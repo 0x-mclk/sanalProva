@@ -1,0 +1,4145 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "SanalProva.Api | v1",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:5081/"
+    }
+  ],
+  "paths": {
+    "/api/v1/auth/csrf": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsrfResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "includeInactive",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProductType"
+            }
+          },
+          {
+            "name": "categoryId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "active"
+            }
+          },
+          {
+            "name": "selectable",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "recommended"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 24
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOfProductListItem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}": {
+      "get": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "put": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/status": {
+      "patch": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/variants": {
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariantWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/variants/{variantId}": {
+      "put": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "variantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariantWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/components": {
+      "put": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SetComponentRequest"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/images": {
+      "post": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageForm"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{id}/images/{imageId}": {
+      "patch": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catalog"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "imageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consent-notice/current": {
+      "get": {
+        "tags": [
+          "TryOn"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentNoticeDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/usage": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "tags": [
+          "TryOn"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "all"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageOfSessionSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "get": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/consent": {
+      "post": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/photos": {
+      "post": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoUploadForm"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoUploadForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/photos/{photoId}": {
+      "delete": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "photoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/draft": {
+      "put": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/close": {
+      "post": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/generations": {
+      "post": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartGenerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/revisions": {
+      "post": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "501": {
+            "description": "Not Implemented"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/images": {
+      "get": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GeneratedImageDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/retry": {
+      "post": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/images/{id}/favorite": {
+      "patch": {
+        "tags": [
+          "Generation"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedImageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/displays": {
+      "get": {
+        "tags": [
+          "Display"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DisplayDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/displays/claim": {
+      "post": {
+        "tags": [
+          "Display"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimDisplayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/displays/{id}": {
+      "patch": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameDisplayRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/displays/{id}/session": {
+      "put": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/displays/{id}/state": {
+      "put": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDisplayStateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/displays/{id}/clear": {
+      "post": {
+        "tags": [
+          "Display"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisplayDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/ai-quality": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiQualityDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiQualityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiQualityDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/status": {
+      "get": {
+        "tags": [
+          "Dev"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dev/mock-generation": {
+      "post": {
+        "tags": [
+          "Dev"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MockGenerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/display/pairing": {
+      "post": {
+        "tags": [
+          "Display"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStartedDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/display/pairing/status": {
+      "get": {
+        "tags": [
+          "Display"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairingStatusDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/display/state": {
+      "get": {
+        "tags": [
+          "Display"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TvStateDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AiQualityDto": {
+        "required": [
+          "resolution",
+          "mode",
+          "isOverride",
+          "defaultResolution",
+          "defaultMode",
+          "options"
+        ],
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "isOverride": {
+            "type": "boolean"
+          },
+          "defaultResolution": {
+            "type": "string"
+          },
+          "defaultMode": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualityOption"
+            }
+          }
+        }
+      },
+      "AiQualityRequest": {
+        "required": [
+          "resolution",
+          "mode"
+        ],
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          }
+        }
+      },
+      "AttachSessionRequest": {
+        "required": [
+          "sessionId"
+        ],
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "BodyZone": {
+        "enum": [
+          "Upper",
+          "Lower",
+          "FullBody",
+          "Waist",
+          "Accessory"
+        ]
+      },
+      "BudgetStatus": {
+        "required": [
+          "live",
+          "allowPaidCalls",
+          "enforce",
+          "dailyLimitUsd",
+          "monthlyLimitUsd",
+          "maxJobCostUsd",
+          "spentTodayUsd",
+          "spentMonthUsd"
+        ],
+        "type": "object",
+        "properties": {
+          "live": {
+            "type": "boolean"
+          },
+          "allowPaidCalls": {
+            "type": "boolean"
+          },
+          "enforce": {
+            "type": "boolean"
+          },
+          "dailyLimitUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "monthlyLimitUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxJobCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "spentTodayUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "spentMonthUsd": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "CategoryDto": {
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "sortOrder",
+          "bodyZone",
+          "layerOrder",
+          "maxSelection",
+          "conflictsWith",
+          "aiHint",
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bodyZone": {
+            "$ref": "#/components/schemas/BodyZone"
+          },
+          "layerOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxSelection": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "conflictsWith": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "aiHint": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CategoryWriteRequest": {
+        "required": [
+          "name",
+          "slug",
+          "sortOrder",
+          "bodyZone",
+          "layerOrder",
+          "maxSelection",
+          "conflictsWith",
+          "aiHint",
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 2,
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 60,
+            "minLength": 0,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "bodyZone": {
+            "$ref": "#/components/schemas/BodyZone"
+          },
+          "layerOrder": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxSelection": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          },
+          "conflictsWith": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "aiHint": {
+            "maxLength": 500,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ClaimDisplayRequest": {
+        "required": [
+          "code",
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      },
+      "ConfiguredModel": {
+        "required": [
+          "jobType",
+          "provider",
+          "model",
+          "displayName",
+          "docStatus",
+          "docsVerifiedOn",
+          "liveVerified",
+          "known",
+          "warning"
+        ],
+        "type": "object",
+        "properties": {
+          "jobType": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "docStatus": {
+            "type": "string"
+          },
+          "docsVerifiedOn": {
+            "type": "string"
+          },
+          "liveVerified": {
+            "type": "boolean"
+          },
+          "known": {
+            "type": "boolean"
+          },
+          "warning": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "ConsentDto": {
+        "required": [
+          "noticeVersion",
+          "processingConsent",
+          "foreignTransferConsent",
+          "extendedRetentionConsent",
+          "guardianConsent",
+          "method",
+          "recordedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "noticeVersion": {
+            "type": "string"
+          },
+          "processingConsent": {
+            "type": "boolean"
+          },
+          "foreignTransferConsent": {
+            "type": "boolean"
+          },
+          "extendedRetentionConsent": {
+            "type": "boolean"
+          },
+          "guardianConsent": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "method": {
+            "$ref": "#/components/schemas/ConsentMethod"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConsentMethod": {
+        "enum": [
+          "StaffConfirmedVerbal",
+          "CustomerTapped",
+          "SignedOnTablet"
+        ]
+      },
+      "ConsentNoticeDto": {
+        "required": [
+          "version",
+          "title",
+          "paragraphs",
+          "retentionNote"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "paragraphs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "retentionNote": {
+            "type": "string"
+          }
+        }
+      },
+      "ConsentRequest": {
+        "required": [
+          "noticeVersion",
+          "processingConsent",
+          "foreignTransferConsent",
+          "extendedRetentionConsent",
+          "isMinor",
+          "guardianConsent",
+          "method"
+        ],
+        "type": "object",
+        "properties": {
+          "noticeVersion": {
+            "maxLength": 20,
+            "minLength": 0,
+            "type": "string"
+          },
+          "processingConsent": {
+            "type": "boolean"
+          },
+          "foreignTransferConsent": {
+            "type": "boolean"
+          },
+          "extendedRetentionConsent": {
+            "type": "boolean"
+          },
+          "isMinor": {
+            "type": "boolean"
+          },
+          "guardianConsent": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "method": {
+            "$ref": "#/components/schemas/ConsentMethod"
+          }
+        }
+      },
+      "CreateSessionRequest": {
+        "required": [
+          "customerLabel"
+        ],
+        "type": "object",
+        "properties": {
+          "customerLabel": {
+            "maxLength": 40,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "CsrfResponse": {
+        "required": [
+          "token",
+          "headerName"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "headerName": {
+            "type": "string"
+          }
+        }
+      },
+      "DatabaseInfo": {
+        "required": [
+          "canConnect",
+          "server",
+          "database",
+          "appliedMigrations",
+          "pendingMigrations"
+        ],
+        "type": "object",
+        "properties": {
+          "canConnect": {
+            "type": "boolean"
+          },
+          "server": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "database": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "appliedMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pendingMigrations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DevStatusResponse": {
+        "required": [
+          "environment",
+          "version",
+          "runtime",
+          "serverTime",
+          "database",
+          "useMockProviders",
+          "strategies"
+        ],
+        "type": "object",
+        "properties": {
+          "environment": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseInfo"
+          },
+          "useMockProviders": {
+            "type": "boolean"
+          },
+          "strategies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrategyInfo"
+            }
+          }
+        }
+      },
+      "DisplayDto": {
+        "required": [
+          "id",
+          "name",
+          "online",
+          "lastSeenAt",
+          "sessionId",
+          "sessionCode",
+          "sessionLabel",
+          "mode",
+          "stateVersion",
+          "stateChangedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "lastSeenAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "sessionId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "sessionCode": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "sessionLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DisplayMode"
+          },
+          "stateVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stateChangedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DisplayMode": {
+        "enum": [
+          "Idle",
+          "Single",
+          "Compare"
+        ]
+      },
+      "DraftDto": {
+        "required": [
+          "mode",
+          "items",
+          "warnings"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OutfitMode"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftItemDto"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DraftItemDto": {
+        "required": [
+          "categoryId",
+          "productId",
+          "variantId"
+        ],
+        "type": "object",
+        "properties": {
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "DraftItemRequest": {
+        "required": [
+          "productId",
+          "variantId"
+        ],
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "DraftRequest": {
+        "required": [
+          "mode",
+          "items"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OutfitMode"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftItemRequest"
+            }
+          }
+        }
+      },
+      "FavoriteRequest": {
+        "required": [
+          "isFavorite"
+        ],
+        "type": "object",
+        "properties": {
+          "isFavorite": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GenderTarget": {
+        "enum": [
+          "Women",
+          "Men",
+          "Unisex",
+          "Kids",
+          null
+        ]
+      },
+      "GeneratedImageDto": {
+        "required": [
+          "id",
+          "versionNo",
+          "parentImageId",
+          "jobId",
+          "label",
+          "isDemo",
+          "isColorPreview",
+          "isFavorite",
+          "createdAt",
+          "urls"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "parentImageId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "jobId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string"
+          },
+          "isDemo": {
+            "type": "boolean"
+          },
+          "isColorPreview": {
+            "type": "boolean"
+          },
+          "isFavorite": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "urls": {
+            "$ref": "#/components/schemas/ImageUrls"
+          }
+        }
+      },
+      "GenerationErrorCode": {
+        "enum": [
+          "InvalidInput",
+          "ContentRejected",
+          "RateLimited",
+          "Timeout",
+          "ProviderUnavailable",
+          "InvalidOutput",
+          "MaskQualityLow",
+          "QuotaExceeded",
+          "NotImplemented",
+          "BudgetExceeded",
+          "ProviderNotConfigured",
+          "Unknown",
+          null
+        ]
+      },
+      "GenerationJobStatus": {
+        "enum": [
+          "Queued",
+          "Running",
+          "Succeeded",
+          "Failed",
+          "Cancelled"
+        ]
+      },
+      "GenerationJobType": {
+        "enum": [
+          "OutfitSet",
+          "FreeCombination",
+          "Recolor",
+          "ProductSwap",
+          "VariantPreview"
+        ]
+      },
+      "GenerationStage": {
+        "enum": [
+          "Preparing",
+          "Generating",
+          "Validating",
+          null
+        ]
+      },
+      "IFormFile": {
+        "type": "string",
+        "format": "binary"
+      },
+      "ImageAngle": {
+        "enum": [
+          "Front",
+          "Back",
+          "Left",
+          "Right",
+          "Detail"
+        ]
+      },
+      "ImageUrls": {
+        "required": [
+          "url",
+          "thumbUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "thumbUrl": {
+            "type": "string"
+          }
+        }
+      },
+      "JobDto": {
+        "required": [
+          "id",
+          "sessionId",
+          "jobType",
+          "status",
+          "stage",
+          "queuePosition",
+          "attempt",
+          "maxAttempts",
+          "errorCode",
+          "message",
+          "retryable",
+          "resultImageId",
+          "createdAt",
+          "startedAt",
+          "finishedAt",
+          "provider",
+          "model",
+          "isDemo"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "jobType": {
+            "$ref": "#/components/schemas/GenerationJobType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/GenerationJobStatus"
+          },
+          "stage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GenerationStage"
+              }
+            ]
+          },
+          "queuePosition": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "attempt": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "errorCode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GenerationErrorCode"
+              }
+            ]
+          },
+          "message": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "resultImageId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "provider": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "model": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isDemo": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LoginRequest": {
+        "required": [
+          "email",
+          "password",
+          "rememberMe"
+        ],
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "rememberMe": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MeResponse": {
+        "required": [
+          "id",
+          "displayName",
+          "email",
+          "organizationId",
+          "organizationName",
+          "demoCatalog",
+          "stores"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationName": {
+            "type": "string"
+          },
+          "demoCatalog": {
+            "type": "boolean"
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StoreAccessDto"
+            }
+          }
+        }
+      },
+      "MockGenerationRequest": {
+        "required": [
+          "jobType"
+        ],
+        "type": "object",
+        "properties": {
+          "jobType": {
+            "$ref": "#/components/schemas/GenerationJobType"
+          }
+        }
+      },
+      "OutfitMode": {
+        "enum": [
+          "OutfitSet",
+          "FreeCombination"
+        ]
+      },
+      "PageOfProductListItem": {
+        "required": [
+          "items",
+          "pageNumber",
+          "pageSize",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductListItem"
+            }
+          },
+          "pageNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "PageOfSessionSummary": {
+        "required": [
+          "items",
+          "pageNumber",
+          "pageSize",
+          "total"
+        ],
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionSummary"
+            }
+          },
+          "pageNumber": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pageSize": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "PairingStartedDto": {
+        "required": [
+          "code",
+          "pairingSecret",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "pairingSecret": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PairingStatus": {
+        "enum": [
+          "Pending",
+          "Claimed",
+          "Expired"
+        ]
+      },
+      "PairingStatusDto": {
+        "required": [
+          "status",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PairingStatus"
+          },
+          "expiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "PhotoDto": {
+        "required": [
+          "id",
+          "angle",
+          "width",
+          "height",
+          "isPrimary",
+          "quality",
+          "urls"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "angle": {
+            "$ref": "#/components/schemas/ImageAngle"
+          },
+          "width": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "height": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "quality": {
+            "$ref": "#/components/schemas/PhotoQualityDto"
+          },
+          "urls": {
+            "$ref": "#/components/schemas/ImageUrls"
+          }
+        }
+      },
+      "PhotoQualityDto": {
+        "required": [
+          "blurry",
+          "lowResolution",
+          "notPortrait",
+          "hasWarnings",
+          "warnings"
+        ],
+        "type": "object",
+        "properties": {
+          "blurry": {
+            "type": "boolean"
+          },
+          "lowResolution": {
+            "type": "boolean"
+          },
+          "notPortrait": {
+            "type": "boolean"
+          },
+          "hasWarnings": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PhotoUploadForm": {
+        "required": [
+          "file"
+        ],
+        "type": "object",
+        "properties": {
+          "file": {
+            "$ref": "#/components/schemas/IFormFile"
+          },
+          "angle": {
+            "$ref": "#/components/schemas/ImageAngle"
+          }
+        }
+      },
+      "ProductDetail": {
+        "required": [
+          "id",
+          "code",
+          "name",
+          "productType",
+          "categoryId",
+          "categoryName",
+          "description",
+          "tagline",
+          "genderTarget",
+          "layerOrderOverride",
+          "aiNotes",
+          "isActive",
+          "isReadyForAi",
+          "cover",
+          "variants",
+          "images",
+          "components"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productType": {
+            "$ref": "#/components/schemas/ProductType"
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tagline": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "genderTarget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GenderTarget"
+              }
+            ]
+          },
+          "layerOrderOverride": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "aiNotes": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isReadyForAi": {
+            "type": "boolean"
+          },
+          "cover": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantDto"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductImageDto"
+            }
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetComponentDto"
+            }
+          }
+        }
+      },
+      "ProductImageDto": {
+        "required": [
+          "id",
+          "variantId",
+          "angle",
+          "kind",
+          "isAiReference",
+          "sortOrder",
+          "urls"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "angle": {
+            "$ref": "#/components/schemas/ImageAngle"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProductImageKind"
+          },
+          "isAiReference": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "urls": {
+            "$ref": "#/components/schemas/ImageUrls"
+          }
+        }
+      },
+      "ProductImageForm": {
+        "required": [
+          "file"
+        ],
+        "type": "object",
+        "properties": {
+          "file": {
+            "$ref": "#/components/schemas/IFormFile"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "angle": {
+            "$ref": "#/components/schemas/ImageAngle"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProductImageKind"
+          },
+          "isAiReference": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProductImageKind": {
+        "enum": [
+          "Flat",
+          "OnModel",
+          "Detail"
+        ]
+      },
+      "ProductImageUpdateRequest": {
+        "required": [
+          "isAiReference",
+          "angle",
+          "kind",
+          "sortOrder"
+        ],
+        "type": "object",
+        "properties": {
+          "isAiReference": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "angle": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageAngle"
+              }
+            ]
+          },
+          "kind": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ProductImageKind"
+              }
+            ]
+          },
+          "sortOrder": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "ProductListItem": {
+        "required": [
+          "id",
+          "code",
+          "name",
+          "productType",
+          "categoryId",
+          "categoryName",
+          "tagline",
+          "subtitle",
+          "isActive",
+          "isReadyForAi",
+          "cover",
+          "variants"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productType": {
+            "$ref": "#/components/schemas/ProductType"
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "tagline": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "subtitle": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isReadyForAi": {
+            "type": "boolean"
+          },
+          "cover": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VariantDto"
+            }
+          }
+        }
+      },
+      "ProductStatusRequest": {
+        "required": [
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProductType": {
+        "enum": [
+          "Single",
+          "OutfitSet"
+        ]
+      },
+      "ProductWriteRequest": {
+        "required": [
+          "code",
+          "name",
+          "categoryId",
+          "description",
+          "tagline",
+          "productType",
+          "genderTarget",
+          "layerOrderOverride",
+          "aiNotes",
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "maxLength": 40,
+            "minLength": 2,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "type": "string"
+          },
+          "categoryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tagline": {
+            "maxLength": 60,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "productType": {
+            "$ref": "#/components/schemas/ProductType"
+          },
+          "genderTarget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GenderTarget"
+              }
+            ]
+          },
+          "layerOrderOverride": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "aiNotes": {
+            "maxLength": 500,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QualityOption": {
+        "required": [
+          "resolution",
+          "mode",
+          "credits",
+          "estimatedUsdPerImage",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "credits": {
+            "type": "number",
+            "format": "double"
+          },
+          "estimatedUsdPerImage": {
+            "type": "number",
+            "format": "double"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "RenameDisplayRequest": {
+        "required": [
+          "name"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      },
+      "RevisionRequest": {
+        "required": [
+          "baseImageId",
+          "type",
+          "targetCategoryId",
+          "productId",
+          "variantId",
+          "color"
+        ],
+        "type": "object",
+        "properties": {
+          "baseImageId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "targetCategoryId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "productId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "color": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "SessionDetail": {
+        "required": [
+          "id",
+          "customerLabel",
+          "code",
+          "status",
+          "nextStep",
+          "createdAt",
+          "lastActivityAt",
+          "retentionUntil",
+          "extendedRetention",
+          "consent",
+          "photos",
+          "draft",
+          "images",
+          "jobs",
+          "activeJobId"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "nextStep": {
+            "$ref": "#/components/schemas/SessionStep"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retentionUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "extendedRetention": {
+            "type": "boolean"
+          },
+          "consent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConsentDto"
+              }
+            ]
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhotoDto"
+            }
+          },
+          "draft": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DraftDto"
+              }
+            ]
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GeneratedImageDto"
+            }
+          },
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobDto"
+            }
+          },
+          "activeJobId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "SessionStatus": {
+        "enum": [
+          "Open",
+          "Closed",
+          "Purged"
+        ]
+      },
+      "SessionStep": {
+        "enum": [
+          "Consent",
+          "Photo",
+          "Mode",
+          "Outfit",
+          "Generating",
+          "Result",
+          "Closed"
+        ]
+      },
+      "SessionSummary": {
+        "required": [
+          "id",
+          "customerLabel",
+          "code",
+          "status",
+          "nextStep",
+          "createdAt",
+          "lastActivityAt",
+          "retentionUntil",
+          "versionCount",
+          "photo",
+          "result",
+          "resultIsDemo"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "nextStep": {
+            "$ref": "#/components/schemas/SessionStep"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "retentionUntil": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "versionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "photo": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          },
+          "resultIsDemo": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SetComponentDto": {
+        "required": [
+          "productId",
+          "code",
+          "name",
+          "categoryName",
+          "variantId",
+          "image"
+        ],
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "variantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          }
+        }
+      },
+      "SetComponentRequest": {
+        "required": [
+          "componentProductId",
+          "componentVariantId"
+        ],
+        "type": "object",
+        "properties": {
+          "componentProductId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "componentVariantId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "SetDisplayStateRequest": {
+        "required": [
+          "mode",
+          "imageIds",
+          "expectedVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/DisplayMode"
+          },
+          "imageIds": {
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "expectedVersion": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int64"
+          }
+        }
+      },
+      "StartGenerationRequest": {
+        "required": [
+          "photoId"
+        ],
+        "type": "object",
+        "properties": {
+          "photoId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "allowVariation": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "StoreAccessDto": {
+        "required": [
+          "id",
+          "name",
+          "code",
+          "role"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/StoreRole"
+          }
+        }
+      },
+      "StoreRole": {
+        "enum": [
+          "Staff",
+          "Manager",
+          "Owner"
+        ]
+      },
+      "StrategyInfo": {
+        "required": [
+          "jobType",
+          "provider",
+          "configuredProvider",
+          "model",
+          "fallback"
+        ],
+        "type": "object",
+        "properties": {
+          "jobType": {
+            "$ref": "#/components/schemas/GenerationJobType"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "configuredProvider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "fallback": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GenerationJobType"
+              }
+            ]
+          }
+        }
+      },
+      "TvImageDto": {
+        "required": [
+          "id",
+          "url",
+          "label",
+          "isDemo",
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "isDemo": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TvImageKind"
+          }
+        }
+      },
+      "TvImageKind": {
+        "enum": [
+          "Result",
+          "Photo"
+        ]
+      },
+      "TvStateDto": {
+        "required": [
+          "version",
+          "mode",
+          "deviceName",
+          "hasSession",
+          "images"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DisplayMode"
+          },
+          "deviceName": {
+            "type": "string"
+          },
+          "hasSession": {
+            "type": "boolean"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TvImageDto"
+            }
+          }
+        }
+      },
+      "UsageByDay": {
+        "required": [
+          "day",
+          "calls",
+          "failures",
+          "estimatedCostUsd"
+        ],
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "calls": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "estimatedCostUsd": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "UsageByModel": {
+        "required": [
+          "provider",
+          "model",
+          "calls",
+          "successes",
+          "failures",
+          "retries",
+          "averageDurationMs",
+          "credits",
+          "estimatedCostUsd",
+          "actualCostUsd"
+        ],
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "calls": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "successes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "retries": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "averageDurationMs": {
+            "type": "number",
+            "format": "double"
+          },
+          "credits": {
+            "type": "number",
+            "format": "double"
+          },
+          "estimatedCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "actualCostUsd": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "UsageReport": {
+        "required": [
+          "from",
+          "to",
+          "totals",
+          "byDay",
+          "byModel",
+          "budget",
+          "models"
+        ],
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageTotals"
+          },
+          "byDay": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageByDay"
+            }
+          },
+          "byModel": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageByModel"
+            }
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetStatus"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfiguredModel"
+            }
+          }
+        }
+      },
+      "UsageTotals": {
+        "required": [
+          "calls",
+          "successes",
+          "failures",
+          "retries",
+          "averageDurationMs",
+          "credits",
+          "inputTokens",
+          "outputTokens",
+          "estimatedCostUsd",
+          "actualCostUsd"
+        ],
+        "type": "object",
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "successes": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "retries": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "averageDurationMs": {
+            "type": "number",
+            "format": "double"
+          },
+          "credits": {
+            "type": "number",
+            "format": "double"
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "estimatedCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "actualCostUsd": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "VariantDto": {
+        "required": [
+          "id",
+          "code",
+          "colorName",
+          "colorHex",
+          "isDefault",
+          "isActive",
+          "image"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "colorName": {
+            "type": "string"
+          },
+          "colorHex": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ImageUrls"
+              }
+            ]
+          }
+        }
+      },
+      "VariantWriteRequest": {
+        "required": [
+          "code",
+          "colorName",
+          "colorHex",
+          "isDefault",
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "colorName": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "colorHex": {
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Catalog"
+    },
+    {
+      "name": "TryOn"
+    },
+    {
+      "name": "Admin"
+    },
+    {
+      "name": "Generation"
+    },
+    {
+      "name": "Display"
+    },
+    {
+      "name": "Dev"
+    }
+  ]
+}

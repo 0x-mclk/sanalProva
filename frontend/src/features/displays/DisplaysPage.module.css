@@ -1,0 +1,139 @@
+.icon {
+  color: var(--sp-color-text-subtle);
+}
+
+.pair {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-lg);
+  border: 1px solid var(--sp-color-border);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  box-shadow: var(--sp-shadow-card);
+}
+
+.pairTitle {
+  margin: 0;
+  font-family: var(--sp-font-heading);
+  font-weight: 400;
+  font-size: 22px;
+}
+
+.pairFields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-space-sm);
+
+  @media (min-width: 768px) {
+    grid-template-columns: 200px 1fr;
+  }
+}
+
+.codeInput {
+  font-family: var(--sp-font-mono);
+  font-size: 20px;
+  letter-spacing: 0.18em;
+}
+
+.message {
+  margin: 0;
+  font-size: var(--sp-font-size-sm);
+
+  &[data-tone='ok'] {
+    color: var(--sp-color-success-text);
+  }
+
+  &[data-tone='error'] {
+    color: var(--sp-color-danger-text);
+  }
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-space-sm);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-md);
+  border: 1px solid var(--sp-color-border);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  box-shadow: var(--sp-shadow-card);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-sm);
+}
+
+.cardIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-color-surface-muted);
+  color: var(--sp-color-primary);
+}
+
+.cardTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cardName {
+  font-size: var(--sp-font-size-lg);
+}
+
+.rename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-space-xs);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--sp-font-size-sm);
+  color: var(--sp-color-text-muted);
+
+  &[data-online='true'] {
+    color: var(--sp-color-success-text);
+  }
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sp-color-text-subtle);
+
+  [data-online='true'] > & {
+    background: var(--sp-color-success-dot);
+  }
+}
+
+.meta {
+  margin: 0;
+  font-size: var(--sp-font-size-sm);
+  color: var(--sp-color-text-muted);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-space-xs);
+}

@@ -1,0 +1,251 @@
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+}
+
+.headActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-space-xs);
+  margin-bottom: var(--sp-space-md);
+}
+
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  margin-bottom: var(--sp-space-md);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-space-sm);
+
+  & > div {
+    display: flex;
+    gap: var(--sp-space-xs);
+  }
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+  box-shadow: var(--sp-shadow-card);
+
+  &[data-inactive] {
+    opacity: 0.72;
+  }
+}
+
+.cardLink {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  color: inherit;
+  text-decoration: none;
+}
+
+.media {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 3 / 4;
+  background: var(--sp-color-surface-muted);
+  color: var(--sp-color-text-subtle);
+
+  & img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.sample,
+.typeTag {
+  position: absolute;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: var(--sp-radius-pill);
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--sp-color-text-muted);
+}
+
+.sample {
+  left: 8px;
+}
+
+.typeTag {
+  right: 8px;
+  background: var(--sp-color-primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-space-sm) var(--sp-space-sm) var(--sp-space-xs);
+}
+
+.name {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.code {
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-muted);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--sp-space-xxs);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  border-radius: var(--sp-radius-pill);
+  background: var(--sp-color-surface-muted);
+  font-size: 11px;
+  color: var(--sp-color-text-muted);
+
+  &[data-tone='warning'] {
+    background: var(--sp-color-warning-bg);
+    color: var(--sp-color-warning-text);
+  }
+
+  &[data-tone='muted'] {
+    background: var(--sp-color-surface-accent);
+  }
+}
+
+.cardFoot {
+  padding: var(--sp-space-xs) var(--sp-space-sm) var(--sp-space-sm);
+  border-top: 1px solid var(--sp-color-border);
+}
+
+/* Düzenleme formu */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-lg);
+  max-width: 860px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-lg);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-family: var(--sp-font-heading);
+  font-weight: 400;
+  font-size: 22px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-space-sm);
+}
+
+.variantRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-xs) 0;
+  border-top: 1px solid var(--sp-color-border);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(42, 34, 32, 0.22);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.imageCard {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--sp-radius-md);
+  border: 1px solid var(--sp-color-border);
+  background: var(--sp-color-surface);
+
+  & img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
+  }
+}
+
+.imageMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-space-xs);
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-muted);
+}
+
+.actionsBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-space-xs);
+}
+
+@media (min-width: $tablet) {
+  .head {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .images {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

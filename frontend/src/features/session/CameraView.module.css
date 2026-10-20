@@ -1,0 +1,114 @@
+.root {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  max-height: 68dvh;
+  overflow: hidden;
+  border-radius: var(--sp-radius-xl);
+  background: radial-gradient(90% 70% at 50% 30%, #4a403c 0%, var(--sp-color-media-dark) 70%);
+  color: #fff;
+  box-shadow: var(--sp-shadow-raised);
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--sp-motion-normal) var(--sp-motion-easing);
+
+  &[data-live] {
+    opacity: 1;
+  }
+}
+
+.guide {
+  position: absolute;
+  inset: 8% 6% 12%;
+  width: 88%;
+  height: 80%;
+  pointer-events: none;
+}
+
+.caption {
+  position: absolute;
+  inset: auto 0 12px;
+  margin: 0;
+  text-align: center;
+  font-size: var(--sp-font-size-xs);
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+
+.pill {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--sp-radius-pill);
+  background: rgba(30, 20, 18, 0.62);
+  font-size: var(--sp-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rec {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6fd08c;
+}
+
+.flip {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(30, 20, 18, 0.62);
+  color: #fff;
+  cursor: pointer;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-space-xs);
+  padding: var(--sp-space-lg);
+  text-align: center;
+  background: rgba(30, 20, 18, 0.72);
+  font-size: var(--sp-font-size-sm);
+}
+
+.overlayText {
+  max-width: 30ch;
+  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.45;
+}
+
+.retry {
+  min-height: 44px;
+  margin-top: var(--sp-space-xs);
+  padding: 0 var(--sp-space-lg);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: var(--sp-radius-pill);
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

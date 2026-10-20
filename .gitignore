@@ -1,0 +1,44 @@
+# Yerel araçlar ve veriler (taşınabilir PostgreSQL, veri klasörü, yerel dosya deposu)
+.local/
+storage/
+
+# Gizli değerler
+.env
+.env.*
+!.env.example
+*.pfx
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# Node
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Editör / işletim sistemi
+.idea/
+.DS_Store
+Thumbs.db
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
+
+# Gerçek AI test çıktıları ve izinli test görselleri (kişisel veri içerebilir)
+docs/ai-benchmark/runs/
+testdata/

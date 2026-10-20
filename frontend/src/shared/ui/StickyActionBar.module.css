@@ -1,0 +1,24 @@
+.root {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  padding: var(--sp-space-sm) var(--sp-gutter) calc(var(--sp-space-sm) + env(safe-area-inset-bottom));
+  background: var(--sp-color-surface);
+  box-shadow: var(--sp-shadow-bar);
+  border-radius: var(--sp-radius-lg) var(--sp-radius-lg) 0 0;
+}
+
+.inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-xs);
+  max-width: var(--sp-content-max-width);
+  margin: 0 auto;
+}
+
+@media (min-width: $tablet) {
+  .root {
+    padding-left: var(--sp-gutter-tablet);
+    padding-right: var(--sp-gutter-tablet);
+  }
+}

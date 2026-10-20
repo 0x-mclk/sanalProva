@@ -1,0 +1,55 @@
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-md);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+
+  & p {
+    margin: 0;
+    font-size: var(--sp-font-size-sm);
+    line-height: 1.55;
+    color: var(--sp-color-text);
+  }
+}
+
+.retention {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-xs);
+  padding-top: var(--sp-space-xs);
+  border-top: 1px solid var(--sp-color-border);
+  color: var(--sp-color-text-muted) !important;
+}
+
+.fieldset {
+  margin: 0;
+  padding: var(--sp-space-md);
+  border: 1px solid var(--sp-color-border);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+}
+
+.methodLabel {
+  margin: 0 0 var(--sp-space-xs);
+  font-size: var(--sp-font-size-sm);
+  font-weight: 600;
+}
+
+.barWrap {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 20;
+  padding: var(--sp-space-sm) var(--sp-gutter) calc(var(--sp-space-sm) + env(safe-area-inset-bottom));
+  background: var(--sp-color-surface);
+  box-shadow: var(--sp-shadow-bar);
+  border-radius: var(--sp-radius-lg) var(--sp-radius-lg) 0 0;
+
+  & > * {
+    max-width: var(--sp-content-max-width);
+    margin: 0 auto;
+    display: flex;
+  }
+}

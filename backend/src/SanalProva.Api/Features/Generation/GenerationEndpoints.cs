@@ -1,0 +1,313 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using SanalProva.Api.Features.TryOn;
+using SanalProva.Api.Hubs;
+using SanalProva.Api.Infrastructure;
+using SanalProva.Domain.Catalog;
+using SanalProva.Domain.Common;
+using SanalProva.Domain.Generation;
+using SanalProva.Domain.Tenancy;
+using SanalProva.Domain.TryOn;
+using SanalProva.Infrastructure.Ai;
+using SanalProva.Infrastructure.Generation;
+using SanalProva.Infrastructure.Persistence;
+
+namespace SanalProva.Api.Features.Generation;
+
+/// <summary>
+/// Üretim işleri. API işi yalnızca kuyruğa yazar (202); asıl iş <see cref="GenerationWorker"/>'dadır.
+/// Durum SignalR ile bildirilir, <c>GET /jobs/{id}</c> yoklama yedeğidir.
+/// </summary>
+public static class GenerationEndpoints
+{
+    public static RouteGroupBuilder MapGenerationEndpoints(this RouteGroupBuilder api)
+    {
+        var group = api.MapGroup("").WithTags("Generation").RequireStore(StoreRole.Staff);
+        group.MapPost("/sessions/{id:guid}/generations", StartAsync).Produces<JobDto>(StatusCodes.Status202Accepted);
+        group.MapPost("/sessions/{id:guid}/revisions", RevisionAsync).Produces(StatusCodes.Status501NotImplemented);
+        group.MapGet("/sessions/{id:guid}/images", ListImagesAsync).Produces<IReadOnlyList<GeneratedImageDto>>();
+        group.MapGet("/jobs/{id:guid}", GetJobAsync).Produces<JobDto>();
+        group.MapPost("/jobs/{id:guid}/cancel", CancelAsync).Produces<JobDto>();
+        group.MapPost("/jobs/{id:guid}/retry", RetryAsync).Produces<JobDto>(StatusCodes.Status202Accepted);
+        group.MapPatch("/images/{id:guid}/favorite", FavoriteAsync).Produces<GeneratedImageDto>();
+        return api;
+    }
+
+    private static async Task<IResult> StartAsync(
+        Guid id, StartGenerationRequest request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+        AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, GenerationStrategy strategy, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64)
+        {
+            return ApiProblems.BadRequest("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key başlığı (en fazla 64 karakter) gerekli.");
+        }
+
+        var session = await reader.LoadAsync(id, ct);
+        if (session is null)
+        {
+            return ApiProblems.NotFound("Prova bulunamadı.");
+        }
+
+        // Aynı anahtarla tekrar gelen istek yeni iş oluşturmaz
+        var existing = await db.GenerationJobs.SingleOrDefaultAsync(j => j.SessionId == id && j.IdempotencyKey == idempotencyKey, ct);
+        if (existing is not null)
+        {
+            return TypedResults.Accepted($"/api/v1/jobs/{existing.Id}", await reader.ToJobDtoAsync(existing, null, ct));
+        }
+
+        if (session.Status != SessionStatus.Open)
+        {
+            return ApiProblems.Conflict("SESSION_CLOSED", "Bu prova kapatılmış.");
+        }
+
+        if (session.Consent?.AllowsProcessing != true)
+        {
+            return ApiProblems.Conflict("CONSENT_REQUIRED", "Üretim için müşteri onayı gerekli.");
+        }
+
+        var photo = request.PhotoId is { } photoId
+            ? session.Photos.SingleOrDefault(p => p.Id == photoId)
+            : session.Photos.OrderByDescending(p => p.IsPrimary).ThenByDescending(p => p.CreatedAt).FirstOrDefault();
+        if (photo is null)
+        {
+            return ApiProblems.Conflict("NO_PHOTO", "Önce müşterinin fotoğrafı yüklenmeli.");
+        }
+
+        if (session.Draft is not { Items.Count: > 0 } draft)
+        {
+            return ApiProblems.BadRequest("EMPTY_SELECTION", "Önce kıyafet seçin.");
+        }
+
+        var selected = await SessionEndpoints.ResolveSelectionAsync(db, draft.Items.Select(i => new DraftItemRequest(i.ProductId, i.VariantId)).ToList(), ct);
+        if (selected.Problem is { } problem)
+        {
+            return problem;
+        }
+
+        var errors = draft.Mode == OutfitMode.OutfitSet ? CombinationRules.ValidateOutfitSet(selected.Items) : CombinationRules.ValidateFreeCombination(selected.Items);
+        if (errors.Count > 0)
+        {
+            return ApiProblems.Create(StatusCodes.Status422UnprocessableEntity, "INVALID_COMBINATION", "Seçilen kombin geçerli değil.",
+                new Dictionary<string, object?> { ["errors"] = errors.Select(e => e.ToString()).ToList() });
+        }
+
+        foreach (var item in draft.Items)
+        {
+            if (!selected.Items.Single(s => s.Product.Id == item.ProductId).Product.IsReadyForAi(item.VariantId))
+            {
+                return ApiProblems.Unprocessable("PRODUCT_NOT_READY", "Seçilen ürünlerden birinin AI referans görseli yok.");
+            }
+        }
+
+        if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
+        {
+            return quotaProblem;
+        }
+
+        var jobType = draft.Mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination;
+        var fingerprint = Fingerprint(photo.Id, jobType, draft.Items);
+
+        // Gerçek (ücretli) sağlayıcıda aynı fotoğraf + aynı seçim için süren/başarılı iş varsa yenisi açılmaz: aynı sonuç için ikinci ücret yok
+        if (!request.AllowVariation && strategy.Resolve(jobType).Provider != GenerationStrategy.MockProvider)
+        {
+            var duplicate = await db.GenerationJobs.AsNoTracking()
+                .Where(j => j.SessionId == id && j.RequestFingerprint == fingerprint
+                    && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running || j.Status == GenerationJobStatus.Succeeded))
+                .OrderByDescending(j => j.CreatedAt).FirstOrDefaultAsync(ct);
+            if (duplicate is not null)
+            {
+                var existingImage = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == duplicate.Id, ct);
+                return TypedResults.Accepted($"/api/v1/jobs/{duplicate.Id}", await reader.ToJobDtoAsync(duplicate, existingImage, ct));
+            }
+        }
+
+        var now = clock.GetUtcNow();
+        var selection = new OutfitSelection { OrganizationId = user.OrganizationId, SessionId = id, Mode = draft.Mode, CreatedByUserId = user.UserId };
+        foreach (var item in draft.Items)
+        {
+            var match = selected.Items.Single(s => s.Product.Id == item.ProductId);
+            selection.Items.Add(new OutfitSelectionItem
+            {
+                OrganizationId = user.OrganizationId, ProductId = item.ProductId, VariantId = item.VariantId, CategoryId = match.Category.Id,
+                LayerOrder = match.Product.LayerOrderOverride ?? match.Category.LayerOrder,
+            });
+        }
+
+        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, now, fingerprint);
+        db.OutfitSelections.Add(selection);
+        db.GenerationJobs.Add(job);
+        reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
+        audit.Record("Generation.Requested", nameof(GenerationJob), job.Id);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
+        {
+            // Aynı anahtarla eşzamanlı ikinci istek: mevcut işi döndür
+            db.ChangeTracker.Clear();
+            var winner = await db.GenerationJobs.SingleAsync(j => j.SessionId == id && j.IdempotencyKey == idempotencyKey, ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{winner.Id}", await reader.ToJobDtoAsync(winner, null, ct));
+        }
+
+        await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, job.Stage, null, null), ct);
+        return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, null, ct));
+    }
+
+    /// <summary>Fotoğraf + iş tipi + sıralı (ürün, varyant) çiftlerinin özeti. Kişisel veri içermez.</summary>
+    private static string Fingerprint(Guid photoId, GenerationJobType type, IEnumerable<DraftItem> items)
+    {
+        var parts = items.Select(i => $"{i.ProductId:N}:{i.VariantId:N}").Order(StringComparer.Ordinal);
+        var text = $"{photoId:N}|{type}|{string.Join(',', parts)}";
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))[..32];
+    }
+
+    private static GenerationJob NewJob(TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now, string? fingerprint = null) => new()
+    {
+        RequestFingerprint = fingerprint,
+        OrganizationId = session.OrganizationId, StoreId = session.StoreId, SessionId = session.Id, JobType = type, SelectionId = selectionId,
+        SourcePhotoId = photoId, IdempotencyKey = key, NextAttemptAt = now, RequestedByUserId = user.UserId,
+    };
+
+    /// <summary>Mağaza günlük kotası (mağaza saat dilimine göre gün) ve oturum başına üst sınır.</summary>
+    private static async Task<IResult?> CheckQuotaAsync(AppDbContext db, SessionReader reader, CurrentUser user, TryOnSession session, TimeProvider clock, CancellationToken ct)
+    {
+        var settings = await reader.GetSettingsAsync(user.OrganizationId, ct);
+        var store = await db.Stores.AsNoTracking().SingleAsync(s => s.Id == session.StoreId, ct);
+        var dailyLimit = store.DailyGenerationQuota ?? settings.DailyGenerationQuota;
+
+        var now = clock.GetUtcNow();
+        TimeZoneInfo zone;
+        try
+        {
+            zone = TimeZoneInfo.FindSystemTimeZoneById(store.Timezone);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            zone = TimeZoneInfo.Utc;
+        }
+
+        var local = TimeZoneInfo.ConvertTime(now, zone);
+        var dayStart = new DateTimeOffset(local.Date, zone.GetUtcOffset(local.Date)).ToUniversalTime();
+
+        var today = await db.GenerationJobs.CountAsync(j => j.StoreId == session.StoreId && j.CreatedAt >= dayStart && j.Status != GenerationJobStatus.Cancelled, ct);
+        if (today >= dailyLimit)
+        {
+            return ApiProblems.Create(StatusCodes.Status429TooManyRequests, "QUOTA_EXCEEDED", "Bu şubenin günlük üretim kotası doldu.");
+        }
+
+        var inSession = await db.GenerationJobs.CountAsync(j => j.SessionId == session.Id && j.Status != GenerationJobStatus.Cancelled && j.Status != GenerationJobStatus.Failed, ct);
+        return inSession >= settings.MaxGenerationsPerSession
+            ? ApiProblems.Create(StatusCodes.Status429TooManyRequests, "SESSION_QUOTA_EXCEEDED", "Bu prova için üretim sınırına ulaşıldı.")
+            : null;
+    }
+
+    private static IResult RevisionAsync(Guid id, [FromBody] RevisionRequest request)
+    {
+        // Revizyon arayüzü hazır; motor (SAM 2 + OpenCV renk değişimi, Gemini düzenleme) Aşama 5'te uygulanacak.
+        // Sahte sonuç üretilmez: istek doğrulanmaz, 501 döner.
+        _ = (id, request);
+        return ApiProblems.Create(StatusCodes.Status501NotImplemented, "NOT_IMPLEMENTED", "Revizyon motoru henüz etkin değil. Yeni bir kombin oluşturabilirsiniz.");
+    }
+
+    private static async Task<IResult> ListImagesAsync(Guid id, AppDbContext db, ImageLinks links, CancellationToken ct)
+    {
+        if (!await db.TryOnSessions.AnyAsync(s => s.Id == id, ct))
+        {
+            return ApiProblems.NotFound("Prova bulunamadı.");
+        }
+
+        var images = await db.GeneratedImages.AsNoTracking().Where(i => i.SessionId == id).OrderBy(i => i.VersionNo).ToListAsync(ct);
+        var files = await ImageLinks.LoadFilesAsync(db, images.Select(i => i.FileId), ct);
+        return TypedResults.Ok(images.Where(i => files.ContainsKey(i.FileId)).Select(i => SessionReader.ToImageDto(i, links.Customer(files[i.FileId]))).ToList());
+    }
+
+    private static async Task<IResult> GetJobAsync(Guid id, AppDbContext db, SessionReader reader, CancellationToken ct)
+    {
+        var job = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
+        if (job is null)
+        {
+            return ApiProblems.NotFound("İş bulunamadı.");
+        }
+
+        var image = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == id, ct);
+        return TypedResults.Ok(await reader.ToJobDtoAsync(job, image, ct));
+    }
+
+    /// <summary>Kuyruktaki veya çalışan iş iptal edilir (atomik güncelleme yarışı önler). Çalışan işte worker sağlayıcı bekleyişini bırakır; çağrı başlamışsa sağlayıcı yine de ücretlendirebilir ve bu en kötü durum tahminiyle kaydedilir.</summary>
+    private static async Task<IResult> CancelAsync(Guid id, AppDbContext db, SessionReader reader, IJobNotifier notifier, TimeProvider clock, CancellationToken ct)
+    {
+        var job = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
+        if (job is null)
+        {
+            return ApiProblems.NotFound("İş bulunamadı.");
+        }
+
+        var now = clock.GetUtcNow();
+        var updated = await db.GenerationJobs.Where(j => j.Id == id && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running))
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Cancelled).SetProperty(j => j.Stage, (GenerationStage?)null)
+                .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null).SetProperty(j => j.FinishedAt, now), ct);
+        if (updated == 0)
+        {
+            return ApiProblems.Conflict("JOB_NOT_CANCELLABLE", "İş zaten işleniyor veya tamamlandı; iptal edilemez.");
+        }
+
+        job = await db.GenerationJobs.AsNoTracking().SingleAsync(j => j.Id == id, ct);
+        await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, null, null, null), ct);
+        return TypedResults.Ok(await reader.ToJobDtoAsync(job, null, ct));
+    }
+
+    /// <summary>Başarısız işi aynı seçim ve fotoğrafla yeni iş olarak yeniden kuyruğa alır.</summary>
+    private static async Task<IResult> RetryAsync(Guid id, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+    {
+        var failed = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
+        if (failed is null)
+        {
+            return ApiProblems.NotFound("İş bulunamadı.");
+        }
+
+        if (failed.Status != GenerationJobStatus.Failed)
+        {
+            return ApiProblems.Conflict("JOB_NOT_FAILED", "Yalnızca başarısız işler yeniden denenebilir.");
+        }
+
+        var session = await reader.LoadAsync(failed.SessionId, ct);
+        if (session is null || session.Status != SessionStatus.Open)
+        {
+            return ApiProblems.Conflict("SESSION_CLOSED", "Bu prova kapatılmış.");
+        }
+
+        if (failed.SourcePhotoId is null || !session.Photos.Any(p => p.Id == failed.SourcePhotoId))
+        {
+            return ApiProblems.Conflict("NO_PHOTO", "Fotoğraf silinmiş. Yeni fotoğraf yükleyip tekrar üretin.");
+        }
+
+        if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
+        {
+            return quotaProblem;
+        }
+
+        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(), failed.RequestFingerprint);
+        db.GenerationJobs.Add(job);
+        reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
+        audit.Record("Generation.Retried", nameof(GenerationJob), job.Id);
+        await db.SaveChangesAsync(ct);
+        await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, null, null, null), ct);
+        return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, null, ct));
+    }
+
+    private static async Task<IResult> FavoriteAsync(Guid id, FavoriteRequest request, AppDbContext db, ImageLinks links, CancellationToken ct)
+    {
+        var image = await db.GeneratedImages.SingleOrDefaultAsync(i => i.Id == id && db.TryOnSessions.Any(s => s.Id == i.SessionId), ct);
+        if (image is null)
+        {
+            return ApiProblems.NotFound("Görsel bulunamadı.");
+        }
+
+        image.IsFavorite = request.IsFavorite;
+        await db.SaveChangesAsync(ct);
+        var files = await ImageLinks.LoadFilesAsync(db, [image.FileId], ct);
+        return TypedResults.Ok(SessionReader.ToImageDto(image, links.Customer(files[image.FileId])));
+    }
+}

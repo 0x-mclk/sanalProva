@@ -1,0 +1,141 @@
+.page {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: var(--sp-gutter);
+  overflow: hidden;
+  background: var(--sp-color-bg);
+}
+
+.backdrop {
+  position: absolute;
+  inset: -4%;
+  width: 108%;
+  height: 108%;
+  object-fit: cover;
+  filter: blur(28px) saturate(0.9);
+  transform: scale(1.04);
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(247, 243, 236, 0.78), rgba(247, 243, 236, 0.92));
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-space-sm);
+  width: 100%;
+  max-width: 440px;
+  padding: var(--sp-space-xl) var(--sp-space-lg);
+  text-align: center;
+  border-radius: var(--sp-radius-xl);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+  box-shadow: var(--sp-shadow-raised);
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #f3e1e6;
+  color: var(--sp-color-primary);
+
+  &[data-failed] {
+    background: var(--sp-color-danger-bg);
+    color: var(--sp-color-danger-text);
+  }
+}
+
+.title {
+  margin: 0;
+  font-family: var(--sp-font-heading);
+  font-weight: 400;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.text {
+  margin: 0;
+  color: var(--sp-color-text-muted);
+  font-size: var(--sp-font-size-md);
+  line-height: 1.5;
+}
+
+.stages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+  width: 100%;
+  margin: var(--sp-space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-sm);
+  color: var(--sp-color-text-subtle);
+  font-size: var(--sp-font-size-md);
+
+  &[data-state='active'] {
+    color: var(--sp-color-text);
+    font-weight: 600;
+  }
+
+  &[data-state='done'] {
+    color: var(--sp-color-success-text);
+  }
+}
+
+.stageDot {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: var(--sp-font-size-xs);
+}
+
+.stageLabel {
+  display: block;
+}
+
+.stageHint {
+  display: block;
+  font-size: var(--sp-font-size-xs);
+  font-weight: 400;
+  color: var(--sp-color-text-muted);
+}
+
+.meta {
+  margin: var(--sp-space-xs) 0 0;
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.demo {
+  margin: 0;
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-warning-text);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-xs);
+  width: 100%;
+}

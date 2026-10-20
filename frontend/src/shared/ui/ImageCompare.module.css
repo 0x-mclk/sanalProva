@@ -1,0 +1,120 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-sm);
+}
+
+.frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface-muted);
+  box-shadow: var(--sp-shadow-card);
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.base,
+.overlay {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  object-fit: cover;
+}
+
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(42, 34, 32, 0.25);
+  pointer-events: none;
+}
+
+.grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  border-radius: var(--sp-radius-pill);
+  background: #fff;
+  color: var(--sp-color-primary);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  box-shadow: var(--sp-shadow-raised);
+  white-space: nowrap;
+}
+
+.tag {
+  position: absolute;
+  top: 12px;
+  padding: 3px 10px;
+  border-radius: var(--sp-radius-pill);
+  background: rgba(42, 34, 32, 0.72);
+  color: #fff;
+  font-size: var(--sp-font-size-xs);
+  font-weight: 600;
+
+  &[data-side='left'] {
+    left: 12px;
+  }
+
+  &[data-side='right'] {
+    right: 12px;
+  }
+}
+
+.range {
+  width: 100%;
+  height: 44px; /* dokunmatik hedef */
+  accent-color: var(--sp-color-primary);
+  cursor: ew-resize;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sideBySide {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-space-sm);
+}
+
+.figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-xxs);
+
+  & img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: var(--sp-radius-lg);
+    box-shadow: var(--sp-shadow-card);
+  }
+
+  & figcaption {
+    font-size: var(--sp-font-size-sm);
+    font-weight: 600;
+    text-align: center;
+  }
+}

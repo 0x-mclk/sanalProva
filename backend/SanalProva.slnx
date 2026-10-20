@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SanalProva.Domain/SanalProva.Domain.csproj" />
+    <Project Path="src/SanalProva.Infrastructure/SanalProva.Infrastructure.csproj" />
+    <Project Path="src/SanalProva.Api/SanalProva.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SanalProva.UnitTests/SanalProva.UnitTests.csproj" />
+    <Project Path="tests/SanalProva.IntegrationTests/SanalProva.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

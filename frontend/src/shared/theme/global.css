@@ -1,0 +1,114 @@
+/* Uygulama geneli temel stiller. Renk/ölçü değerleri --sp-* token değişkenlerinden gelir (theme.ts). */
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--sp-color-bg);
+  color: var(--sp-color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
+}
+
+/* Klavye ile gezinmede belirgin altın odak halkası */
+:focus-visible {
+  outline: 2px solid var(--sp-color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Sayfa kabı: mobil öncelikli kenar boşluğu, çentik/alt çubuk güvenli alanı */
+.sp-page {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  padding: 0 max(var(--sp-gutter), env(safe-area-inset-right)) calc(var(--sp-space-xxl) + env(safe-area-inset-bottom))
+    max(var(--sp-gutter), env(safe-area-inset-left));
+  margin: 0 auto;
+  max-width: var(--sp-wide-max-width);
+}
+
+.sp-content {
+  max-width: var(--sp-content-max-width);
+  margin: 0 auto;
+}
+
+/* Alttaki sabit eylem çubuğu (StickyActionBar) içeriği örtmesin */
+.sp-page--with-bar {
+  padding-bottom: calc(190px + env(safe-area-inset-bottom));
+}
+
+/* Ekran başlığı: serif başlık + açıklama (referans: "Önce, boydan bir fotoğraf.") */
+.sp-title {
+  margin: var(--sp-space-sm) 0 var(--sp-space-xs);
+  font-family: var(--sp-font-heading);
+  font-weight: 400;
+  font-size: 28px;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.sp-lead {
+  margin: 0 0 var(--sp-space-lg);
+  color: var(--sp-color-text-muted);
+  font-size: var(--sp-font-size-md);
+  line-height: 1.5;
+}
+
+/* Ürün ızgarası: mobil 2, tablet 3, geniş 4 sütun */
+.sp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-space-sm);
+}
+
+@media (min-width: $tablet) {
+  .sp-title {
+    font-size: 34px;
+  }
+
+  .sp-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-space-md);
+  }
+}
+
+@media (min-width: $desktop) {
+  .sp-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Ekran okuyucuya görünür, ekranda gizli */
+.sp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: $tablet) {
+  .sp-page {
+    padding-left: var(--sp-gutter-tablet);
+    padding-right: var(--sp-gutter-tablet);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,20 @@
+[project]
+name = "sanalprova-image-worker"
+version = "0.1.0"
+description = "Sanal Prova görsel işleme servisi: segmentasyon (SAM 2) ve OpenCV renk değişimi"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+    "python-multipart>=0.0.18",
+    "numpy>=1.26,<3",
+    "opencv-python-headless>=4.10,<5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+# Aşama 5: SAM 2 (PyTorch). Varsayılan kurulumda YOK; ayrı Docker imajında kurulacak.
+# sam2 = ["torch", "sam2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

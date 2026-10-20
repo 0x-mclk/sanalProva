@@ -1,0 +1,28 @@
+.root {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-xxs);
+  min-height: var(--sp-control-app-bar);
+  padding-top: env(safe-area-inset-top);
+  margin: 0 calc(var(--sp-space-xs) * -1);
+  background: var(--sp-color-bg);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0 var(--sp-space-xs);
+  font-size: var(--sp-font-size-lg);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trailing {
+  flex-shrink: 0;
+  padding-right: var(--sp-space-xs);
+}

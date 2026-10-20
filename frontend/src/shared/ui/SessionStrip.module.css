@@ -1,0 +1,37 @@
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-sm);
+  padding: var(--sp-space-sm) var(--sp-space-md);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-color-surface-accent);
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--sp-color-primary);
+}
+
+.text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--sp-font-size-md);
+  font-weight: 600;
+}
+
+.status {
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-muted);
+}
+
+.check {
+  color: var(--sp-color-text-muted);
+}

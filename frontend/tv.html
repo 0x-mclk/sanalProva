@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1E080E" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <title>Sanal Prova · TV</title>
+    <style>
+      /* Uygulama yüklenemezse görünen düz (bağımlılıksız) ekran */
+      #tv-fallback { display: none; position: fixed; top: 0; right: 0; bottom: 0; left: 0; padding: 6vw; background: #1E080E; color: #FDFBF7; font-family: Georgia, serif; }
+      #tv-fallback h1 { margin: 0 0 1.5vw; font-weight: 400; font-size: 4vw; }
+      #tv-fallback p { margin: 0; font-size: 1.6vw; line-height: 1.5; color: #E7D3A0; font-family: Arial, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div id="tv-fallback" role="alert">
+      <h1>Bu TV tarayıcısı desteklenmiyor</h1>
+      <p id="tv-fallback-text">Tarayıcı bu uygulamayı çalıştıramıyor. TV yazılımını güncelleyin veya başka bir TV kullanın.</p>
+    </div>
+    <!-- ES modülü desteklemeyen çok eski tarayıcılar bu betiği çalıştırır; modül betiği onlarda hiç çalışmaz -->
+    <script nomodule>
+      document.getElementById('tv-fallback').style.display = 'block';
+    </script>
+    <script>
+      // Uygulama 10 sn içinde açılmazsa (çalışma zamanı hatası, eski motor) anlaşılır mesaj göster
+      setTimeout(function () {
+        if (!window.__tvBooted) {
+          document.getElementById('tv-fallback').style.display = 'block';
+        }
+      }, 10000);
+    </script>
+    <script type="module" src="/src/tv/main.tsx"></script>
+  </body>
+</html>

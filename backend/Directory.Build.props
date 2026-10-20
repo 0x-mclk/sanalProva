@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!--
+      CA1515: API/test tipleri public kalır. CA1711/CA1720: "Single", "Display" gibi iş terimleri tip adı sanılıyor.
+      CA2007: ASP.NET Core'da SynchronizationContext yok, ConfigureAwait gereksiz.
+      CA1848/CA1873: yalnızca günlük performansı kuralları; log hacmi düşük, LoggerMessage zorunluluğu okunabilirliği bozuyor.
+    -->
+    <NoWarn>$(NoWarn);CA1515;CA1711;CA1720;CA2007;CA1848;CA1873</NoWarn>
+  </PropertyGroup>
+</Project>

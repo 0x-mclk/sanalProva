@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Geçici uygulama ikonu: bordo zemin, altın halka ve askı motifi. Marka ikonu gelince değiştirilecek. -->
+  <rect width="512" height="512" rx="112" fill="#7A1F3A"/>
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#D9BE7C" stroke-width="10"/>
+  <path d="M256 168a28 28 0 1 1 28 28c-16 0-28 12-28 28v8l112 72c14 9 8 30-9 30H153c-17 0-23-21-9-30l112-72"
+        fill="none" stroke="#FBF7EF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
