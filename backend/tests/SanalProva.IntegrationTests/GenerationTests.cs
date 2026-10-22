@@ -37,7 +37,7 @@ public sealed class GenerationTests(ApiFactory factory) : ApiTestBase(factory)
 
         Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
         Assert.Equal("Mock", job.Provider);
-        Assert.Equal("tryon-max", job.Model); // gerçek model yapılandırmadan, sağlayıcı mock
+        Assert.Equal("bytedance/seedream/v5/flash/edit", job.Model); // varsayılan tek ürün modeli (Seedream 5 Flash) kaydedilir, sağlayıcı mock
         Assert.True(job.IsDemo);
         Assert.NotNull(job.ResultImageId);
 

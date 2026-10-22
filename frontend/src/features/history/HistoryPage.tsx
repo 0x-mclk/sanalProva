@@ -54,6 +54,7 @@ export function HistoryPage() {
                 </span>
                 <span className={classes.sub}>
                   {tr.sessionStep[session.nextStep] ?? session.nextStep} · {session.versionCount} sürüm
+                  {session.resultAiModel ? ` · ${session.resultAiModel}` : ''}
                 </span>
                 <span className={classes.meta}>
                   {timeAgo(session.lastActivityAt)} · <ShieldIcon size={12} /> {retentionText(session.retentionUntil)} tarihinde silinir

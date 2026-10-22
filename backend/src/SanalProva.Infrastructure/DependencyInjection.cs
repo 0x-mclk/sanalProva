@@ -5,9 +5,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
+using SanalProva.Infrastructure.Ai.Fal;
 using SanalProva.Infrastructure.Ai.Fashn;
 using SanalProva.Infrastructure.Ai.Gemini;
 using SanalProva.Infrastructure.Ai.Mock;
+using SanalProva.Infrastructure.Ai.Pruna;
 using SanalProva.Infrastructure.ImageWorker;
 using SanalProva.Infrastructure.Persistence;
 using SanalProva.Infrastructure.Storage;
@@ -73,6 +75,26 @@ public static class DependencyInjection
         services.AddKeyedTransient<IImageGenerationProvider>(GeminiProvider.ProviderName, (sp, _) => sp.GetRequiredService<GeminiProvider>());
         services.AddKeyedTransient<IImageEditProvider>(GeminiProvider.ProviderName, (sp, _) => sp.GetRequiredService<GeminiProvider>());
         services.AddSingleton<Generation.BudgetGuard>();
+
+        // Tek ürün giydirme modelleri (Aşama 4b): fal.ai (Seedream 5 Flash Edit, GPT Image 2.5 Sunburst Edit) ve Pruna (P-Image Try-On).
+        // FASHN ve Gemini adapter'ları eski (pasif) olarak kayıtlı kalır.
+        services.AddOptions<FalOptions>().Bind(configuration.GetSection(FalOptions.Section));
+        services.AddOptions<PrunaOptions>().Bind(configuration.GetSection(PrunaOptions.Section));
+        services.AddHttpClient<FalQueueClient>((sp, http) =>
+        {
+            http.BaseAddress = new Uri(sp.GetRequiredService<IOptions<FalOptions>>().Value.BaseUrl.TrimEnd('/') + "/");
+            http.Timeout = Timeout.InfiniteTimeSpan;
+        }).RemoveAllLoggers();
+        services.AddHttpClient<PrunaTryOnProvider>((sp, http) =>
+        {
+            http.BaseAddress = new Uri(sp.GetRequiredService<IOptions<PrunaOptions>>().Value.BaseUrl.TrimEnd('/') + "/");
+            http.Timeout = Timeout.InfiniteTimeSpan;
+        }).RemoveAllLoggers();
+        services.AddTransient<FalSeedreamTryOnProvider>();
+        services.AddTransient<FalGptImageTryOnProvider>();
+        services.AddKeyedTransient<ITryOnProvider>(FalSeedreamTryOnProvider.Name, (sp, _) => sp.GetRequiredService<FalSeedreamTryOnProvider>());
+        services.AddKeyedTransient<ITryOnProvider>(FalGptImageTryOnProvider.Name, (sp, _) => sp.GetRequiredService<FalGptImageTryOnProvider>());
+        services.AddKeyedTransient<ITryOnProvider>(PrunaTryOnProvider.Name, (sp, _) => sp.GetRequiredService<PrunaTryOnProvider>());
 
         // Üretim hattı ve KVKK saklama süresi temizliği
         services.AddSingleton<Generation.IJobNotifier, Generation.NullJobNotifier>();

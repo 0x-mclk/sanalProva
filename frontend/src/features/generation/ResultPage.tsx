@@ -109,6 +109,9 @@ export function ResultPage() {
 
         <div className={classes.side}>
           <SessionStrip label={data.customerLabel} code={data.code} status={`Sürüm ${current.versionNo} · ${current.label}`} trailing={null} />
+          {current.aiModel ? (
+            <p className={classes.model}>{current.isDemo ? `Demo sonuç · seçilen model: ${current.aiModel}` : `AI modeli: ${current.aiModel}`}</p>
+          ) : null}
 
           <div className={classes.actions}>
             {isOpen ? (

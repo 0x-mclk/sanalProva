@@ -5,8 +5,11 @@ using Microsoft.Extensions.Options;
 using SanalProva.Domain.Generation;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
+using SanalProva.Infrastructure.Ai.Fal;
 using SanalProva.Infrastructure.Ai.Fashn;
 using SanalProva.Infrastructure.Ai.Gemini;
+using SanalProva.Infrastructure.Ai.Pruna;
+using SanalProva.Infrastructure.Ai.TryOn;
 
 namespace SanalProva.IntegrationTests;
 
@@ -15,11 +18,11 @@ namespace SanalProva.IntegrationTests;
 /// Çalışması için üç şey birlikte gerekir:
 /// <list type="number">
 /// <item><c>SANALPROVA_LIVE_AI=ODEME-ONAYLANDI</c> ortam değişkeni (yalnızca proje sahibinin açık onayından sonra, docs/11 §5);</item>
-/// <item>API anahtarları: <c>Ai__Fashn__ApiKey</c> ve/veya <c>Ai__Gemini__ApiKey</c> ortam değişkeni (kaynağa/depoya yazılmaz);</item>
-/// <item><c>testdata/ai-live/</c> klasöründe <b>izinli veya sentetik</b> test görselleri (gerçek müşteri fotoğrafı DEĞİL): <c>person.jpg</c>, <c>set.jpg</c>, <c>salvar.jpg</c>, <c>gomlek.jpg</c>, <c>yelek.jpg</c>, <c>kaftan.jpg</c>, <c>kemer.jpg</c>, <c>kemer-yeni.jpg</c>.</item>
+/// <item>API anahtarları: <c>Ai__Fal__ApiKey</c> ve/veya <c>Ai__Pruna__ApiKey</c> ortam değişkeni (kaynağa/depoya yazılmaz; eski adımlar için <c>Ai__Fashn__ApiKey</c>, <c>Ai__Gemini__ApiKey</c>);</item>
+/// <item><c>testdata/ai-live/</c> klasöründe <b>izinli veya sentetik</b> test görselleri (gerçek müşteri fotoğrafı DEĞİL): <c>person.jpg</c> ve <c>kaftan.jpg</c> (eski adımlar için ayrıca <c>set.jpg</c>, <c>salvar.jpg</c>, <c>gomlek.jpg</c>, <c>yelek.jpg</c>, <c>kemer.jpg</c>, <c>kemer-yeni.jpg</c>).</item>
 /// </list>
-/// Harcama sınırı: <c>SANALPROVA_LIVE_AI_BUDGET_USD</c> (varsayılan 1.00). Her çağrıdan önce en kötü durum tahmini kalan bütçeyle karşılaştırılır; aşılacaksa çağrı yapılmaz.
-/// Adımlar: <c>SANALPROVA_LIVE_STEPS</c> (virgüllü; varsayılan <c>fashn,gemini-combo,gemini-edit</c>). Çıktılar ve maliyet kaydı <c>docs/ai-benchmark/runs/</c> altına yazılır (git'e girmez).
+/// Harcama sınırı: <c>SANALPROVA_LIVE_AI_BUDGET_USD</c> (varsayılan 0.50). Her çağrıdan önce en kötü durum tahmini kalan bütçeyle karşılaştırılır; aşılacaksa çağrı yapılmaz.
+/// Adımlar: <c>SANALPROVA_LIVE_STEPS</c> (virgüllü; varsayılan <c>seedream,gpt-medium,pruna</c>; ayrıca <c>gpt-low</c>, <c>gpt-high</c>, <c>pruna-turbo</c>; pahalı: <c>gpt-auto</c>, <c>gpt-xhigh</c>, <c>gpt-max</c>; eski: <c>fashn</c>, <c>gemini-combo</c>…). Çıktılar ve maliyet kaydı <c>docs/ai-benchmark/runs/</c> altına yazılır (git'e girmez).
 /// </summary>
 public sealed class LiveAiTests
 {
@@ -51,10 +54,17 @@ public sealed class LiveAiTests
         var inputs = Path.Combine(root, "testdata", "ai-live");
         Assert.SkipUnless(File.Exists(Path.Combine(inputs, "person.jpg")), "testdata/ai-live/person.jpg (izinli/sentetik test fotoğrafı) yok.");
 
-        var budget = decimal.Parse(Environment.GetEnvironmentVariable("SANALPROVA_LIVE_AI_BUDGET_USD") ?? "1.00", CultureInfo.InvariantCulture);
-        var steps = (Environment.GetEnvironmentVariable("SANALPROVA_LIVE_STEPS") ?? "fashn,fashn-2k,gemini-combo,gemini-edit").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var budget = decimal.Parse(Environment.GetEnvironmentVariable("SANALPROVA_LIVE_AI_BUDGET_USD") ?? "0.50", CultureInfo.InvariantCulture);
+        // Varsayılan adımlar yalnızca tek kaftan giydirme modelleridir. Eski FASHN/Gemini adımları (fashn, fashn-2k, gemini-combo, gemini-edit)
+        // yalnızca açıkça listelenirse çalışır; beş parçalı kombin bu aşamanın kapsamı dışındadır.
+        var steps = (Environment.GetEnvironmentVariable("SANALPROVA_LIVE_STEPS") ?? "seedream,gpt-medium,pruna").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var settings = new GenerationSettings();
-        var costs = new CostEstimator(new StaticMonitor(settings));
+        var monitor = new StaticMonitor(settings);
+        var costs = new CostEstimator(monitor);
+        var fal = new FalQueueClient(new HttpClient { BaseAddress = new Uri("https://queue.fal.run/"), Timeout = Timeout.InfiniteTimeSpan },
+            Options.Create(new FalOptions { ApiKey = Environment.GetEnvironmentVariable("Ai__Fal__ApiKey") ?? string.Empty }));
+        var pruna = new PrunaTryOnProvider(new HttpClient { BaseAddress = new Uri("https://api.pruna.ai/"), Timeout = Timeout.InfiniteTimeSpan },
+            Options.Create(new PrunaOptions { ApiKey = Environment.GetEnvironmentVariable("Ai__Pruna__ApiKey") ?? string.Empty }), monitor);
         var fashn = new FashnTryOnProvider(new HttpClient { BaseAddress = new Uri("https://api.fashn.ai/"), Timeout = Timeout.InfiniteTimeSpan },
             Options.Create(new FashnOptions { ApiKey = Environment.GetEnvironmentVariable("Ai__Fashn__ApiKey") ?? string.Empty }), costs);
         var gemini = new GeminiProvider(new HttpClient { BaseAddress = new Uri("https://generativelanguage.googleapis.com/"), Timeout = Timeout.InfiniteTimeSpan },
@@ -84,8 +94,41 @@ public sealed class LiveAiTests
                 result.Usage.EstimatedCostUsd, result.Usage.ActualCostUsd, result.ProviderRequestId, file));
         }
 
-        // Varsayılan (fiyat/performans): balanced + 1k = 2 kredi. 2k (3 kredi) aynı girdi ve aynı tohumla yan yana karşılaştırılır:
-        // yüz, kumaş, nakış ve ürün sadakatindeki fark değerlendirme kaydında puanlanır.
+        // Tek kaftan: aynı kişi ve aynı kaftan görseliyle her model/kalite; yüz, kumaş, nakış ve ürün sadakati kayıtta puanlanır
+        var tryOnSteps = new (string Step, string ModelKey, string Quality)[]
+        {
+            ("seedream", TryOnModels.Seedream, "standard"),
+            ("gpt-low", TryOnModels.GptImage, "low"), ("gpt-medium", TryOnModels.GptImage, "medium"), ("gpt-high", TryOnModels.GptImage, "high"),
+            ("gpt-auto", TryOnModels.GptImage, "auto"), ("gpt-xhigh", TryOnModels.GptImage, "xhigh"), ("gpt-max", TryOnModels.GptImage, "max"), // yalnızca açıkça listelenirse
+            ("pruna", TryOnModels.Pruna, "standard"), ("pruna-turbo", TryOnModels.Pruna, "turbo"),
+        };
+        foreach (var (step, modelKey, quality) in tryOnSteps)
+        {
+            if (!steps.Contains(step))
+            {
+                continue;
+            }
+
+            var model = TryOnModels.Find(modelKey)!;
+            var tier = model.Quality(quality)!;
+            var parameters = new Dictionary<string, string>(tier.Parameters) { ["model_key"] = model.Key, ["tier"] = tier.Key };
+            if (model.Provider != "Pruna")
+            {
+                parameters["prompt"] = PromptBuilder.BuildSingleGarment("Kaftan", "Test kaftanı", null, isCompleteSet: false);
+            }
+
+            var options = new ProviderRequestOptions(model.ModelId, parameters, Seed: 42);
+            var garmentImage = Load("kaftan.jpg");
+            Guard(TryOnModels.Price(model, tier, settings.Pricing, ProviderHttp.CostInput(options, person, garmentImage)).WorstCase); // gerçek görsel boyutlarıyla en kötü durum
+            ITryOnProvider provider = model.Provider switch
+            {
+                "FalSeedream" => new FalSeedreamTryOnProvider(fal, monitor),
+                "FalGptImage" => new FalGptImageTryOnProvider(fal, monitor),
+                _ => pruna,
+            };
+            Record($"kaftan-{step}", await provider.TryOnAsync(person, garmentImage, options, ct), $"{model.DisplayName} · {tier.Label}");
+        }
+
         foreach (var (step, resolution) in new[] { ("fashn", "1k"), ("fashn-2k", "2k") })
         {
             if (!steps.Contains(step))
@@ -95,7 +138,7 @@ public sealed class LiveAiTests
 
             var options = new ProviderRequestOptions("tryon-max", new Dictionary<string, string> { ["resolution"] = resolution, ["generation_mode"] = "balanced" }, Seed: 42);
             Guard(costs.WorstCasePerCallUsd("Fashn", options.Model, options.Parameters, 2));
-            Record($"1-fashn-hazir-takim-{resolution}", await fashn.TryOnAsync(person, Load("set.jpg"), options, ct), $"resolution={resolution}, generation_mode=balanced");
+            Record($"eski-fashn-{resolution}", await fashn.TryOnAsync(person, Load("set.jpg"), options, ct), $"resolution={resolution}, generation_mode=balanced");
         }
 
         if (steps.Contains("gemini-combo"))
@@ -104,17 +147,16 @@ public sealed class LiveAiTests
                 .Select(g => new GarmentReference(Load(g.Item2), g.Item1, g.Item1, null, g.Item3, null)).ToList();
             var options = new ProviderRequestOptions("gemini-3-pro-image", new Dictionary<string, string> { ["image_size"] = "2K" }, Seed: 42);
             Guard(costs.WorstCasePerCallUsd("Gemini", options.Model, options.Parameters, 6));
-            Record("2-gemini-pro-5-parca", await gemini.ComposeOutfitAsync(person, garments, PromptBuilder.BuildFreeCombination(garments), options, ct), "image_size=2K");
+            Record("eski-gemini-pro-5-parca", await gemini.ComposeOutfitAsync(person, garments, PromptBuilder.BuildFreeCombination(garments), options, ct), "image_size=2K");
         }
 
         if (steps.Contains("gemini-edit") && entries.Count > 0)
         {
-            // İlk sonuç üzerinde tek parça (kemer) revizyonu. Revizyon motoru (maskeli birleştirme) Aşama 5'tedir: burada yalnızca ham model çıktısı ölçülür.
             var baseImage = new ImageInput(File.ReadAllBytes(Path.Combine(runDir, entries[^1].OutputFile)), "image/jpeg");
             var options = new ProviderRequestOptions("gemini-nano-banana-2.1", new Dictionary<string, string> { ["image_size"] = "2K" }, Seed: 42);
             Guard(costs.WorstCasePerCallUsd("Gemini", options.Model, options.Parameters, 2));
             var instruction = PromptBuilder.BuildProductSwap("Kemer", "Yeni Kemer", null);
-            Record("3-gemini-2.1-revizyon", await gemini.EditAsync(baseImage, instruction, [Load("kemer-yeni.jpg")], options, ct), "image_size=2K");
+            Record("eski-gemini-2.1-revizyon", await gemini.EditAsync(baseImage, instruction, [Load("kemer-yeni.jpg")], options, ct), "image_size=2K");
         }
 
         WriteRecord(runDir, entries, spent, budget);

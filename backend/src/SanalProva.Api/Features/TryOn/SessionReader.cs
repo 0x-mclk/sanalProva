@@ -3,6 +3,7 @@ using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Generation;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
+using SanalProva.Infrastructure.Ai.TryOn;
 using SanalProva.Infrastructure.Persistence;
 
 namespace SanalProva.Api.Features.TryOn;
@@ -36,7 +37,8 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
 
         var photos = session.Photos.OrderByDescending(p => p.IsPrimary).ThenByDescending(p => p.CreatedAt)
             .Where(p => files.ContainsKey(p.FileId)).Select(p => ToPhotoDto(p, links.Customer(files[p.FileId]))).ToList();
-        var imageDtos = images.Where(i => files.ContainsKey(i.FileId)).Select(i => ToImageDto(i, links.Customer(files[i.FileId]))).ToList();
+        var labels = await ModelLabelsAsync(db, images.Select(i => i.JobId), ct);
+        var imageDtos = images.Where(i => files.ContainsKey(i.FileId)).Select(i => ToImageDto(i, links.Customer(files[i.FileId]), labels.GetValueOrDefault(i.JobId))).ToList();
         var jobDtos = new List<JobDto>();
         foreach (var job in jobs)
         {
@@ -61,6 +63,7 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
             .Where(j => ids.Contains(j.SessionId) && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running))
             .Select(j => j.SessionId).Distinct().ToListAsync(ct);
         var files = await ImageLinks.LoadFilesAsync(db, photos.Select(p => p.FileId).Concat(images.Select(i => i.FileId)), ct);
+        var labels = await ModelLabelsAsync(db, images.GroupBy(i => i.SessionId).Select(g => g.Last().JobId), ct);
 
         return sessions.Select(s =>
         {
@@ -72,7 +75,7 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
                 s.Id, s.CustomerLabel, SessionProgress.DisplayCode(s.Id), s.Status, step, s.CreatedAt, s.LastActivityAt, s.RetentionUntil, mine.Count,
                 photo is not null && files.TryGetValue(photo.FileId, out var pf) ? links.Customer(pf) : null,
                 latest is not null && files.TryGetValue(latest.FileId, out var rf) ? links.Customer(rf) : null,
-                latest?.IsDemo ?? false);
+                latest?.IsDemo ?? false, latest is not null ? labels.GetValueOrDefault(latest.JobId) : null);
         }).ToList();
     }
 
@@ -83,8 +86,16 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
             new PhotoQualityDto(q.Blurry, q.LowResolution, q.NotPortrait, q.HasWarnings, JobMessages.PhotoWarnings(q)), urls);
     }
 
-    public static GeneratedImageDto ToImageDto(Domain.Generation.GeneratedImage i, ImageUrls urls) =>
-        new(i.Id, i.VersionNo, i.ParentImageId, i.JobId, i.Label, i.IsDemo, i.IsColorPreview, i.IsFavorite, i.CreatedAt, urls);
+    public static GeneratedImageDto ToImageDto(Domain.Generation.GeneratedImage i, ImageUrls urls, string? aiModel = null) =>
+        new(i.Id, i.VersionNo, i.ParentImageId, i.JobId, i.Label, i.IsDemo, i.IsColorPreview, i.IsFavorite, i.CreatedAt, urls, aiModel);
+
+    /// <summary>Sonucu üreten işin model · kalite etiketi (ör. "GPT Image 2.5 · Orta"); tek ürün giydirme dışındaki işlerde yok.</summary>
+    public static async Task<Dictionary<Guid, string>> ModelLabelsAsync(AppDbContext db, IEnumerable<Guid> jobIds, CancellationToken ct)
+    {
+        var ids = jobIds.Distinct().ToList();
+        var jobs = await db.GenerationJobs.AsNoTracking().Where(j => ids.Contains(j.Id) && j.ModelKey != null).Select(j => new { j.Id, j.ModelKey, j.Quality }).ToListAsync(ct);
+        return jobs.Select(j => (j.Id, Label: TryOnModels.Describe(j.ModelKey, j.Quality))).Where(j => j.Label is not null).ToDictionary(j => j.Id, j => j.Label!);
+    }
 
     public static DraftDto? ToDraftDto(SessionDraft? draft, IReadOnlyList<string> warnings) =>
         draft is null ? null : new DraftDto(draft.Mode, draft.Items.Select(i => new DraftItemDto(i.CategoryId, i.ProductId, i.VariantId)).ToList(), warnings);
@@ -108,6 +119,7 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
 
         return new JobDto(
             job.Id, job.SessionId, job.JobType, job.Status, job.Stage, position, job.Attempt, job.MaxAttempts, job.ErrorCode, message, retryable, image?.Id,
-            job.CreatedAt, job.StartedAt, job.FinishedAt, job.Provider, job.Model, image?.IsDemo ?? job.Provider == "Mock");
+            job.CreatedAt, job.StartedAt, job.FinishedAt, job.Provider, job.Model, image?.IsDemo ?? job.Provider == "Mock",
+            job.ModelKey, job.Quality, TryOnModels.Describe(job.ModelKey, job.Quality));
     }
 }

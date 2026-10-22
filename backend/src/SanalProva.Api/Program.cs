@@ -8,8 +8,8 @@ using SanalProva.Api.Features.Dev;
 using SanalProva.Api.Features.Displays;
 using SanalProva.Api.Features.Files;
 using SanalProva.Api.Features.Generation;
-using SanalProva.Api.Features.TryOn;
 using SanalProva.Api.Features.Health;
+using SanalProva.Api.Features.TryOn;
 using SanalProva.Api.Hubs;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Infrastructure;
@@ -138,6 +138,7 @@ api.MapGenerationEndpoints();
 api.MapDisplayManagementEndpoints();
 api.MapUsageEndpoints();
 api.MapAiQualityEndpoints();
+api.MapAiModelEndpoints();
 app.MapDisplayDeviceEndpoints();
 
 app.MapHub<StaffHub>(StaffHub.Path);

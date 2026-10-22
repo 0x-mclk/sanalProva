@@ -53,9 +53,20 @@ public static class CombinationRules
             return [CombinationError.Empty];
         }
 
-        return items.Count == 1 && items.First().Product.ProductType == ProductType.OutfitSet
+        return items.Count == 1 && IsSingleTryOnItem(items.First())
             ? []
             : [CombinationError.OutfitSetMustBeAlone];
+    }
+
+    /// <summary>
+    /// Tek görselle giydirilebilen ürün: hazır takım veya tüm vücudu kaplayan tekil ürün (ör. kaftan). Tek ürün giydirme modelleri yalnızca
+    /// bunları alır; çok parçalı kombin ayrı akıştır.
+    /// </summary>
+    public static bool IsSingleTryOnItem(SelectedItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return item.Product.ProductType == ProductType.OutfitSet
+            || (item.Product.ProductType == ProductType.Single && item.Category.BodyZone == BodyZone.FullBody);
     }
 
     /// <summary>Prompt ve görselleştirme için içten dışa katman sırası.</summary>

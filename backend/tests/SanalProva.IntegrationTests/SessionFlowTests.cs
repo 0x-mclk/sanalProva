@@ -64,7 +64,7 @@ public sealed class SessionFlowTests(ApiFactory factory) : ApiTestBase(factory)
         var (_, client) = await StaffAsync();
         var session = await CreateSessionAsync(client);
         var url = $"/api/v1/sessions/{session.Id}/consent";
-        object Body(bool processing = true, bool transfer = true, bool minor = false, bool? guardian = null, string version = ConsentNotice.Version) => new
+        static object Body(bool processing = true, bool transfer = true, bool minor = false, bool? guardian = null, string version = ConsentNotice.Version) => new
         {
             noticeVersion = version, processingConsent = processing, foreignTransferConsent = transfer, extendedRetentionConsent = false,
             isMinor = minor, guardianConsent = guardian, method = "StaffConfirmedVerbal",

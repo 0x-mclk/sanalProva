@@ -1,13 +1,13 @@
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using SanalProva.Infrastructure.Persistence;
-using SanalProva.Infrastructure.Tenancy;
 using SanalProva.Api.Features.Catalog;
-using SanalProva.Api.Infrastructure;
 using SanalProva.Api.Features.TryOn;
+using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
+using SanalProva.Infrastructure.Persistence;
+using SanalProva.Infrastructure.Tenancy;
 
 namespace SanalProva.IntegrationTests;
 

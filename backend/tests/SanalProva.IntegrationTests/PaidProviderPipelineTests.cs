@@ -8,6 +8,7 @@ using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
+using SanalProva.Infrastructure.Ai.TryOn;
 using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
@@ -28,10 +29,14 @@ internal sealed class ScriptedTryOn(Func<int, ProviderRequestOptions, Cancellati
 
     public List<ProviderRequestOptions> Seen { get; } = [];
 
+    /// <summary>Sağlayıcıya giden görseller (maliyet hesabı gerçek boyutlarla doğrulanır).</summary>
+    public List<(ImageInput Person, ImageInput Garment)> Inputs { get; } = [];
+
     public Task<ProviderResult> TryOnAsync(ImageInput person, ImageInput garment, ProviderRequestOptions options, CancellationToken ct)
     {
         Calls++;
         Seen.Add(options);
+        Inputs.Add((person, garment));
         return script(Calls, options, ct);
     }
 }
@@ -64,10 +69,13 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         new([new GeneratedOutput(TestImages.Portrait(seed + 100), "image/jpeg")], provider, model, requestId,
             new ProviderUsage(1200, credits, null, null, estimated, actual));
 
-    private sealed class Harness(ServiceProvider services, ScriptedTryOn fashn, ScriptedCompose gemini) : IAsyncDisposable
+    private sealed class Harness(ServiceProvider services, ScriptedTryOn fashn, ScriptedCompose gemini, ScriptedTryOn tryOn) : IAsyncDisposable
     {
         public ServiceProvider Services { get; } = services;
         public ScriptedTryOn Fashn { get; } = fashn;
+
+        /// <summary>Yeni tek ürün modelleri (FalSeedream, FalGptImage, Pruna) için ortak sahte sağlayıcı.</summary>
+        public ScriptedTryOn TryOn { get; } = tryOn;
         public ScriptedCompose Gemini { get; } = gemini;
 
         public GenerationProcessor Processor => Services.GetRequiredService<GenerationProcessor>();
@@ -77,7 +85,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
     private Harness BuildHarness(
         ScriptedTryOn? fashn = null, ScriptedCompose? gemini = null, bool allowPaid = true, decimal daily = 10m, decimal monthly = 150m, decimal maxJob = 0.5m,
-        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max")
+        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max", bool liveCombination = false)
     {
         var values = new Dictionary<string, string?>
         {
@@ -88,6 +96,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
             ["Generation:UseMockProviders"] = "false",
             ["Generation:RetryBackoffBaseSeconds"] = "0.01",
             ["Generation:CancelPollMs"] = "40",
+            ["Generation:LiveFreeCombinationEnabled"] = liveCombination.ToString(),
             ["Generation:Budget:AllowPaidCalls"] = allowPaid.ToString(),
             ["Generation:Budget:DailyLimitUsd"] = daily.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Generation:Budget:MonthlyLimitUsd"] = monthly.ToString(System.Globalization.CultureInfo.InvariantCulture),
@@ -116,7 +125,21 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         gemini ??= new ScriptedCompose((n, _, _) => Task.FromResult(Result("Gemini", freeModel, $"int-{n}", 0.1562m)));
         services.AddKeyedSingleton<ITryOnProvider>("Fashn", fashn);
         services.AddKeyedSingleton<IImageGenerationProvider>("Gemini", gemini);
-        return new Harness(services.BuildServiceProvider(), fashn, gemini);
+
+        // Yeni modeller: gerçek adapter'lar gibi maliyeti girdi boyutları, kalite ve görsel sayısından hesaplar (fal/Pruna istek başına maliyet döndürmez)
+        ScriptedTryOn tryOn = null!;
+        tryOn = new ScriptedTryOn((n, options, _) =>
+        {
+            var model = TryOnModels.Find(options.Parameters["model_key"])!;
+            var (person, garment) = tryOn.Inputs[^1];
+            return Task.FromResult(Result(model.Provider, options.Model, $"req-{n}", ProviderHttp.EstimatedCost(options, new PricingSettings(), person, garment)));
+        });
+        foreach (var key in new[] { "FalSeedream", "FalGptImage", "Pruna" })
+        {
+            services.AddKeyedSingleton<ITryOnProvider>(key, tryOn);
+        }
+
+        return new Harness(services.BuildServiceProvider(), fashn, gemini, tryOn);
     }
 
     private async Task<(TestTenant Tenant, ApiClient Client, CatalogIds Catalog)> TenantAsync()
@@ -127,7 +150,8 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
     }
 
     /// <summary>Oturum + onay + fotoğraf + seçim + "Running" iş (worker'a karışmaz).</summary>
-    private async Task<(Guid JobId, Guid SessionId)> RunningJobAsync(TestTenant tenant, ApiClient client, CatalogIds catalog, OutfitMode mode)
+    private async Task<(Guid JobId, Guid SessionId)> RunningJobAsync(
+        TestTenant tenant, ApiClient client, CatalogIds catalog, OutfitMode mode, string? modelKey = null, string? quality = null, bool kaftan = false)
     {
         var (session, photo) = await PreparedSessionAsync(client);
         var (scope, db) = OpenDb(tenant.OrganizationId);
@@ -135,7 +159,11 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         {
             var user = await db.Users.SingleAsync(u => u.Email == tenant.Email, TestContext.Current.CancellationToken);
             var selection = new OutfitSelection { OrganizationId = tenant.OrganizationId, SessionId = session.Id, Mode = mode, CreatedByUserId = user.Id };
-            if (mode == OutfitMode.OutfitSet)
+            if (mode == OutfitMode.OutfitSet && kaftan)
+            {
+                selection.Items.Add(new OutfitSelectionItem { OrganizationId = tenant.OrganizationId, ProductId = catalog.KaftanProduct, CategoryId = catalog.Kaftan, LayerOrder = 30 });
+            }
+            else if (mode == OutfitMode.OutfitSet)
             {
                 selection.Items.Add(new OutfitSelectionItem { OrganizationId = tenant.OrganizationId, ProductId = catalog.SetProduct, VariantId = catalog.SetVariant, CategoryId = catalog.Takim, LayerOrder = 50 });
             }
@@ -154,6 +182,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
                 OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, SessionId = session.Id,
                 JobType = mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination,
                 SelectionId = selection.Id, SourcePhotoId = photo.Id, IdempotencyKey = Guid.NewGuid().ToString("N"), RequestedByUserId = user.Id,
+                ModelKey = modelKey, Quality = quality,
                 Status = GenerationJobStatus.Running, Attempt = 1, Stage = GenerationStage.Preparing, StartedAt = now, NextAttemptAt = now, LeaseUntil = now.AddMinutes(10),
             };
             db.OutfitSelections.Add(selection);
@@ -355,7 +384,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
     public async Task Bes_parcali_kombin_gemini_pro_ile_katman_sirasinda_ve_v2_prompt_ile_gonderilir()
     {
         var (tenant, client, catalog) = await TenantAsync();
-        await using var harness = BuildHarness();
+        await using var harness = BuildHarness(liveCombination: true); // eski Gemini yolu yalnızca açıkça etkinleştirilince
         var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.FreeCombination);
 
         await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
@@ -378,7 +407,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
     public async Task Kombin_icin_uygun_olmayan_veya_dogrulanmamis_model_cagrilmaz(string model)
     {
         var (tenant, client, catalog) = await TenantAsync();
-        await using var harness = BuildHarness(freeModel: model);
+        await using var harness = BuildHarness(freeModel: model, liveCombination: true);
         var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.FreeCombination);
 
         await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
@@ -512,6 +541,140 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
         var unchanged = await manager.GetAsync<SanalProva.Api.Features.Admin.AiQualityDto>("/api/v1/admin/ai-quality");
         Assert.False(unchanged.IsOverride);
+    }
+
+    [Fact]
+    public async Task Tek_kaftan_seedream_ile_uretilir_model_kalite_ve_maliyet_kaydedilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.Seedream, "standard", kaftan: true);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Equal("FalSeedream", job.Provider);
+        Assert.Equal("bytedance/seedream/v5/flash/edit", job.Model);
+        Assert.Equal("single-garment.v1", job.PromptTemplateVersion);
+        Assert.Equal(0, harness.Fashn.Calls); // eski FASHN çağrılmaz
+
+        var sent = Assert.Single(harness.TryOn.Seen);
+        Assert.Equal("auto_2K", sent.Parameters["image_size"]);
+        Assert.Contains("Image 2", sent.Parameters["prompt"], StringComparison.Ordinal);
+        Assert.Contains("Zümrüt Kaftan", sent.Parameters["prompt"], StringComparison.Ordinal);
+        Assert.DoesNotContain("customer", sent.Parameters["prompt"], StringComparison.OrdinalIgnoreCase);
+
+        Assert.False(Assert.Single(images).IsDemo);
+        var log = Assert.Single(logs);
+        Assert.Equal("standard", log.Quality);
+        Assert.Equal(0.027m, log.EstimatedCostUsd);
+        Assert.Null(log.ActualCostUsd); // fal istek başına maliyet bildirmez: tahmin
+    }
+
+    [Fact]
+    public async Task Gpt_image_kalitesi_parametreyi_maliyeti_ve_butce_kapisini_belirler()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(maxJob: 0.05m); // medium en kötü ≈ 0,03–0,04 sığar; high en kötü (çıktı ≥ 0,036 + iki referans + prompt) sığmaz
+        var (medium, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.GptImage, "medium", kaftan: true);
+        var (high, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.GptImage, "high", kaftan: true);
+
+        await harness.Processor.ProcessClaimedAsync(medium, TestContext.Current.CancellationToken);
+        await harness.Processor.ProcessClaimedAsync(high, TestContext.Current.CancellationToken);
+
+        var (mediumJob, mediumLogs, _) = await LoadAsync(medium);
+        Assert.Equal(GenerationJobStatus.Succeeded, mediumJob.Status);
+        Assert.Equal("openai/gpt-image-2.5/sunburst/edit", mediumJob.Model);
+        Assert.Equal("medium", Assert.Single(harness.TryOn.Seen).Parameters["quality"]);
+        var log = Assert.Single(mediumLogs);
+        Assert.Equal("medium", log.Quality);
+        var (person, garment) = Assert.Single(harness.TryOn.Inputs);
+        var model = TryOnModels.Find(TryOnModels.GptImage)!;
+        var expected = TryOnModels.Price(model, model.Quality("medium")!, new PricingSettings(), ProviderHttp.CostInput(harness.TryOn.Seen[0], person, garment)).Estimated;
+        Assert.Equal(expected, log.EstimatedCostUsd); // kalite × çözünürlük + iki referans görsel + prompt
+        Assert.InRange(log.EstimatedCostUsd, 0.02m, 0.05m);
+
+        var (highJob, _, _) = await LoadAsync(high);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, highJob.ErrorCode);
+        Assert.Equal(1, harness.TryOn.Calls); // high için sağlayıcıya gidilmedi
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public async Task Gpt_image_pahali_kaliteler_saglayiciya_acikca_gider_ve_maliyeti_kaydedilir(string quality)
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(maxJob: 0.5m);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.GptImage, quality, kaftan: true);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Equal(quality, job.Quality);
+        var sent = Assert.Single(harness.TryOn.Seen);
+        Assert.Equal(quality, sent.Parameters["quality"]); // şema varsayılanına (high) bırakılmaz
+        var log = Assert.Single(logs);
+        Assert.Equal(quality, log.Quality);
+        var (person, garment) = Assert.Single(harness.TryOn.Inputs);
+        var model = TryOnModels.Find(TryOnModels.GptImage)!;
+        var input = ProviderHttp.CostInput(sent, person, garment);
+        Assert.Equal(TryOnModels.Price(model, model.Quality(quality)!, new PricingSettings(), input).Estimated, log.EstimatedCostUsd);
+        var medium = TryOnModels.Price(model, model.Quality("medium")!, new PricingSettings(), input).Estimated;
+        Assert.True(log.EstimatedCostUsd > medium, $"{quality} tahmini medium'dan yüksek olmalı");
+    }
+
+    [Fact]
+    public async Task Gpt_image_max_is_basi_siniri_asarsa_saglayici_cagrilmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(maxJob: 0.10m); // max'ın en kötü çıktısı tek başına ≥ 0,144 $
+        var (maxJob, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.GptImage, "max", kaftan: true);
+        var (autoJob, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.GptImage, "auto", kaftan: true);
+
+        await harness.Processor.ProcessClaimedAsync(maxJob, TestContext.Current.CancellationToken);
+        await harness.Processor.ProcessClaimedAsync(autoJob, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(maxJob)).Job.ErrorCode);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(autoJob)).Job.ErrorCode); // auto en kötü durumu max sütunudur
+        Assert.Equal(0, harness.TryOn.Calls);
+    }
+
+    [Fact]
+    public async Task Pruna_turbo_parametresi_gider_serbest_metin_gonderilmez()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, TryOnModels.Pruna, "turbo");
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Equal("pruna-tryon.v1", job.PromptTemplateVersion);
+        var sent = Assert.Single(harness.TryOn.Seen);
+        Assert.Equal("true", sent.Parameters["turbo"]);
+        Assert.False(sent.Parameters.ContainsKey("prompt"));
+        Assert.Equal(0.008m, Assert.Single(logs).EstimatedCostUsd);
+    }
+
+    [Fact]
+    public async Task Bes_parcali_kombin_gercek_modda_varsayilan_olarak_calismaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(); // LiveFreeCombinationEnabled = false (varsayılan)
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.FreeCombination);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, _, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Failed, job.Status);
+        Assert.Equal(GenerationErrorCode.ProviderNotConfigured, job.ErrorCode);
+        Assert.Equal(0, harness.Gemini.Calls);
+        Assert.Empty(images);
     }
 
     private static byte[] TestFlatJpeg()

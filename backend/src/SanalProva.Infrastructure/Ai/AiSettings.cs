@@ -37,6 +37,41 @@ public sealed class GeminiOptions
 }
 
 /// <summary>
+/// fal.ai kuyruk API'si (Seedream 5 Flash Edit, GPT Image 2.5 Sunburst Edit). Anahtar yalnızca <c>Ai__Fal__ApiKey</c> ortam değişkeni/user-secrets'tan gelir.
+/// Doğrulanan davranış (fal Queue dokümanı ve model OpenAPI şemaları, 2026-10-22): <c>POST https://queue.fal.run/{model}</c>, <c>Authorization: Key …</c>,
+/// durum <c>IN_QUEUE / IN_PROGRESS / COMPLETED</c>, iptal <c>PUT …/requests/{id}/cancel</c>.
+/// </summary>
+public sealed class FalOptions
+{
+    public const string Section = "Ai:Fal";
+
+    public string BaseUrl { get; set; } = "https://queue.fal.run/";
+    public string ApiKey { get; set; } = string.Empty;
+    public int RequestTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>Sonuç bekleme üst sınırı. Aşılırsa iş "Timeout" olur; istek kimliği saklandığı için yeniden denemede aynı istek sorgulanır.</summary>
+    public int MaxWaitSeconds { get; set; } = 180;
+
+    public int PollIntervalMs { get; set; } = 1500;
+}
+
+/// <summary>
+/// Pruna API (P-Image Try-On). Anahtar: <c>Ai__Pruna__ApiKey</c>. Doğrulanan davranış (docs.api.pruna.ai/openapi.yaml, 2026-10-22):
+/// base64 desteklenmez; girdiler <c>POST /v1/files</c> ile geçici yüklenir (30 dk sonra otomatik silinir, silme uç noktası yok);
+/// tahmin <c>POST /v1/predictions</c> (<c>Model: p-image-try-on</c>), durum <c>GET /v1/predictions/status/{id}</c>, çıktı 24 saat erişilebilir.
+/// </summary>
+public sealed class PrunaOptions
+{
+    public const string Section = "Ai:Pruna";
+
+    public string BaseUrl { get; set; } = "https://api.pruna.ai/";
+    public string ApiKey { get; set; } = string.Empty;
+    public int RequestTimeoutSeconds { get; set; } = 30;
+    public int MaxWaitSeconds { get; set; } = 120;
+    public int PollIntervalMs { get; set; } = 1000;
+}
+
+/// <summary>
 /// Maliyet tahmini birim fiyatları (USD). Değerler resmî fiyat sayfalarından 2026-10-20'de alındı (bkz. docs/07 §1); fiyat
 /// değişirse yalnızca yapılandırma güncellenir. Faturalama sağlayıcıdadır: bunlar tahmindir, mutabakat faturayla yapılır.
 /// </summary>
@@ -61,6 +96,12 @@ public sealed class PricingSettings
         ["gemini-3.1-flash-image"] = new() { InputUsdPer1M = 0.50m, OutputTextUsdPer1M = 3.00m, OutputImageUsdPer1M = 60.00m, ImageUsd = new() { ["1K"] = 0.067m, ["2K"] = 0.101m, ["4K"] = 0.151m } },
         ["gemini-3.1-flash-lite-image"] = new() { InputUsdPer1M = 0.25m, OutputTextUsdPer1M = 1.50m, OutputImageUsdPer1M = 30.00m, ImageUsd = new() { ["1K"] = 0.0336m } },
     };
+
+    /// <summary>Tek ürün giydirme modelleri için tahmini maliyet ezmesi ("model:kalite" → USD/görsel). Boşsa katalog değeri (TryOnModels) kullanılır.</summary>
+    public Dictionary<string, decimal> TryOnEstimatedUsd { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Tek ürün giydirme modelleri için bütçe kapısında kullanılan en kötü durum ezmesi ("model:kalite" → USD).</summary>
+    public Dictionary<string, decimal> TryOnWorstCaseUsd { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Çağrı öncesi en kötü durum tahmini için: bir giriş görseli ortalama kaç token (jeton) sayılır.</summary>
     public int AssumedTokensPerInputImage { get; set; } = 1300;

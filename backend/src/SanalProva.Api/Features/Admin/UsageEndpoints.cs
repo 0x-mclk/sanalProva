@@ -13,7 +13,7 @@ public sealed record UsageTotals(int Calls, int Successes, int Failures, int Ret
 
 public sealed record UsageByDay(DateOnly Day, int Calls, int Failures, decimal EstimatedCostUsd);
 
-public sealed record UsageByModel(string Provider, string Model, int Calls, int Successes, int Failures, int Retries, double AverageDurationMs, decimal Credits, decimal EstimatedCostUsd, decimal ActualCostUsd);
+public sealed record UsageByModel(string Provider, string Model, string? Quality, int Calls, int Successes, int Failures, int Retries, double AverageDurationMs, decimal Credits, decimal EstimatedCostUsd, decimal ActualCostUsd);
 
 public sealed record BudgetStatus(
     bool Live, bool AllowPaidCalls, bool Enforce, decimal DailyLimitUsd, decimal MonthlyLimitUsd, decimal MaxJobCostUsd, decimal SpentTodayUsd, decimal SpentMonthUsd);
@@ -58,10 +58,10 @@ public static class UsageEndpoints
 
         var byDay = rows.GroupBy(r => DateOnly.FromDateTime(r.CreatedAt.UtcDateTime)).OrderBy(g => g.Key)
             .Select(g => new UsageByDay(g.Key, g.Count(), g.Count(i => !i.Success), g.Sum(i => i.EstimatedCostUsd))).ToList();
-        var byModel = rows.GroupBy(r => (r.Provider, r.Model)).OrderByDescending(g => g.Sum(i => i.EstimatedCostUsd)).Select(g =>
+        var byModel = rows.GroupBy(r => (r.Provider, r.Model, r.Quality)).OrderByDescending(g => g.Sum(i => i.EstimatedCostUsd)).Select(g =>
         {
             var t = Totals(g.ToList());
-            return new UsageByModel(g.Key.Provider, g.Key.Model, t.Calls, t.Successes, t.Failures, t.Retries, t.AverageDurationMs, t.Credits, t.EstimatedCostUsd, t.ActualCostUsd);
+            return new UsageByModel(g.Key.Provider, g.Key.Model, g.Key.Quality, t.Calls, t.Successes, t.Failures, t.Retries, t.AverageDurationMs, t.Credits, t.EstimatedCostUsd, t.ActualCostUsd);
         }).ToList();
 
         var settings = generation.CurrentValue;

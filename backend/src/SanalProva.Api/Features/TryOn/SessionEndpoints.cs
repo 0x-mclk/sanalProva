@@ -298,9 +298,9 @@ public static class SessionEndpoints
         }
 
         var items = selected.Items;
-        if (request.Mode == OutfitMode.OutfitSet && items.Any(i => i.Product.ProductType != ProductType.OutfitSet))
+        if (request.Mode == OutfitMode.OutfitSet && items.Any(i => !CombinationRules.IsSingleTryOnItem(i)))
         {
-            return ApiProblems.BadRequest("WRONG_PRODUCT_TYPE", "Hazır takım modunda yalnızca takımlar seçilebilir.");
+            return ApiProblems.BadRequest("WRONG_PRODUCT_TYPE", "Bu modda yalnızca hazır takım veya kaftan gibi tek parça tüm vücut ürünü seçilebilir.");
         }
 
         if (request.Mode == OutfitMode.FreeCombination && items.Any(i => i.Product.ProductType != ProductType.Single))

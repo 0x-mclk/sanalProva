@@ -73,7 +73,7 @@ internal static class CatalogMapping
     public static ProductImage? PickCover(this Product product, Guid? variantId = null)
     {
         var defaultVariant = variantId ?? product.Variants.FirstOrDefault(v => v.IsDefault && v.IsActive)?.Id ?? product.Variants.FirstOrDefault(v => v.IsActive)?.Id;
-        IEnumerable<ProductImage> Ordered(IEnumerable<ProductImage> images) =>
+        static IEnumerable<ProductImage> Ordered(IEnumerable<ProductImage> images) =>
             images.OrderByDescending(i => i.Angle == ImageAngle.Front).ThenByDescending(i => i.IsAiReference).ThenBy(i => i.SortOrder);
 
         return Ordered(product.Images.Where(i => i.VariantId == defaultVariant && defaultVariant != null)).FirstOrDefault()

@@ -1,6 +1,6 @@
 # Yerel araçlar ve veriler (taşınabilir PostgreSQL, veri klasörü, yerel dosya deposu)
 .local/
-storage/
+/storage/
 
 # Gizli değerler
 .env
@@ -42,3 +42,6 @@ frontend/playwright-report/
 # Gerçek AI test çıktıları ve izinli test görselleri (kişisel veri içerebilir)
 docs/ai-benchmark/runs/
 testdata/
+
+# Kişisel editör ayarları (yerel SDK yolu içerir)
+.vscode/settings.json

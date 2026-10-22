@@ -1,9 +1,10 @@
-import { Button, Chip, Menu, TextInput } from '@mantine/core';
+import { Button, Chip, Menu, Select, TextInput } from '@mantine/core';
 import { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
 import type { DraftDto, ProductListItem } from '../../shared/api/types';
 import { ApiError } from '../../shared/api/http';
+import { useTryOnOptions, type TryOnOptions } from '../../shared/api/usage';
 import { useAuth } from '../../shared/auth/AuthContext';
 import { errorMessage, tr } from '../../shared/i18n/tr';
 import { CheckIcon, ChevronDownIcon, EmptyState, ErrorState, Eyebrow, FlowHeader, FilterIcon, LoadingState, Notice, ProductCard, SearchIcon, SparklesIcon, StepProgress, StickyActionBar } from '../../shared/ui';
@@ -14,13 +15,16 @@ import classes from './PickerPage.module.css';
 
 const SORT_LABELS: Record<PickerSort, string> = { recommended: 'Önerilen', name: 'Ada göre', code: 'Koda göre' };
 
-/** Hazır takım kataloğu (referans: "Hazır takım kataloğu"). Tek takım seçilir; seçim sunucudaki taslağa yazılır. */
+/**
+ * Tek ürün giydirme kataloğu (referans: "Hazır takım kataloğu"): hazır takımlar ve kaftan gibi tüm vücut tekil ürünler. Tek ürün seçilir;
+ * seçim sunucudaki taslağa yazılır. Personel yalnızca yöneticinin izin verdiği AI modeli ve kaliteyi seçebilir.
+ */
 export function OutfitSetPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { me } = useAuth();
   const session = useSession(id);
-  const products = useProducts({ type: 'OutfitSet', selectable: true, pageSize: 100 });
+  const products = useProducts({ tryOn: true, selectable: true, pageSize: 100 });
 
   if (session.isLoading || products.isLoading) {
     return (
@@ -77,6 +81,9 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
   const [sort, setSort] = useState<PickerSort>('recommended');
   const [error, setError] = useState<string | null>(null);
   const idempotencyKey = useRef<string>(crypto.randomUUID());
+  const options = useTryOnOptions();
+  const [model, setModel] = useState<{ key?: string; quality?: string }>({});
+  const overBudget = options.data ? resolvePick(options.data, model)?.quality?.exceedsJobLimit === true : false;
 
   const chips = useMemo(() => categoryChips(items), [items]);
   const visible = useMemo(() => filterProducts(items, deferredQuery, categoryId, sort), [items, deferredQuery, categoryId, sort]);
@@ -96,7 +103,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
     setError(null);
     try {
       await flush();
-      const job = await start.mutateAsync({ idempotencyKey: idempotencyKey.current, photoId });
+      const job = await start.mutateAsync({ idempotencyKey: idempotencyKey.current, photoId, modelKey: model.key ?? null, quality: model.quality ?? null });
       void navigate(`/prova/${sessionId}/uretim/${job.id}`);
     } catch (e) {
       setError(errorMessage(e instanceof ApiError ? e.code : 'UNKNOWN'));
@@ -105,13 +112,13 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
 
   return (
     <main className="sp-page sp-page--with-bar">
-      <FlowHeader title="Hazır takımlar" back={onBack} />
+      <FlowHeader title="Hazır takım ve kaftanlar" back={onBack} />
       <StepProgress steps={tr.steps.tryOn} current={2} />
 
       <h1 className="sp-title">Bir takım, bambaşka bir his.</h1>
       <p className="sp-lead">
         {label ? `${label} · ` : ''}
-        {code} için bir takım seç.
+        {code} için bir takım veya kaftan seç.
       </p>
 
       <div className={classes.tools}>
@@ -139,7 +146,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
           </span>
         </div>
         <div className={classes.countRow}>
-          <span className={classes.count}>{visible.length} takım · Tüm renkler</span>
+          <span className={classes.count}>{visible.length} ürün · Tüm renkler</span>
           <Menu position="bottom-end" shadow="md" radius="md">
             <Menu.Target>
               <button type="button" className={classes.sortButton} aria-label={`Sıralama: ${SORT_LABELS[sort]}`}>
@@ -159,7 +166,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
 
       {loadError ? <ErrorState error={loadError} /> : null}
       {!loadError && visible.length === 0 ? (
-        <EmptyState title="Takım bulunamadı" description={items.length === 0 ? 'Katalogda AI\'ya hazır hazır takım yok. Yönetici ürün eklemeli.' : 'Arama veya filtreyi değiştirin.'} />
+        <EmptyState title="Ürün bulunamadı" description={items.length === 0 ? 'Katalogda AI\'ya hazır takım veya kaftan yok. Yönetici ürün eklemeli.' : 'Arama veya filtreyi değiştirin.'} />
       ) : (
         <ul className="sp-grid" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {visible.map((product) => {
@@ -188,21 +195,96 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
       <StickyActionBar>
         <div className={classes.barHead}>
           <div className={classes.barText}>
-            <Eyebrow tone="muted">{selectedProduct ? '1 takım seçildi' : 'Takım seçin'}</Eyebrow>
+            <Eyebrow tone="muted">{selectedProduct ? '1 ürün seçildi' : 'Takım veya kaftan seçin'}</Eyebrow>
             <span className={classes.barName}>{selectedProduct ? `${selectedProduct.name} · ${selectedProduct.code}` : 'Henüz seçim yapılmadı'}</span>
           </div>
           <span className={classes.barReady}>
             <CheckIcon size={14} /> Fotoğraf hazır
           </span>
         </div>
+        {options.data ? (
+          <ModelPicker
+            options={options.data}
+            value={model}
+            onChange={(next) => {
+              idempotencyKey.current = crypto.randomUUID(); // farklı model/kalite bilinçli yeni istektir
+              setModel(next);
+            }}
+          />
+        ) : null}
         {warnings.length > 0 ? <Notice tone="warning">Seçimde sorun var: {warnings.join(', ')}</Notice> : null}
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {saveError ? <Notice tone="warning">Seçim kaydedilemedi; tekrar dokunun.</Notice> : null}
-        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={!selectedProduct || warnings.length > 0} loading={start.isPending} onClick={() => void generate()}>
+        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={!selectedProduct || warnings.length > 0 || overBudget} loading={start.isPending} onClick={() => void generate()}>
           Üret
         </Button>
         <p className={classes.barNote}>{demo ? 'Demo üretim: gerçek yapay zekâ çağrısı yapılmaz.' : 'AI prova hazırlanır; sonuç ekranda gösterilir.'}</p>
       </StickyActionBar>
     </main>
+  );
+}
+
+type Pick = { key?: string; quality?: string };
+
+/** Seçili (yoksa firmanın varsayılanı olan) model ve kalite. */
+function resolvePick(options: TryOnOptions, value: Pick) {
+  const model = options.models.find((m) => m.key === (value.key ?? options.defaultModel)) ?? options.models[0];
+  if (!model) return null;
+  const qualityKey = value.quality && model.qualities.some((q) => q.key === value.quality) ? value.quality : model.defaultQuality;
+  return { model, quality: model.qualities.find((q) => q.key === qualityKey) };
+}
+
+const usd = (value: number) => `$${value.toFixed(4)}`;
+
+/**
+ * AI modeli ve kalitesi. Seçenekler sunucudan (yönetici izinleri) gelir; seçim yapılmazsa firmanın varsayılanı kullanılır.
+ * Tutar tahminidir (sağlayıcı istek başına maliyet bildirmez). Tek seçenek varsa seçici gösterilmez. Yüksek maliyetli kalitede
+ * en kötü durum da gösterilir; iş başı bütçe sınırını aşan kalite seçilemez (sunucu da reddeder).
+ */
+function ModelPicker({ options, value, onChange }: { options: TryOnOptions; value: Pick; onChange: (next: Pick) => void }) {
+  const pick = resolvePick(options, value);
+  if (!pick) return null;
+  const { model, quality } = pick;
+  const qualityKey = quality?.key ?? model.defaultQuality;
+  const single = options.models.length === 1 && model.qualities.length === 1;
+
+  return (
+    <div className={classes.modelPicker}>
+      {single ? null : (
+        <div className={classes.modelFields}>
+          <Select
+            label="AI modeli"
+            size="sm"
+            value={model.key}
+            allowDeselect={false}
+            data={options.models.map((m) => ({ value: m.key, label: m.displayName }))}
+            onChange={(v) => v && onChange({ key: v, quality: undefined })}
+          />
+          <Select
+            label="Kalite"
+            size="sm"
+            value={qualityKey}
+            allowDeselect={false}
+            disabled={model.qualities.length < 2}
+            data={model.qualities.map((q) => ({
+              value: q.key,
+              label: `${q.label}${q.highCost ? ' · yüksek maliyet' : ''}${q.exceedsJobLimit ? ' · bütçe sınırı aşılıyor' : ''}`,
+              disabled: q.exceedsJobLimit,
+            }))}
+            onChange={(v) => v && onChange({ key: model.key, quality: v })}
+          />
+        </div>
+      )}
+      <p className={classes.barNote}>
+        {model.displayName}
+        {quality ? ` · ${quality.label}` : ''}
+        {options.live && quality ? ` · tahmini ≈ ${usd(quality.estimatedUsd)}` : ''}
+        {options.live && quality?.highCost ? ` (en fazla ${usd(quality.worstCaseUsd)})` : ''}
+        {options.live ? '' : ' · demo: ücret yok'}
+      </p>
+      {quality?.exceedsJobLimit ? (
+        <Notice tone="warning">Bu kalitenin en kötü durum maliyeti iş başı bütçe sınırını aşıyor. Başka bir kalite seçin veya yöneticinize danışın.</Notice>
+      ) : null}
+    </div>
   );
 }

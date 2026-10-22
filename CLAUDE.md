@@ -14,12 +14,13 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 ## Durum
 
 | Aşama | Durum |
-|---|---|
+| --- | --- |
 | 0 Analiz ve planlama | ✅ tamamlandı (`docs/`) |
 | 1 Proje iskeleti | ✅ tamamlandı |
 | 2 Katalog ve prova akışı (mock AI) | ✅ tamamlandı |
 | 3 TV senkronizasyonu | ✅ kod tamamlandı (gerçek mağaza TV'sinde deneme **yapılmadı**, Aşama 6'da zorunlu) — Aşama 4'e geçiş için kullanıcı onayı bekleniyor |
 | 4 Gerçek AI entegrasyonu (FASHN, Gemini) | ✅ kod tamamlandı (mock/sözleşme testleri geçti); **canlı API testi yapılmadı, ücretli çağrılar kapalı** — canlı test ve Aşama 5 için kullanıcı onayı bekleniyor ([docs/11](docs/11-ai-entegrasyon-plani-ve-test.md)) |
+| 4b Tek kaftan modelleri (Seedream 5 Flash, GPT Image 2.5, Pruna) | ✅ kod tamamlandı, mock/sözleşme testleri geçti; **canlı test onay bekliyor** ([docs/12](docs/12-tek-kaftan-model-entegrasyonu.md)) |
 | 5 Revizyon motoru (Gemini edit, SAM 2 + OpenCV) | bekliyor (onay gerekir) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
@@ -30,7 +31,7 @@ Onaylı kararlar: K1 hazır takım = FASHN Try-On Max, serbest kombin = Gemini N
 Plan `docs/` altında; ayrıntı orada, burada yinelenmez. Başlangıç: [docs/README.md](docs/README.md).
 
 | Belge | Konu |
-|---|---|
+| --- | --- |
 | [01-gereksinim-analizi](docs/01-gereksinim-analizi.md) | Gereksinimler, eksik/çelişkili kararlar (K1–K12) |
 | [02-sistem-mimarisi](docs/02-sistem-mimarisi.md) | Bileşenler, iş akışı, klasör yapısı |
 | [03-veri-modeli](docs/03-veri-modeli.md) | ER modeli, tablolar |
@@ -42,6 +43,7 @@ Plan `docs/` altında; ayrıntı orada, burada yinelenmez. Başlangıç: [docs/R
 | [09-gorev-listesi](docs/09-gorev-listesi.md) | Aşama 1–6 görevleri ve çıkış kriterleri |
 | [10-test-ve-kabul](docs/10-test-ve-kabul.md) | Kabul kriterleri, test planı |
 | [11-ai-entegrasyon-plani-ve-test](docs/11-ai-entegrasyon-plani-ve-test.md) | **Aşama 4**: doğrulanan API bilgileri, bütçe kapıları, onay bekleyen canlı test planı |
+| [12-tek-kaftan-model-entegrasyonu](docs/12-tek-kaftan-model-entegrasyonu.md) | **Güncel modeller**: Seedream/GPT Image/Pruna, model-kalite ayarları, KVKK (Pruna saklama), canlı test planı |
 
 `docs/design/reference.png` = Figma referansı (dört ekran). `docs/screenshots/asama-2/` = Aşama 2 ekran görüntüleri.
 
@@ -56,6 +58,7 @@ Modüler monolit + ayrı Python servisi. Mikroservis, Redis, mesaj kuyruğu yok.
 - `.local/` (taşınabilir PostgreSQL 18, port 5433), `storage/` (yerel dosya deposu) git'e girmez.
 
 Temel kararlar:
+
 - **Firma izolasyonu:** `ITenantOwned` + EF global query filter. **Şube izolasyonu:** `X-Store-Id` başlığı + `StoreAccessFilter` (rol kontrolü) + `IStoreOwned` filtresi. Filtre değerleri sorgu anında `TenantContext`'ten okunur (ara katman/endpoint filtresi doldurur). Katalog yönetimi: firmadaki herhangi bir şubede Manager+ (`OrganizationRoleFilter`).
 - **Sağlayıcıdan bağımsız üretim:** `GenerationStrategy` (yapılandırmadan) iş tipine göre sağlayıcı/model seçer; adapter'lar `ITryOnProvider`, `IImageGenerationProvider`, `IImageEditProvider`; mock modda bile yapılandırılmış model adı kaydedilir. Kullanıcı prompt yazmaz (`PromptBuilder` sunucuda üretir).
 - **İş kuyruğu PostgreSQL'de:** `generation_jobs`, `FOR UPDATE SKIP LOCKED`, lease/yeniden kuyruğa alma, geçici hata geri çekilmesi, sürüm numarası için oturum başına advisory lock. `GenerationWorker` + `GenerationProcessor` (Infrastructure), bildirim `IJobNotifier` (SignalR uygulaması Api'de).
@@ -79,15 +82,21 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 **Fiyat/performans:** FASHN varsayılanı **balanced + 1k (2 kredi ≈ 0,15 $)**; 2k (3 kredi) alternatif. Yönetici `/maliyet` ekranından (`GET/PUT /admin/ai-quality`, firma ayarı `OrganizationSettings.FashnResolution/FashnGenerationMode`) değiştirir; maliyet tahmini ve bütçe kapısı seçime göre hesaplanır. 1K/2K sadakat farkı **canlı testte** karşılaştırılacak (kalite kanıtlanmadan ucuz seçenek yeterli sayılmaz).
 **Ücretli çağrı kapıları (hepsi gerekli):** `Generation:UseMockProviders=false` + `Generation:Budget:AllowPaidCalls=true` + API anahtarı (`Ai__Fashn__ApiKey`, `Ai__Gemini__ApiKey` ortam değişkeni; kaynağa yazılmaz) + bütçe. Varsayılanlar kapalıdır. **Proje sahibinin ayrı onayı olmadan gerçek API çağrısı yapılmaz.**
 
+## Aşama 4b'de gelenler (tek kaftan modelleri)
+
+`TryOnModels` kataloğu + `TryOnPolicyResolver` (firma ayarı: etkin modeller, izinli kaliteler, varsayılanlar), `FalQueueClient` + `FalSeedreamTryOnProvider` + `FalGptImageTryOnProvider`, `PrunaTryOnProvider`, `GET/PUT /admin/ai-models`, `GET /ai/try-on-options`, üretim isteğinde `modelKey`/`quality` (işe sabitlenir; parmak izine dahil), tek kaftan akışı (`CombinationRules.IsSingleTryOnItem`, `/products?tryOn=true`), gerçek modda kombin kapalı (`Generation:LiveFreeCombinationEnabled=false`), kullanım kaydında kalite. Varsayılan model **Seedream 5 Flash**; GPT Image varsayılan kalite **medium**; GPT'nin altı kalitesi (auto/low/medium/high/xhigh/max) desteklenir, auto/xhigh/max varsayılan kapalı (yönetici açar). GPT maliyeti `GptImagePricing` ile kalite × çıktı boyutu + referans görseller + prompt + görsel sayısından hesaplanır (docs/12 §2a); en kötü durumu iş başı sınırı aşan kalite `QUALITY_OVER_BUDGET` ile reddedilir. FASHN eski/pasif (kod korunur). Anahtarlar: `Ai__Fal__ApiKey`, `Ai__Pruna__ApiKey`.
+
 ## Yerel çalıştırma
 
 Ayrıntı: [README.md](README.md). Özet (PowerShell, .NET 10 kullanıcı klasöründe kurulu — her oturumda önce `. ./scripts/dev-env.ps1`):
+
 ```powershell
 ./scripts/db.ps1 start                                   # PostgreSQL (ilk kurulum: db.ps1 init)
 cd backend; dotnet run --project src/SanalProva.Api --launch-profile http   # :5080
 ./scripts/image-worker.ps1                               # :8090 (isteğe bağlı; Aşama 5)
 cd frontend; npm run dev                                 # :5173, /tv → TV girişi
 ```
+
 Tarayıcı E2E (iki ayrı tarayıcı: personel + TV; API ve Vite'ı kendisi başlatır, yerel `sanalprova_dev` ve demo katalog kullanır, kendi kayıtlarını siler): `cd frontend; npm run test:e2e` (PostgreSQL açık olmalı; parola `E2E_PASSWORD` veya user-secrets `Seed:DevPassword`).
 Testler: `cd backend; dotnet test --solution SanalProva.slnx` (entegrasyon testleri gerçek `sanalprova_test` DB kullanır; `dotnet test` .NET 10'da `--solution`/`--project` ister) · `cd frontend; npm run typecheck; npm run lint; npm test; npm run build` · `cd image-worker; .venv\Scripts\python -m pytest`.
 Demo hesaplar: `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@lal.local` (Owner); parola `dotnet user-secrets list --project backend/src/SanalProva.Api` içindeki `Seed:DevPassword`. Gizli değerlerin hepsi user-secrets'ta (`db.ps1 init` üretir). Giriş hız sınırı 5/dk/IP; çok girişli otomasyonda `Security__LoginRateLimitPerMinute` yükseltilir.
@@ -111,15 +120,21 @@ Demo hesaplar: `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@
 - **Çift ücret:** başarısız FASHN tahmini ücretsiz (yeni tahmin açılabilir), ama **zaman aşımında aynı tahmin sorgulanmalı** (`ProviderRequestId`); geçersiz çıktıyı otomatik yeniden deneme yok; iptal edilen/çağrısı başlamış iş en kötü durum maliyetiyle kaydedilir.
 - **Entegrasyon testlerinde "gerçek sağlayıcı" yolu:** ana test host'u mock'tur ve paralel worker'ı iş kapar. Ayarları değiştirmek yerine `PaidProviderPipelineTests` kendi `ServiceCollection`'ını kurar, işi "Running" yazar ve `GenerationProcessor.ProcessClaimedAsync` ile çalıştırır. Gerçek-mod HTTP doğrulaması için `RealModeApiFactory` (worker yoklaması 1 saat) kullanılır.
 - **C# test verisi:** enterpolasyonlu ham dizede (`$$` + üç tırnak) `}}` ile biten JSON için bir `$` daha gerekir; `Options(...)` adlı yardımcı `Options.Create`'i gölgeler.
+- **fal kuyruk adresleri:** gönderim tam model yoluna (`bytedance/seedream/v5/flash/edit`), durum/sonuç/iptal **sahip/uygulama** yoluna (`bytedance/seedream/requests/{id}/status`) gider (doküman: tam yol 405). Seedream kimliğinde `fal-ai/` öneki YOK (404). fal ve Pruna istek başına maliyet döndürmez: maliyet tahmindir.
+- **GPT Image fiyat tablosu boyutla tekdüze değil** (1024×1024, 1024×1536'dan pahalı): en kötü durum o boyuta kadarki en pahalı satırı alır. `auto` kalitesi en kötü durumda max sütunudur. Yapılandırmadaki fiyat ezmesi yalnızca tahmini/en kötüyü ayrı ayrı ezer; en kötü durum tahminden küçük olamaz.
+- **Pruna base64 kabul etmez:** görseller `/v1/files`'a geçici yüklenir (otomatik silme, elle silme yok). KVKK notu docs/12 §4.
+- **İki test sunucusu aynı DB'yi paylaşırken** (`RealModeApiFactory`) aynı depolama kökünü kullanmalı; yoksa ana worker diğerinin işini "girdi görseli yok" ile başarısız eder.
+- **VS Code NETSDK1045 (Problems panelinde ~220 hata):** C# Dev Kit proje sistemi SDK'yı VS Code sürecinin **PATH**'inden bulur (`dotnet.dotnetPath` yalnızca dil sunucusunun çalışma zamanını değiştirir). Sistemde yalnızca SDK 8 varken projeler yüklenemiyordu; çözüm .NET 10 SDK'nın sistem genelinde kurulmasıydı (2026-10-22). Proje yüklenmezken görülen CS0518/CS0246 ve "gereksiz using" (IDE0005) kayıtları bunun yan etkisidir; CLI build'i etkilemez.
 - SkiaSharp 4: `SKPath` değiştirici yöntemleri kullanımdan kalkıyor (yalnızca dev `DemoArt.cs` dosyasında CS0618 bastırıldı).
 - Windows PowerShell 5.1 (`RandomNumberGenerator.Fill` yok, `-Environment` yok), `.ps1` dosyaları UTF-8 BOM + CRLF olmalı; bash heredoc'ta çok dosya yazmak kırılgan — dosyaları Write ile yaz.
 - `.NET 10` Minimal API: form endpoint'lerinde `.DisableAntiforgery()` (grup filtresi zaten CSRF'i doğrular); `AddValidation()` DataAnnotations'ı çalıştırır; bağlama hataları `BadRequestExceptionHandler` ile 4xx döner.
 
 ## Sıradaki işler
 
-**Aşama 3 ve 4 kodu tamamlandı.** Aşama 4'ün canlı API testi onay bekliyor (docs/11 §5); Aşama 5 (SAM 2 + OpenCV + maskeli birleştirme) onaysız başlanmaz. Açık: gerçek mağaza TV'sinde uyumluluk denemesi (WebSocket/SSE, ES2019, CSS değişkenleri, `localStorage`), QR ile eşleştirme (bağımlılık gerektirir, yapılmadı), çoklu sunucu için SignalR backplane. Aşağıdaki Aşama 3 listesi tarihçedir.
+**Aşama 3, 4 ve 4b kodu tamamlandı.** 4b canlı testi (Seedream/GPT/Pruna, ≈ 0,06 $) onay bekliyor (docs/12 §6). Aşama 4'ün canlı API testi onay bekliyor (docs/11 §5); Aşama 5 (SAM 2 + OpenCV + maskeli birleştirme) onaysız başlanmaz. Açık: gerçek mağaza TV'sinde uyumluluk denemesi (WebSocket/SSE, ES2019, CSS değişkenleri, `localStorage`), QR ile eşleştirme (bağımlılık gerektirir, yapılmadı), çoklu sunucu için SignalR backplane. Aşağıdaki Aşama 3 listesi tarihçedir.
 
 **Aşama 3 — TV senkronizasyonu** (tasarım: [06-tv-signalr](docs/06-tv-signalr.md), görevler: [09 §Aşama 3](docs/09-gorev-listesi.md)):
+
 0. Mağazadaki gerçek TV tarayıcısında uyumluluk denemesi (WebSocket, ES2019, localStorage) — risk önce kapatılır.
 1. `display_devices` / `display_pairings` varlıkları migration'da var; eşleştirme API'si (geçici kod 5 dk, QR, kod/secret hash, tek seferlik cihaz belirteci), cihaz belirteci kimlik doğrulaması (`DisplayHub` şu an `DisplayDevice` politikasıyla tüm bağlantıları reddediyor), `DisplayHub` grupları, heartbeat, çevrimiçi durumu.
 2. TV uygulaması (`frontend/src/tv`, şu an iskelet): kod/QR → bekleme → tekli/karşılaştırma modları, yeniden bağlanma + durum geri yükleme, uzun kopmada görseli gizleme, otomatik temizleme.

@@ -29,6 +29,18 @@ public sealed class OrganizationSettings
     /// <summary>Hazır takım (FASHN) çözünürlüğü: "1k" veya "2k". null = sunucu yapılandırmasındaki varsayılan (balanced + 1k).</summary>
     public string? FashnResolution { get; set; }
 
+    /// <summary>Tek ürün giydirmede varsayılan model anahtarı. null = sistem varsayılanı (Seedream 5 Flash).</summary>
+    public string? DefaultTryOnModel { get; set; }
+
+    /// <summary>Personelin kullanabileceği model anahtarları. null = eski olmayan tüm modeller.</summary>
+    public List<string>? EnabledTryOnModels { get; set; }
+
+    /// <summary>İzin verilen kaliteler, "model:kalite" biçiminde (ör. "gpt-image-2.5:medium"). Listede adı geçmeyen model için tüm kaliteler serbesttir.</summary>
+    public List<string>? AllowedTryOnQualities { get; set; }
+
+    /// <summary>Model başına varsayılan kalite, "model:kalite" biçiminde. Yoksa modelin sistem varsayılanı (GPT Image için medium).</summary>
+    public List<string>? DefaultTryOnQualities { get; set; }
+
     /// <summary>Hazır takım (FASHN) üretim modu: "fast", "balanced" veya "quality". null = sunucu varsayılanı.</summary>
     public string? FashnGenerationMode { get; set; }
 }

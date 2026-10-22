@@ -80,6 +80,12 @@ public sealed class GenerationJob : Entity, IStoreOwned
     /// <summary>Aynı fotoğraf + aynı seçim + aynı iş tipi için özet. Gerçek sağlayıcıda aynı isteğin ikinci kez ücretlendirilmesini önler.</summary>
     public string? RequestFingerprint { get; init; }
 
+    /// <summary>Tek ürün giydirmede seçilen model anahtarı (ör. <c>seedream-5-flash</c>). İstek anında sabitlenir; yeniden denemeler aynı modeli kullanır.</summary>
+    public string? ModelKey { get; init; }
+
+    /// <summary>Seçilen kalite (ör. GPT Image için <c>medium</c>). Maliyet tahmini ve kullanım kaydı buna göre yapılır.</summary>
+    public string? Quality { get; init; }
+
     public required string IdempotencyKey { get; init; }
     public int Attempt { get; set; }
     public int MaxAttempts { get; set; } = 3;
@@ -136,6 +142,9 @@ public sealed class AiUsageLog : Entity, IStoreOwned
     public required string Provider { get; init; }
     public required string Model { get; init; }
     public required string Operation { get; init; }
+
+    /// <summary>Kullanılan kalite seviyesi (varsa). Her kalite için ayrı maliyet izlenir.</summary>
+    public string? Quality { get; init; }
     public int Attempt { get; init; }
     public bool Success { get; init; }
     public int DurationMs { get; init; }

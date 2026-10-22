@@ -12,6 +12,7 @@ using SanalProva.Domain.Generation;
 using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
+using SanalProva.Infrastructure.Ai.TryOn;
 using SanalProva.Infrastructure.Displays;
 using SanalProva.Infrastructure.Images;
 using SanalProva.Infrastructure.Persistence;
@@ -189,10 +190,35 @@ public sealed class GenerationProcessor(
             }
 
             var isMock = resolved.Provider == GenerationStrategy.MockProvider;
+
+            // Tek ürün giydirme: model ve kalite istek anında sabitlendi (job.ModelKey/Quality); yapılandırma stratejisinin yerine geçer
+            var tryOn = job.JobType == GenerationJobType.OutfitSet && TryOnModels.Find(job.ModelKey) is { } selectedModel
+                && selectedModel.Quality(job.Quality ?? selectedModel.DefaultQuality) is { } selectedQuality
+                ? (Model: selectedModel, Quality: selectedQuality)
+                : ((TryOnModel Model, TryOnQuality Quality)?)null;
+            if (tryOn is { } t)
+            {
+                var parameters = new Dictionary<string, string>(t.Quality.Parameters) { ["model_key"] = t.Model.Key, ["tier"] = t.Quality.Key };
+                resolved = resolved with
+                {
+                    Provider = isMock ? GenerationStrategy.MockProvider : t.Model.Provider,
+                    ConfiguredProvider = t.Model.Provider,
+                    Options = new ProviderRequestOptions(t.Model.ModelId, parameters),
+                };
+            }
+
+            if (job.JobType == GenerationJobType.FreeCombination && !isMock && !settings.CurrentValue.LiveFreeCombinationEnabled)
+            {
+                // Çok parçalı kombin gerçek modelle doğrulanmadı: gerçek modda çalışıyormuş gibi gösterilmez (API de reddeder; bu ikinci savunma hattı)
+                throw new ProviderException(GenerationErrorCode.ProviderNotConfigured, "Beş parçalı kombin gerçek modda henüz etkin değil.", retryable: false);
+            }
+
             var previousProvider = job.Provider;
             job.Provider = resolved.Provider;
             job.Model = resolved.Options.Model;
-            job.PromptTemplateVersion = isMock ? DemoPromptVersion : job.JobType == GenerationJobType.FreeCombination ? PromptBuilder.FreeCombinationVersion : PromptBuilder.OutfitSetVersion;
+            job.PromptTemplateVersion = isMock ? DemoPromptVersion
+                : tryOn is { } v ? (v.Model.Provider == "Pruna" ? PromptBuilder.PrunaTryOnVersion : v.Model.Provider == "Fashn" ? PromptBuilder.OutfitSetVersion : PromptBuilder.SingleGarmentVersion)
+                : job.JobType == GenerationJobType.FreeCombination ? PromptBuilder.FreeCombinationVersion : PromptBuilder.OutfitSetVersion;
             job.Stage = GenerationStage.Generating;
             await db.SaveChangesAsync(ct);
             await NotifyAsync(job, null, ct);
@@ -201,15 +227,31 @@ public sealed class GenerationProcessor(
 
             // Önceki denemede sağlayıcıya gönderilmiş ve sonucu alınamamış tahmin varsa yenisi açılmaz (çift ücret yok)
             var resumeId = !isMock && previousProvider == resolved.Provider ? job.ProviderRequestId : null;
+            if (tryOn is { } prompted && prompted.Model.Provider is "FalSeedream" or "FalGptImage")
+            {
+                // Görsel düzenleme modelleri talimatla çalışır: talimat katalog verisinden sunucuda üretilir
+                var garment = inputs.Garments[0];
+                var parameters = new Dictionary<string, string>(resolved.Options.Parameters)
+                {
+                    ["prompt"] = PromptBuilder.BuildSingleGarment(garment.Category.Name, garment.Product.Name, garment.ColorName, garment.Product.ProductType == ProductType.OutfitSet),
+                };
+                resolved = resolved with { Options = resolved.Options with { Parameters = parameters } };
+            }
+
             if (!isMock)
             {
-                var capability = ModelCatalog.CheckCapability(resolved.ConfiguredProvider, resolved.Options.Model, job.JobType);
-                if (capability is not null)
+                if (tryOn is null)
                 {
-                    throw new ProviderException(GenerationErrorCode.ProviderNotConfigured, capability, retryable: false);
+                    var capability = ModelCatalog.CheckCapability(resolved.ConfiguredProvider, resolved.Options.Model, job.JobType);
+                    if (capability is not null)
+                    {
+                        throw new ProviderException(GenerationErrorCode.ProviderNotConfigured, capability, retryable: false);
+                    }
                 }
 
-                worstCase = costs.WorstCasePerCallUsd(resolved.ConfiguredProvider, resolved.Options.Model, resolved.Options.Parameters, inputs.Garments.Count + 1);
+                worstCase = tryOn is { } priced
+                    ? TryOnModels.Price(priced.Model, priced.Quality, settings.CurrentValue.Pricing, ProviderHttp.CostInput(resolved.Options, inputs.Person, inputs.Garments[0].Image)).WorstCase
+                    : costs.WorstCasePerCallUsd(resolved.ConfiguredProvider, resolved.Options.Model, resolved.Options.Parameters, inputs.Garments.Count + 1);
                 if (resumeId is null)
                 {
                     await budget.EnsureAllowedAsync(db, job.OrganizationId, job.Id, worstCase, ct);
@@ -287,7 +329,7 @@ public sealed class GenerationProcessor(
                 db.AiUsageLogs.Add(new AiUsageLog
                 {
                     OrganizationId = job.OrganizationId, StoreId = job.StoreId, JobId = job.Id, Provider = resolved.Provider, Model = resolved.Options.Model,
-                    Operation = job.JobType.ToString(), Attempt = job.Attempt, Success = false, DurationMs = (int)stopwatch.ElapsedMilliseconds,
+                    Operation = job.JobType.ToString(), Quality = job.Quality, Attempt = job.Attempt, Success = false, DurationMs = (int)stopwatch.ElapsedMilliseconds,
                     EstimatedCostUsd = worstCase, ProviderRequestId = job.ProviderRequestId,
                 });
                 await db.SaveChangesAsync(CancellationToken.None);
@@ -315,7 +357,7 @@ public sealed class GenerationProcessor(
     private static AiUsageLog UsageLog(GenerationJob job, ProviderResult result, long elapsedMs, bool success, GenerationErrorCode? errorCode) => new()
     {
         OrganizationId = job.OrganizationId, StoreId = job.StoreId, JobId = job.Id,
-        Provider = result.Provider, Model = result.Model, Operation = job.JobType.ToString(), Attempt = job.Attempt,
+        Provider = result.Provider, Model = result.Model, Operation = job.JobType.ToString(), Quality = job.Quality, Attempt = job.Attempt,
         Success = success, DurationMs = (int)elapsedMs, CreditsUsed = result.Usage.Credits,
         InputTokens = result.Usage.InputTokens, OutputTokens = result.Usage.OutputTokens,
         EstimatedCostUsd = result.Usage.EstimatedCostUsd, ActualCostUsd = result.Usage.ActualCostUsd,
@@ -466,7 +508,7 @@ public sealed class GenerationProcessor(
         db.AiUsageLogs.Add(new AiUsageLog
         {
             OrganizationId = job.OrganizationId, StoreId = job.StoreId, JobId = job.Id,
-            Provider = resolved?.Provider ?? "unknown", Model = resolved?.Options.Model ?? "unknown", Operation = job.JobType.ToString(),
+            Provider = resolved?.Provider ?? "unknown", Model = resolved?.Options.Model ?? "unknown", Operation = job.JobType.ToString(), Quality = job.Quality,
             Attempt = job.Attempt, Success = false, DurationMs = (int)elapsedMs, ErrorCode = ex.Code,
             EstimatedCostUsd = ex.ChargedUsd, ProviderRequestId = requestId,
         });

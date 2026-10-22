@@ -160,3 +160,14 @@
     color: var(--sp-color-danger-text);
   }
 }
+
+.qualityOption {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+
+  small {
+    color: var(--sp-color-text-muted);
+  }
+}

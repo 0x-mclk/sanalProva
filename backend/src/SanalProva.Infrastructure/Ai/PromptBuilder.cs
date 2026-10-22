@@ -22,6 +22,33 @@ public static class PromptBuilder
 
     public const string ProductSwapVersion = "product-swap.v1";
 
+    /// <summary>Görsel düzenleme modelleriyle (Seedream, GPT Image) tek ürün giydirme talimatı.</summary>
+    public const string SingleGarmentVersion = "single-garment.v1";
+
+    /// <summary>Pruna P-Image Try-On'a serbest metin gönderilmez (<c>prompt</c> deneysel ve isteğe bağlı); sürüm kaydı izlenebilirlik içindir.</summary>
+    public const string PrunaTryOnVersion = "pruna-tryon.v1";
+
+    /// <summary>
+    /// Tek kaftan / hazır takım giydirme. Görsel 1 = kişi, Görsel 2 = ürün fotoğrafı. Yüz/poz/arka plan korunması ve ürün sadakati vurgulanır;
+    /// garanti değildir (çıktı insan gözüyle değerlendirilir).
+    /// </summary>
+    public static string BuildSingleGarment(string categoryName, string productName, string? colorName, bool isCompleteSet)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(categoryName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(productName);
+        var color = string.IsNullOrWhiteSpace(colorName) ? string.Empty : $", color: {colorName}";
+        var garment = isCompleteSet ? "the complete outfit (all pieces) shown in Image 2" : $"the {categoryName} shown in Image 2";
+        var text = new StringBuilder();
+        text.AppendLine("Image 1 is a full-body photo of a real person. Image 2 is a product photo of a real garment from a store.");
+        text.AppendLine(CultureInfo.InvariantCulture, $"Dress the person in Image 1 with {garment} ({productName}{color}), replacing the clothing they are wearing where the garment covers the body.");
+        text.AppendLine("Strict requirements:");
+        text.AppendLine("- Keep the person's face, identity, hair, skin tone, body shape, pose, hands and the background exactly the same as Image 1.");
+        text.AppendLine("- Reproduce the garment's cut, fabric, pattern, gold embroidery, ornaments and color as faithfully as possible. Do not invent new ornaments or change colors.");
+        text.AppendLine("- Do not add any accessories, crowns, headpieces, jewelry, bags, shoes or extra garments that are not in Image 2.");
+        text.AppendLine("- Photorealistic, natural lighting matching Image 1. Output a single full-body image with the same framing and aspect ratio as Image 1.");
+        return text.ToString();
+    }
+
     public static string BuildFreeCombination(IReadOnlyList<GarmentReference> garments)
     {
         ArgumentNullException.ThrowIfNull(garments);

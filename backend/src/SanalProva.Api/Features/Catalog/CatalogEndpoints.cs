@@ -119,7 +119,7 @@ public static class CatalogEndpoints
     private static async Task<IResult> ListProductsAsync(
         AppDbContext db, CurrentUser user, ImageLinks links, CancellationToken ct,
         ProductType? type = null, Guid? categoryId = null, string? q = null,
-        string status = "active", bool selectable = false, string sort = "recommended", int page = 1, int pageSize = 24)
+        string status = "active", bool selectable = false, string sort = "recommended", int page = 1, int pageSize = 24, bool tryOn = false)
     {
         var canManage = user.Role >= StoreRole.Manager;
         page = Math.Max(1, page);
@@ -149,6 +149,12 @@ public static class CatalogEndpoints
         {
             var pattern = $"%{q.Trim().Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
             query = query.Where(p => EF.Functions.ILike(p.Name, pattern) || EF.Functions.ILike(p.Code, pattern));
+        }
+
+        if (tryOn)
+        {
+            // Tek ürün giydirme: hazır takımlar + tüm vücut tekil ürünler (kaftan)
+            query = query.Where(p => p.ProductType == ProductType.OutfitSet || (p.ProductType == ProductType.Single && p.Category!.BodyZone == BodyZone.FullBody));
         }
 
         if (selectable)

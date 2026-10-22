@@ -1,5 +1,7 @@
 # 07 — AI Entegrasyon Stratejisi
 
+> **Güncelleme (2026-10-22):** Tek ürün (tek kaftan / hazır takım) giydirmede proje sahibinin model testlerinden sonra **Seedream 5 Flash Edit** (varsayılan), **GPT Image 2.5 Sunburst Edit** (varsayılan kalite medium) ve **Pruna P-Image Try-On** seçildi: [12](12-tek-kaftan-model-entegrasyonu.md). FASHN adapter'ı **eski (pasif)**; Gemini yalnızca gerçek modda kapalı olan beş parçalı kombin içindir. Aşağıdaki bölümler tarihçe ve eski adapter'ların belgesidir.
+
 ## 1. Doğrulanan sağlayıcı bilgileri (2026-10-20 itibarıyla resmî dokümandan)
 
 ### FASHN — Try-On Max

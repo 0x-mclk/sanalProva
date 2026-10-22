@@ -217,6 +217,14 @@
               "format": "int32",
               "default": 24
             }
+          },
+          {
+            "name": "tryOn",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
@@ -720,6 +728,25 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/try-on-options": {
+      "get": {
+        "tags": [
+          "Generation"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TryOnOptionsDto"
                 }
               }
             }
@@ -1606,6 +1633,52 @@
         }
       }
     },
+    "/api/v1/admin/ai-models": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelSettingsDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelSettingsDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/dev/status": {
       "get": {
         "tags": [
@@ -1707,6 +1780,137 @@
   },
   "components": {
     "schemas": {
+      "AdminTryOnModelDto": {
+        "required": [
+          "key",
+          "displayName",
+          "providerModelId",
+          "note",
+          "legacy",
+          "liveVerified",
+          "priceSource",
+          "enabled",
+          "allowedQualities",
+          "defaultQuality",
+          "qualities"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "providerModelId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "legacy": {
+            "type": "boolean"
+          },
+          "liveVerified": {
+            "type": "boolean"
+          },
+          "priceSource": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowedQualities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultQuality": {
+            "type": "string"
+          },
+          "qualities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TryOnQualityDto"
+            }
+          }
+        }
+      },
+      "AiModelSettingRequest": {
+        "required": [
+          "key",
+          "enabled",
+          "allowedQualities",
+          "defaultQuality"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "allowedQualities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultQuality": {
+            "type": "string"
+          }
+        }
+      },
+      "AiModelSettingsDto": {
+        "required": [
+          "defaultModel",
+          "live",
+          "maxJobCostUsd",
+          "models"
+        ],
+        "type": "object",
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "maxJobCostUsd": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminTryOnModelDto"
+            }
+          }
+        }
+      },
+      "AiModelSettingsRequest": {
+        "required": [
+          "defaultModel",
+          "models"
+        ],
+        "type": "object",
+        "properties": {
+          "defaultModel": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiModelSettingRequest"
+            }
+          }
+        }
+      },
       "AiQualityDto": {
         "required": [
           "resolution",
@@ -2426,7 +2630,8 @@
           "isColorPreview",
           "isFavorite",
           "createdAt",
-          "urls"
+          "urls",
+          "aiModel"
         ],
         "type": "object",
         "properties": {
@@ -2467,6 +2672,12 @@
           },
           "urls": {
             "$ref": "#/components/schemas/ImageUrls"
+          },
+          "aiModel": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -2560,7 +2771,10 @@
           "finishedAt",
           "provider",
           "model",
-          "isDemo"
+          "isDemo",
+          "modelKey",
+          "quality",
+          "modelLabel"
         ],
         "type": "object",
         "properties": {
@@ -2661,6 +2875,24 @@
           },
           "isDemo": {
             "type": "boolean"
+          },
+          "modelKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quality": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "modelLabel": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3547,7 +3779,8 @@
           "versionCount",
           "photo",
           "result",
-          "resultIsDemo"
+          "resultIsDemo",
+          "resultAiModel"
         ],
         "type": "object",
         "properties": {
@@ -3608,6 +3841,12 @@
           },
           "resultIsDemo": {
             "type": "boolean"
+          },
+          "resultAiModel": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3718,6 +3957,18 @@
           "allowVariation": {
             "type": "boolean",
             "default": false
+          },
+          "modelKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quality": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -3783,6 +4034,111 @@
                 "$ref": "#/components/schemas/GenerationJobType"
               }
             ]
+          }
+        }
+      },
+      "TryOnModelOptionDto": {
+        "required": [
+          "key",
+          "displayName",
+          "note",
+          "liveVerified",
+          "defaultQuality",
+          "qualities"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "liveVerified": {
+            "type": "boolean"
+          },
+          "defaultQuality": {
+            "type": "string"
+          },
+          "qualities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TryOnQualityDto"
+            }
+          }
+        }
+      },
+      "TryOnOptionsDto": {
+        "required": [
+          "live",
+          "freeCombinationEnabled",
+          "defaultModel",
+          "models"
+        ],
+        "type": "object",
+        "properties": {
+          "live": {
+            "type": "boolean"
+          },
+          "freeCombinationEnabled": {
+            "type": "boolean"
+          },
+          "defaultModel": {
+            "type": "string"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TryOnModelOptionDto"
+            }
+          }
+        }
+      },
+      "TryOnQualityDto": {
+        "required": [
+          "key",
+          "label",
+          "estimatedUsd",
+          "worstCaseUsd",
+          "measuredUsd",
+          "enabledByDefault",
+          "highCost",
+          "exceedsJobLimit"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "estimatedUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "worstCaseUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "measuredUsd": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "enabledByDefault": {
+            "type": "boolean"
+          },
+          "highCost": {
+            "type": "boolean"
+          },
+          "exceedsJobLimit": {
+            "type": "boolean"
           }
         }
       },
@@ -3882,6 +4238,7 @@
         "required": [
           "provider",
           "model",
+          "quality",
           "calls",
           "successes",
           "failures",
@@ -3898,6 +4255,12 @@
           },
           "model": {
             "type": "string"
+          },
+          "quality": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "calls": {
             "type": "integer",

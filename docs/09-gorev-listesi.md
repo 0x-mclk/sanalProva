@@ -80,6 +80,8 @@ Her aşama küçük, test edilebilir görevlere bölünmüştür. **Her aşama s
 
 ## Aşama 4 — Gerçek AI entegrasyonu
 
+> **Aşama 4b (2026-10-22): tek kaftan modelleri** — Seedream 5 Flash Edit, GPT Image 2.5 Sunburst Edit, Pruna P-Image Try-On adapter'ları, yönetici model/kalite ayarları, tek kaftan akışı: kod tamamlandı, mock/sözleşme testleri geçti; **canlı test onay bekliyor** ([12 §6](12-tek-kaftan-model-entegrasyonu.md#6-canlı-test-planı--onay-bekliyor)). Beş parçalı kombin gerçek modda kapalı. Gerçek Smart TV uyumluluk testi (3.0) açık. Native istemciler için token tabanlı kimlik doğrulama açık görev.
+
 > **Durum: kod tamamlandı (mock/sözleşme testleri geçti), kullanıcı onayı bekliyor.** 4.0'daki hukuki/sözleşme değerlendirmesi ve **4.9 benchmark/canlı doğrulama yapılmadı** (ücretli çağrı onayı gerekir; plan: [11 §5](11-ai-entegrasyon-plani-ve-test.md#5-kontrollü-gerçek-api-test-planı--onay-bekliyor)). Gerçek Smart TV uyumluluk testi (3.0) açık görev olarak duruyor. Webhook ve Polly devre kesici yapılmadı (yoklama + üstel geri çekilme + bütçe kapısı yeterli bulundu; devre kesici Aşama 6'ya).
 
 | # | Görev |

@@ -1,5 +1,6 @@
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useProducts, useSaveDraft, useSession } from '../../shared/api/hooks';
+import { useTryOnOptions } from '../../shared/api/usage';
 import type { OutfitMode } from '../../shared/api/types';
 import { useAuth } from '../../shared/auth/AuthContext';
 import { tr } from '../../shared/i18n/tr';
@@ -13,7 +14,10 @@ export function ModePage() {
   const { me } = useAuth();
   const session = useSession(id);
   const saveDraft = useSaveDraft(id!);
-  const sets = useProducts({ type: 'OutfitSet', selectable: true, pageSize: 4 });
+  const sets = useProducts({ tryOn: true, selectable: true, pageSize: 4 });
+  const options = useTryOnOptions();
+  // Gerçek modda çok parçalı kombin henüz doğrulanmadı: seçenek kapalı gösterilir (sunucu da reddeder)
+  const comboDisabled = options.data ? !options.data.freeCombinationEnabled : false;
   const singles = useProducts({ type: 'Single', selectable: true, pageSize: 40 });
 
   if (session.isLoading) {
@@ -58,20 +62,20 @@ export function ModePage() {
         <button type="button" className={classes.card} onClick={() => choose('OutfitSet')} disabled={saveDraft.isPending}>
           <span className={classes.cardText}>
             <Eyebrow icon={<SparklesIcon />}>Hızlı başlangıç</Eyebrow>
-            <span className={classes.cardTitle}>Hazır Takım Seç</span>
-            <span className={classes.cardDesc}>Bindallı ve şalvar takımlarını tek seçimle deneyin.</span>
+            <span className={classes.cardTitle}>Hazır Takım veya Kaftan</span>
+            <span className={classes.cardDesc}>Bindallı, şalvar takımı ya da tek kaftanı tek seçimle deneyin.</span>
             <span className={classes.cardLink}>
-              Takımları keşfet <ArrowRightIcon size={16} />
+              Ürünleri keşfet <ArrowRightIcon size={16} />
             </span>
           </span>
           <span className={classes.cardMedia}>{setCover ? <img src={setCover.thumbUrl} alt="" /> : null}</span>
         </button>
 
-        <button type="button" className={classes.card} onClick={() => choose('FreeCombination')} disabled={saveDraft.isPending}>
+        <button type="button" className={classes.card} onClick={() => choose('FreeCombination')} disabled={saveDraft.isPending || comboDisabled} aria-describedby={comboDisabled ? 'combo-note' : undefined}>
           <span className={classes.cardText}>
             <Eyebrow icon={<LayersIcon />}>Özgürce kombinle</Eyebrow>
             <span className={classes.cardTitle}>Kendi Kombinini Oluştur</span>
-            <span className={classes.cardDesc}>Kaftan, şalvar ve aksesuarları ayrı ayrı eşleştirin.</span>
+            <span className={classes.cardDesc}>{comboDisabled ? 'Henüz etkin değil: çok parçalı kombin gerçek AI ile doğrulanana kadar kapalı.' : 'Kaftan, şalvar ve aksesuarları ayrı ayrı eşleştirin.'}</span>
             <span className={classes.cardLink}>
               Kombine başla <ArrowRightIcon size={16} />
             </span>
@@ -80,12 +84,17 @@ export function ModePage() {
         </button>
       </div>
 
+      {comboDisabled ? (
+        <p id="combo-note" className={classes.demoNote}>
+          <InfoIcon size={16} /> Çok parçalı kombin henüz etkin değil. Tek kaftan veya hazır takım deneyin.
+        </p>
+      ) : null}
       {saveDraft.isError ? <Notice tone="danger">Seçim kaydedilemedi. Tekrar deneyin.</Notice> : null}
 
       <div className={classes.tvInfo}>
         <TvIcon size={20} />
         <span>
-          <strong>Büyük ekranda birlikte karar verin.</strong> Kıyafeti seçip Üret&apos;e dokunduğunuzda prova sonucu hazırlanır. TV bağlantısı sonraki aşamada eklenecek.
+          <strong>Büyük ekranda birlikte karar verin.</strong> Kıyafeti seçip Üret&apos;e dokunduğunuzda prova sonucu hazırlanır; sonucu TV&apos;ye gönderebilirsiniz.
         </span>
       </div>
 

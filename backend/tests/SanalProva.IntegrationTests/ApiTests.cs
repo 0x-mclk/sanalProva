@@ -58,7 +58,7 @@ public sealed class HealthAndSecurityTests(ApiFactory factory)
         Assert.Empty(status.GetProperty("database").GetProperty("pendingMigrations").EnumerateArray());
         var outfitSet = status.GetProperty("strategies").EnumerateArray().Single(s => s.GetProperty("jobType").GetString() == "OutfitSet");
         Assert.Equal("Mock", outfitSet.GetProperty("provider").GetString());
-        Assert.Equal("Fashn", outfitSet.GetProperty("configuredProvider").GetString());
+        Assert.Equal("FalSeedream", outfitSet.GetProperty("configuredProvider").GetString());
     }
 }
 

@@ -4,7 +4,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 
 Mimari ve planlama: [docs/](docs/README.md) · Tasarım referansı: [docs/design/reference.png](docs/design/reference.png)
 
-> **Durum:** Aşama 4 kodu tamamlandı (onay bekliyor; **gerçek AI çağrısı yapılmadı**, ücretli çağrılar varsayılan olarak kapalı) — FASHN ve Gemini adapter'ları, bütçe kapıları ve maliyet izleme hazır. Aşama 3 kodu tamamlandı — katalog, prova akışı ve **Smart TV eşleştirme / gerçek zamanlı görüntüleme** çalışıyor. Tüm AI sağlayıcıları **mock** modda; gerçek/ücretli API çağrısı yapılmaz ve üretilen görseller **DEMO** olarak işaretlenir. Gerçek AI (Aşama 4) ve revizyon motoru (Aşama 5) henüz yok; TV uygulaması gerçek bir mağaza TV'sinde henüz denenmedi.
+> **Durum:** Aşama 4b kodu tamamlandı (onay bekliyor; **gerçek AI çağrısı yapılmadı**, ücretli çağrılar varsayılan olarak kapalı) — tek kaftan/hazır takım giydirme için Seedream 5 Flash (varsayılan), GPT Image 2.5 ve Pruna adapter'ları, yönetici model/kalite ayarları, bütçe kapıları ve maliyet izleme hazır; FASHN/Gemini eski (pasif). Aşama 3 kodu tamamlandı — katalog, prova akışı ve **Smart TV eşleştirme / gerçek zamanlı görüntüleme** çalışıyor. Tüm AI sağlayıcıları **mock** modda; gerçek/ücretli API çağrısı yapılmaz ve üretilen görseller **DEMO** olarak işaretlenir. Gerçek AI (Aşama 4) ve revizyon motoru (Aşama 5) henüz yok; TV uygulaması gerçek bir mağaza TV'sinde henüz denenmedi.
 
 ## Bileşenler
 

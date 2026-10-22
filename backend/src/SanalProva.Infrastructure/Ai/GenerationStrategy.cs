@@ -33,6 +33,12 @@ public sealed class GenerationSettings
     public PricingSettings Pricing { get; set; } = new();
 
     public BudgetSettings Budget { get; set; } = new();
+
+    /// <summary>
+    /// Gerçek modda (UseMockProviders=false) çok parçalı kombin. Henüz gerçek modelle doğrulanmadığı için varsayılan <b>kapalı</b>:
+    /// istek reddedilir, arayüz seçeneği gizler. Mock modda DEMO olarak çalışmaya devam eder.
+    /// </summary>
+    public bool LiveFreeCombinationEnabled { get; set; }
 }
 
 public sealed class StrategySettings

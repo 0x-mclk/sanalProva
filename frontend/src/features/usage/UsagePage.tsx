@@ -1,13 +1,19 @@
-import { Button, Select } from '@mantine/core';
+import { Button, Checkbox, Select } from '@mantine/core';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiError } from '../../shared/api/http';
 import { errorMessage } from '../../shared/i18n/tr';
-import { useAiQuality, useSetAiQuality, useUsageReport, type AiQuality, type UsageReport } from '../../shared/api/usage';
+import { useAiModels, useSetAiModels, useUsageReport, type AiModelSettings, type UsageReport } from '../../shared/api/usage';
 import { AppBar, ErrorState, Eyebrow, LoadingState, Notice } from '../../shared/ui';
 import classes from './UsagePage.module.css';
 
 const usd = (value: number) => `$${value.toFixed(value < 1 ? 4 : 2)}`;
+
+const QUALITY_LABELS: Record<string, string> = {
+  auto: 'Otomatik', low: 'Düşük', medium: 'Orta', high: 'Yüksek', xhigh: 'Çok yüksek', max: 'Maksimum', standard: 'Standart', turbo: 'Turbo',
+};
+
+const qualityLabel = (key: string) => QUALITY_LABELS[key] ?? key;
 
 /**
  * AI kullanım ve maliyet raporu (yönetici). Kişisel veri içermez. Tutarlar yapılandırmadaki birim fiyatlardan <b>tahmindir</b>;
@@ -24,7 +30,7 @@ export function UsagePage() {
       <div className="sp-content">
         {report.isLoading ? <LoadingState /> : null}
         {report.isError ? <ErrorState error={report.error} onRetry={() => void report.refetch()} /> : null}
-        <QualitySettings />
+        <ModelSettings />
         {report.data ? <Report report={report.data} /> : null}
       </div>
     </main>
@@ -80,12 +86,12 @@ function Report({ report }: { report: UsageReport }) {
         <div className={classes.tableWrap}>
           <table className={classes.table}>
             <thead>
-              <tr><th>Sağlayıcı / model</th><th>Çağrı</th><th>Başarısız</th><th>Yeniden</th><th>Süre</th><th>Tahmini</th></tr>
+              <tr><th>Sağlayıcı / model / kalite</th><th>Çağrı</th><th>Başarısız</th><th>Yeniden</th><th>Süre</th><th>Tahmini</th></tr>
             </thead>
             <tbody>
               {report.byModel.map((row) => (
-                <tr key={`${row.provider}/${row.model}`}>
-                  <td>{row.provider} · {row.model}</td>
+                <tr key={`${row.provider}/${row.model}/${row.quality ?? ''}`}>
+                  <td>{row.provider} · {row.model}{row.quality ? ` · ${qualityLabel(row.quality)}` : ''}</td>
                   <td>{row.calls}</td>
                   <td>{row.failures}</td>
                   <td>{row.retries}</td>
@@ -113,69 +119,115 @@ function Report({ report }: { report: UsageReport }) {
   );
 }
 
-const modeLabel: Record<string, string> = { fast: 'Hızlı (fast)', balanced: 'Dengeli (balanced)', quality: 'Yüksek kalite (quality)' };
+type ModelDraft = { enabled: boolean; allowed: string[]; defaultQuality: string };
 
 /**
- * Hazır takım üretim kalitesi (FASHN Try-On Max). Varsayılan fiyat/performans seçimi Dengeli + 1K'dır (2 kredi); 2K (3 kredi) alternatiftir.
- * Maliyet tahmini ve bütçe kapısı seçime göre güncellenir. Ucuz seçeneğin yüz/kumaş/nakış sadakatini koruduğu varsayılmaz: gerçek testte 1K ile 2K karşılaştırılacak.
+ * Tek ürün giydirme modelleri (yönetici). Hangi modellerin ve kalitelerin personelce kullanılabileceği ve varsayılanlar firma düzeyinde seçilir;
+ * sunucu her üretim isteğinde bunu yeniden denetler. Tutarlar tahmindir. "Canlı doğrulanmadı": bu modelle henüz ücretli test yapılmadı.
+ * Eski (pasif) modeller listelenir ama seçilemez.
  */
-function QualitySettings() {
-  const quality = useAiQuality();
-  const save = useSetAiQuality();
-  const [draft, setDraft] = useState<{ resolution?: string; mode?: string }>({});
+function ModelSettings() {
+  const settings = useAiModels();
+  const save = useSetAiModels();
+  const [draft, setDraft] = useState<{ defaultModel?: string; models?: Record<string, ModelDraft> }>({});
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-  if (!quality.data) {
-    return quality.isError ? <ErrorState error={quality.error} onRetry={() => void quality.refetch()} /> : null;
+  if (!settings.data) {
+    return settings.isError ? <ErrorState error={settings.error} onRetry={() => void settings.refetch()} /> : null;
   }
 
-  const current: AiQuality = quality.data;
-  const resolution = draft.resolution ?? current.resolution;
-  const mode = draft.mode ?? current.mode;
-  const option = current.options.find((o) => o.resolution === resolution && o.mode === mode);
-  const dirty = resolution !== current.resolution || mode !== current.mode;
+  const current: AiModelSettings = settings.data;
+  const selectable = current.models.filter((m) => !m.legacy);
+  const legacy = current.models.filter((m) => m.legacy);
+  const state = (key: string): ModelDraft => {
+    const fromDraft = draft.models?.[key];
+    if (fromDraft) return fromDraft;
+    const m = current.models.find((x) => x.key === key)!;
+    return { enabled: m.enabled, allowed: [...m.allowedQualities], defaultQuality: m.defaultQuality };
+  };
+  const update = (key: string, patch: Partial<ModelDraft>) =>
+    setDraft((d) => ({ ...d, models: { ...d.models, [key]: { ...state(key), ...patch } } }));
+  const defaultModel = draft.defaultModel ?? current.defaultModel;
+  const enabledKeys = selectable.filter((m) => state(m.key).enabled).map((m) => m.key);
+
+  const submit = () => {
+    setMessage(null);
+    save.mutate(
+      { defaultModel, models: selectable.map((m) => ({ key: m.key, enabled: state(m.key).enabled, allowedQualities: state(m.key).allowed, defaultQuality: state(m.key).defaultQuality })) },
+      {
+        onSuccess: () => {
+          setDraft({});
+          setMessage({ tone: 'ok', text: 'Model ayarları kaydedildi; sonraki üretimler bu ayarlarla yapılır.' });
+        },
+        onError: (error) => setMessage({ tone: 'error', text: errorMessage(error instanceof ApiError ? error.code : undefined) }),
+      },
+    );
+  };
 
   return (
-    <section className={classes.quality} aria-labelledby="quality-title">
-      <h2 id="quality-title" className={classes.heading}>
-        Hazır takım kalitesi
+    <section className={classes.quality} aria-labelledby="models-title">
+      <h2 id="models-title" className={classes.heading}>
+        Tek ürün giydirme modelleri
       </h2>
-      <div className={classes.qualityFields}>
-        <Select
-          label="Çözünürlük"
-          value={resolution}
-          allowDeselect={false}
-          data={[...new Set(current.options.map((o) => o.resolution))].map((r) => ({ value: r, label: r.toUpperCase() }))}
-          onChange={(v) => v && setDraft((d) => ({ ...d, resolution: v }))}
-        />
-        <Select
-          label="Mod"
-          value={mode}
-          allowDeselect={false}
-          data={[...new Set(current.options.map((o) => o.mode))].map((m) => ({ value: m, label: modeLabel[m] ?? m }))}
-          onChange={(v) => v && setDraft((d) => ({ ...d, mode: v }))}
-        />
-      </div>
-      <p className={classes.qualityHint}>
-        {option ? `${option.credits} kredi · görsel başına ≈ ${usd(option.estimatedUsdPerImage)}` : ''}
-        {current.isOverride ? '' : ` · varsayılan (${current.defaultMode} + ${current.defaultResolution.toUpperCase()})`}
-      </p>
-      <Button
-        size="md"
-        loading={save.isPending}
-        disabled={!dirty}
-        onClick={() =>
-          save.mutate(
-            { resolution, mode },
-            {
-              onSuccess: () => {
-                setDraft({});
-                setMessage({ tone: 'ok', text: 'Kalite ayarı kaydedildi; sonraki üretimler bu ayarla yapılır.' });
-              },
-              onError: (error) => setMessage({ tone: 'error', text: errorMessage(error instanceof ApiError ? error.code : undefined) }),
-            },
-          )
-        }
-      >
+      {current.maxJobCostUsd != null ? (
+        <p className={classes.qualityHint}>İş başı bütçe sınırı: {usd(current.maxJobCostUsd)}. En kötü durumu bu sınırı aşan kalite gerçek modda reddedilir.</p>
+      ) : null}
+      <Select
+        label="Varsayılan model"
+        value={enabledKeys.includes(defaultModel) ? defaultModel : null}
+        allowDeselect={false}
+        data={selectable.filter((m) => enabledKeys.includes(m.key)).map((m) => ({ value: m.key, label: m.displayName }))}
+        onChange={(v) => v && setDraft((d) => ({ ...d, defaultModel: v }))}
+      />
+      <ul className={classes.models}>
+        {selectable.map((m) => {
+          const s = state(m.key);
+          return (
+            <li key={m.key}>
+              <Checkbox label={<strong>{m.displayName}</strong>} checked={s.enabled} onChange={(e) => update(m.key, { enabled: e.currentTarget.checked })} />
+              <span className={classes.badge} data-ok={m.liveVerified}>{m.liveVerified ? 'Canlı doğrulandı' : 'Canlı doğrulanmadı'}</span>
+              <small>{m.note}</small>
+              <div className={classes.qualityFields}>
+                {m.qualities.map((q) => (
+                  <div key={q.key} className={classes.qualityOption}>
+                    <Checkbox
+                      disabled={!s.enabled}
+                      label={`${q.label} · ≈ ${usd(q.estimatedUsd)} (en fazla ${usd(q.worstCaseUsd)})`}
+                      checked={s.allowed.includes(q.key)}
+                      onChange={(e) => {
+                        // katalog sırası korunur (personelin listesi de bu sırada görünür)
+                        const allowed = m.qualities.map((x) => x.key).filter((k) => (k === q.key ? e.currentTarget.checked : s.allowed.includes(k)));
+                        update(m.key, { allowed, defaultQuality: allowed.includes(s.defaultQuality) ? s.defaultQuality : (allowed[0] ?? s.defaultQuality) });
+                      }}
+                    />
+                    {q.measuredUsd != null ? <small>Ölçülen: {usd(q.measuredUsd)}</small> : null}
+                    {q.highCost ? <span className={classes.badge}>Yüksek maliyet{q.enabledByDefault ? '' : ' · varsayılan kapalı'}</span> : null}
+                    {q.exceedsJobLimit ? <small className={classes.warning}>İş başı sınırı aşıyor: bu kaliteyle üretim reddedilir</small> : null}
+                  </div>
+                ))}
+              </div>
+              {m.qualities.length > 1 ? (
+                <Select
+                  label="Varsayılan kalite"
+                  size="sm"
+                  disabled={!s.enabled}
+                  value={s.allowed.includes(s.defaultQuality) ? s.defaultQuality : null}
+                  allowDeselect={false}
+                  data={m.qualities.filter((q) => s.allowed.includes(q.key)).map((q) => ({ value: q.key, label: q.label }))}
+                  onChange={(v) => v && update(m.key, { defaultQuality: v })}
+                />
+              ) : null}
+              <small>Fiyat kaynağı: {m.priceSource}</small>
+              {m.qualities.length > 1 ? (
+                <small>Tahmin: tipik 3:4 fotoğraf ve tek ürün görseli; en fazla: yükleme sınırındaki en büyük görseller ve uzun talimat (bütçe kapısı bunu kullanır).</small>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      {legacy.length > 0 ? (
+        <p className={classes.qualityHint}>Eski modeller (pasif, seçilemez): {legacy.map((m) => m.displayName).join(', ')}</p>
+      ) : null}
+      <Button size="md" loading={save.isPending} disabled={!draft.models && !draft.defaultModel} onClick={submit}>
         Kaydet
       </Button>
       {message ? (

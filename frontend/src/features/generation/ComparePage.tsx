@@ -7,7 +7,8 @@ import { TvSendButton, TvSessionPanel } from '../displays/TvControls';
 import classes from './ComparePage.module.css';
 
 /** `id`: TV'ye gönderilirken sunucunun tanıdığı kimlik (orijinal fotoğraf için fotoğraf kimliği). */
-type Option = { value: string; id: string; label: string; src: string };
+// label: seçicide (model adıyla); badge: görsel üzerinde kısa etiket (uzun etiket kaydırıcıda üst üste biner)
+type Option = { value: string; id: string; label: string; badge: string; src: string };
 
 /** Önce/sonra ve sürüm karşılaştırması: orijinal fotoğraf ile sonuç ya da iki sürüm; kaydırıcı veya yan yana. */
 export function ComparePage() {
@@ -22,9 +23,16 @@ export function ComparePage() {
     if (!data) return [];
     const list: Option[] = [];
     const photo = data.photos[0];
-    if (photo) list.push({ value: 'photo', id: photo.id, label: 'Orijinal fotoğraf', src: photo.urls.url });
+    if (photo) list.push({ value: 'photo', id: photo.id, label: 'Orijinal fotoğraf', badge: 'Orijinal fotoğraf', src: photo.urls.url });
     for (const image of data.images) {
-      list.push({ value: image.id, id: image.id, label: `Sürüm ${image.versionNo}${image.isDemo ? ' (DEMO)' : ''}`, src: image.urls.url });
+      const demo = image.isDemo ? ' (DEMO)' : '';
+      list.push({
+        value: image.id,
+        id: image.id,
+        label: `Sürüm ${image.versionNo}${image.aiModel ? ` · ${image.aiModel}` : ''}${demo}`,
+        badge: `Sürüm ${image.versionNo}${demo}`,
+        src: image.urls.url,
+      });
     }
     return list;
   }, [session.data]);
@@ -87,9 +95,9 @@ export function ComparePage() {
           </div>
           <div className={classes.view}>
             {mode === 'slider' ? (
-              <ImageCompare left={{ src: left.src, label: left.label }} right={{ src: right.src, label: right.label }} />
+              <ImageCompare left={{ src: left.src, label: left.badge }} right={{ src: right.src, label: right.badge }} />
             ) : (
-              <SideBySide left={{ src: left.src, label: left.label }} right={{ src: right.src, label: right.label }} />
+              <SideBySide left={{ src: left.src, label: left.badge }} right={{ src: right.src, label: right.badge }} />
             )}
             <p className={classes.hint}>
               <CompareIcon size={16} /> {mode === 'slider' ? 'Kaydırıcıyı sürükleyin veya ok tuşlarını kullanın.' : 'Her iki görsel aynı fotoğraftan türetilmiştir.'}

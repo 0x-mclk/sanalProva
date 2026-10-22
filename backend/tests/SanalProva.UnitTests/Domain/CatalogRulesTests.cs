@@ -73,6 +73,21 @@ public sealed class CombinationRulesTests
     }
 
     [Fact]
+    public void Tek_urun_giydirmede_kaftan_gibi_tum_vucut_tekil_urun_de_kabul_edilir()
+    {
+        var kaftan = NewCategory("Kaftan", 30);
+        kaftan.BodyZone = BodyZone.FullBody;
+        var salvar = NewCategory("Salvar", 10);
+        salvar.BodyZone = BodyZone.Lower;
+
+        Assert.Empty(CombinationRules.ValidateOutfitSet([Item(kaftan)]));
+        Assert.True(CombinationRules.IsSingleTryOnItem(Item(kaftan)));
+        Assert.False(CombinationRules.IsSingleTryOnItem(Item(salvar)));
+        Assert.Equal([CombinationError.OutfitSetMustBeAlone], CombinationRules.ValidateOutfitSet([Item(salvar)]));
+        Assert.Equal([CombinationError.OutfitSetMustBeAlone], CombinationRules.ValidateOutfitSet([Item(kaftan), Item(salvar)])); // tek ürün akışı tek parça
+    }
+
+    [Fact]
     public void Katman_sirasi_icten_disa_ve_urun_istisnasina_gore_siralanir()
     {
         var gomlek = NewCategory("Gomlek", 10);

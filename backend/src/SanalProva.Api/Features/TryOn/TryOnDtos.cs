@@ -36,19 +36,21 @@ public sealed record DraftItemDto(Guid CategoryId, Guid ProductId, Guid? Variant
 /// <param name="Warnings">Birleştirme uyarıları (çakışan kategori vb.). Taslak kaydedilir; "Üret" sırasında engellenir.</param>
 public sealed record DraftDto(OutfitMode Mode, IReadOnlyList<DraftItemDto> Items, IReadOnlyList<string> Warnings);
 
+/// <param name="AiModel">Üreten model ve kalite (ör. "GPT Image 2.5 · Orta"). Demo sonuçta seçilen model gösterilir; görsel yine DEMO'dur.</param>
 public sealed record GeneratedImageDto(
     Guid Id, int VersionNo, Guid? ParentImageId, Guid JobId, string Label, bool IsDemo, bool IsColorPreview, bool IsFavorite,
-    DateTimeOffset CreatedAt, ImageUrls Urls);
+    DateTimeOffset CreatedAt, ImageUrls Urls, string? AiModel);
 
 public sealed record JobDto(
     Guid Id, Guid SessionId, GenerationJobType JobType, GenerationJobStatus Status, GenerationStage? Stage, int? QueuePosition,
     int Attempt, int MaxAttempts, GenerationErrorCode? ErrorCode, string? Message, bool Retryable, Guid? ResultImageId,
-    DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Provider, string? Model, bool IsDemo);
+    DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, string? Provider, string? Model, bool IsDemo,
+    string? ModelKey, string? Quality, string? ModelLabel);
 
 public sealed record SessionSummary(
     Guid Id, string? CustomerLabel, string Code, SessionStatus Status, SessionStep NextStep,
     DateTimeOffset CreatedAt, DateTimeOffset LastActivityAt, DateTimeOffset RetentionUntil, int VersionCount,
-    ImageUrls? Photo, ImageUrls? Result, bool ResultIsDemo);
+    ImageUrls? Photo, ImageUrls? Result, bool ResultIsDemo, string? ResultAiModel);
 
 public sealed record SessionDetail(
     Guid Id, string? CustomerLabel, string Code, SessionStatus Status, SessionStep NextStep,
@@ -57,7 +59,9 @@ public sealed record SessionDetail(
     IReadOnlyList<GeneratedImageDto> Images, IReadOnlyList<JobDto> Jobs, Guid? ActiveJobId);
 
 /// <param name="AllowVariation">Gerçek sağlayıcıda aynı fotoğraf+seçim için daha önce başarılı/süren bir iş varsa varsayılan olarak o iş döner (aynı isteğin ikinci kez ücretlendirilmesi önlenir). true ise bilerek yeni (ücretli) bir varyasyon üretilir.</param>
-public sealed record StartGenerationRequest(Guid? PhotoId, bool AllowVariation = false);
+/// <param name="ModelKey">Tek ürün giydirmede model (ör. <c>seedream-5-flash</c>, <c>gpt-image-2.5</c>, <c>pruna-tryon</c>). Boşsa firmanın varsayılanı. Yalnızca yöneticinin izin verdiği modeller kabul edilir.</param>
+/// <param name="Quality">Modelin kalite seviyesi (GPT Image: <c>auto</c>/<c>low</c>/<c>medium</c>/<c>high</c>/<c>xhigh</c>/<c>max</c>). Boşsa modelin varsayılanı. Yalnızca yöneticinin izin verdiği kaliteler kabul edilir.</param>
+public sealed record StartGenerationRequest(Guid? PhotoId, bool AllowVariation = false, string? ModelKey = null, string? Quality = null);
 
 public sealed record RevisionRequest(Guid BaseImageId, string Type, Guid? TargetCategoryId, Guid? ProductId, Guid? VariantId, string? Color);
 
@@ -76,7 +80,7 @@ internal static class JobMessages
         GenerationErrorCode.MaskQualityLow => ("Renk değişimi güvenilir yapılamadı.", false),
         GenerationErrorCode.QuotaExceeded => ("Üretim kotası doldu.", false),
         GenerationErrorCode.BudgetExceeded => ("AI bütçe sınırına ulaşıldı. Yöneticiye bildirin; sağlayıcı çağrılmadı, ücret doğmadı.", false),
-        GenerationErrorCode.ProviderNotConfigured => ("Gerçek AI üretimi şu an etkin değil. Yöneticiyle iletişime geçin.", false),
+        GenerationErrorCode.ProviderNotConfigured => ("Bu üretim şu an etkin değil (gerçek AI kapalı veya bu işlem henüz desteklenmiyor). Yöneticiyle iletişime geçin.", false),
         GenerationErrorCode.NotImplemented => ("Bu işlem henüz desteklenmiyor.", false),
         _ => ("Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.", true),
     };

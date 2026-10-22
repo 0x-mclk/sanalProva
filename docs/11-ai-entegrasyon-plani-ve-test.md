@@ -1,5 +1,7 @@
 # 11 — Aşama 4: Gerçek AI Entegrasyonu — Plan, Maliyet Sınırları ve Kontrollü Test Planı
 
+> **Güncelleme (2026-10-22):** Tek ürün giydirme modelleri değişti → [12](12-tek-kaftan-model-entegrasyonu.md) (Seedream 5 Flash, GPT Image 2.5, Pruna). Bu belgedeki FASHN/Gemini planı tarihçedir; bütçe kapıları, çift ücret koruması ve kayıt yapısı aynen geçerlidir. Canlı test planının güncel hali 12 §6'dadır.
+
 > Durum: kod tamamlandı, **mock/sözleşme testleri geçti**; **hiçbir ücretli gerçek API çağrısı yapılmadı.** Gerçek API testi (§5) yalnızca proje sahibinin ayrıca vereceği onaydan sonra çalıştırılır.
 > Doğrulama tarihi: 2026-10-20 (resmî dokümanlar). Fiyat ve model bilgisi değişebilir; çalıştırmadan önce yeniden kontrol edilir.
 

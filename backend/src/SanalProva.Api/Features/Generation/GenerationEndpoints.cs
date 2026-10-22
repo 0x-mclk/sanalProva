@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SanalProva.Api.Features.Admin;
 using SanalProva.Api.Features.TryOn;
 using SanalProva.Api.Hubs;
 using SanalProva.Api.Infrastructure;
@@ -9,6 +10,7 @@ using SanalProva.Domain.Generation;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure.Ai;
+using SanalProva.Infrastructure.Ai.TryOn;
 using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
@@ -35,7 +37,8 @@ public static class GenerationEndpoints
 
     private static async Task<IResult> StartAsync(
         Guid id, StartGenerationRequest request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
-        AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, GenerationStrategy strategy, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+        AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, GenerationStrategy strategy, Microsoft.Extensions.Options.IOptionsMonitor<GenerationSettings> generationSettings,
+        AuditTrail audit, TimeProvider clock, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64)
         {
@@ -105,10 +108,41 @@ public static class GenerationEndpoints
         }
 
         var jobType = draft.Mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination;
-        var fingerprint = Fingerprint(photo.Id, jobType, draft.Items);
+        var live = strategy.Resolve(jobType).Provider != GenerationStrategy.MockProvider;
+        if (jobType == GenerationJobType.FreeCombination && live && !generationSettings.CurrentValue.LiveFreeCombinationEnabled)
+        {
+            // Beş parçalı kombin gerçek modelle doğrulanmadı: gerçek modda çalışıyormuş gibi sunulmaz
+            return ApiProblems.Conflict("FREE_COMBINATION_DISABLED", "Çok parçalı kombin henüz etkin değil. Tek kaftan veya hazır takım deneyin.");
+        }
+
+        string? modelKey = null;
+        string? quality = null;
+        if (jobType == GenerationJobType.OutfitSet)
+        {
+            var policy = TryOnPolicyResolver.Resolve(await reader.GetSettingsAsync(user.OrganizationId, ct));
+            var (choice, selectedQuality, error) = TryOnPolicyResolver.Select(policy, request.ModelKey, request.Quality);
+            if (error is not null)
+            {
+                return error is TryOnSelectionError.UnknownModel or TryOnSelectionError.ModelNotAllowed
+                    ? ApiProblems.BadRequest("MODEL_NOT_ALLOWED", "Seçilen AI modeli kullanıma açık değil.")
+                    : ApiProblems.BadRequest("QUALITY_NOT_ALLOWED", "Seçilen kalite bu model için kullanıma açık değil.");
+            }
+
+            modelKey = choice!.Model.Key;
+            quality = selectedQuality;
+
+            // Yüksek maliyetli kalite iş başı bütçe sınırını aşıyorsa iş kuyruğa hiç alınmaz (işleyicideki bütçe kapısı ikinci savunma hattıdır)
+            var (_, worst) = TryOnModels.DisplayPrice(choice.Model, choice.Model.Quality(quality!)!, generationSettings.CurrentValue.Pricing);
+            if (live && AiModelEndpoints.ExceedsJobLimit(generationSettings.CurrentValue, worst))
+            {
+                return ApiProblems.Conflict("QUALITY_OVER_BUDGET", "Seçilen kalitenin en kötü durum maliyeti iş başı bütçe sınırını aşıyor.");
+            }
+        }
+
+        var fingerprint = Fingerprint(photo.Id, jobType, draft.Items, modelKey, quality);
 
         // Gerçek (ücretli) sağlayıcıda aynı fotoğraf + aynı seçim için süren/başarılı iş varsa yenisi açılmaz: aynı sonuç için ikinci ücret yok
-        if (!request.AllowVariation && strategy.Resolve(jobType).Provider != GenerationStrategy.MockProvider)
+        if (!request.AllowVariation && live)
         {
             var duplicate = await db.GenerationJobs.AsNoTracking()
                 .Where(j => j.SessionId == id && j.RequestFingerprint == fingerprint
@@ -133,7 +167,7 @@ public static class GenerationEndpoints
             });
         }
 
-        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, now, fingerprint);
+        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, now, fingerprint, modelKey, quality);
         db.OutfitSelections.Add(selection);
         db.GenerationJobs.Add(job);
         reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
@@ -156,16 +190,21 @@ public static class GenerationEndpoints
     }
 
     /// <summary>Fotoğraf + iş tipi + sıralı (ürün, varyant) çiftlerinin özeti. Kişisel veri içermez.</summary>
-    private static string Fingerprint(Guid photoId, GenerationJobType type, IEnumerable<DraftItem> items)
+    private static string Fingerprint(Guid photoId, GenerationJobType type, IEnumerable<DraftItem> items, string? modelKey, string? quality)
     {
+        // Model ve kalite de dahil: aynı seçimi farklı modelle/kaliteyle denemek bilinçli yeni bir istektir
         var parts = items.Select(i => $"{i.ProductId:N}:{i.VariantId:N}").Order(StringComparer.Ordinal);
-        var text = $"{photoId:N}|{type}|{string.Join(',', parts)}";
+        var text = $"{photoId:N}|{type}|{string.Join(',', parts)}|{modelKey}|{quality}";
         return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)))[..32];
     }
 
-    private static GenerationJob NewJob(TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now, string? fingerprint = null) => new()
+    private static GenerationJob NewJob(
+        TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now,
+        string? fingerprint = null, string? modelKey = null, string? quality = null) => new()
     {
         RequestFingerprint = fingerprint,
+        ModelKey = modelKey,
+        Quality = quality,
         OrganizationId = session.OrganizationId, StoreId = session.StoreId, SessionId = session.Id, JobType = type, SelectionId = selectionId,
         SourcePhotoId = photoId, IdempotencyKey = key, NextAttemptAt = now, RequestedByUserId = user.UserId,
     };
@@ -220,7 +259,8 @@ public static class GenerationEndpoints
 
         var images = await db.GeneratedImages.AsNoTracking().Where(i => i.SessionId == id).OrderBy(i => i.VersionNo).ToListAsync(ct);
         var files = await ImageLinks.LoadFilesAsync(db, images.Select(i => i.FileId), ct);
-        return TypedResults.Ok(images.Where(i => files.ContainsKey(i.FileId)).Select(i => SessionReader.ToImageDto(i, links.Customer(files[i.FileId]))).ToList());
+        var labels = await SessionReader.ModelLabelsAsync(db, images.Select(i => i.JobId), ct);
+        return TypedResults.Ok(images.Where(i => files.ContainsKey(i.FileId)).Select(i => SessionReader.ToImageDto(i, links.Customer(files[i.FileId]), labels.GetValueOrDefault(i.JobId))).ToList());
     }
 
     private static async Task<IResult> GetJobAsync(Guid id, AppDbContext db, SessionReader reader, CancellationToken ct)
@@ -288,7 +328,7 @@ public static class GenerationEndpoints
             return quotaProblem;
         }
 
-        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(), failed.RequestFingerprint);
+        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(), failed.RequestFingerprint, failed.ModelKey, failed.Quality);
         db.GenerationJobs.Add(job);
         reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
         audit.Record("Generation.Retried", nameof(GenerationJob), job.Id);
@@ -308,6 +348,7 @@ public static class GenerationEndpoints
         image.IsFavorite = request.IsFavorite;
         await db.SaveChangesAsync(ct);
         var files = await ImageLinks.LoadFilesAsync(db, [image.FileId], ct);
-        return TypedResults.Ok(SessionReader.ToImageDto(image, links.Customer(files[image.FileId])));
+        var labels = await SessionReader.ModelLabelsAsync(db, [image.JobId], ct);
+        return TypedResults.Ok(SessionReader.ToImageDto(image, links.Customer(files[image.FileId]), labels.GetValueOrDefault(image.JobId)));
     }
 }

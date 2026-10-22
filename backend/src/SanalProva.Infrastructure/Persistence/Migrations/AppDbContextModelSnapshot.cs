@@ -809,6 +809,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("provider_request_id");
 
+                    b.Property<string>("Quality")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("quality");
+
                     b.Property<Guid>("StoreId")
                         .HasColumnType("uuid")
                         .HasColumnName("store_id");
@@ -989,6 +994,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(80)")
                         .HasColumnName("model");
 
+                    b.Property<string>("ModelKey")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("model_key");
+
                     b.Property<DateTimeOffset>("NextAttemptAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("next_attempt_at");
@@ -1011,6 +1021,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)")
                         .HasColumnName("provider_request_id");
+
+                    b.Property<string>("Quality")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("quality");
 
                     b.Property<string>("RequestFingerprint")
                         .HasMaxLength(64)
@@ -1918,11 +1933,23 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         {
                             b1.Property<Guid>("OrganizationId");
 
+                            b1.PrimitiveCollection<string>("AllowedTryOnQualities");
+
                             b1.Property<int>("DailyGenerationQuota");
 
                             b1.Property<int>("DefaultRetentionHours");
 
+                            b1.Property<string>("DefaultTryOnModel");
+
+                            b1.PrimitiveCollection<string>("DefaultTryOnQualities");
+
+                            b1.PrimitiveCollection<string>("EnabledTryOnModels");
+
                             b1.Property<int>("ExtendedRetentionDays");
+
+                            b1.Property<string>("FashnGenerationMode");
+
+                            b1.Property<string>("FashnResolution");
 
                             b1.Property<bool>("IsDemoCatalog");
 

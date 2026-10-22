@@ -132,6 +132,7 @@ export function GeneratingPage() {
             <p className={classes.meta}>
               {elapsed} sn · {hub === 'connected' ? 'Canlı bağlantı' : 'Durum düzenli olarak denetleniyor'}
               {data.attempt > 1 ? ` · ${data.attempt}. deneme` : ''}
+              {data.modelLabel ? ` · seçilen model: ${data.modelLabel}` : ''}
             </p>
             {me?.demoCatalog || data.isDemo ? <p className={classes.demo}>Demo üretim: gerçek yapay zekâ çağrısı yapılmaz.</p> : null}
             {data.status === 'Queued' || data.status === 'Running' ? (

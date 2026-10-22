@@ -153,3 +153,9 @@
     top: var(--sp-space-xl);
   }
 }
+
+.model {
+  margin: 0;
+  font-size: var(--sp-font-size-sm);
+  color: var(--sp-color-text-muted);
+}

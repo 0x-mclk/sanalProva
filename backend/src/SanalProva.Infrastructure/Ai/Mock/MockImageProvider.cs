@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using SanalProva.Domain.Generation;
-using SanalProva.Infrastructure.Images;
 using SanalProva.Infrastructure.Ai.Abstractions;
+using SanalProva.Infrastructure.Images;
 
 namespace SanalProva.Infrastructure.Ai.Mock;
 

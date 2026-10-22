@@ -224,3 +224,15 @@
   font-size: var(--sp-font-size-sm);
   color: var(--sp-color-text-muted);
 }
+
+.modelPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modelFields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-space-xs);
+}

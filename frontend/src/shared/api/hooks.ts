@@ -197,11 +197,11 @@ export function useSaveDraft(sessionId: string) {
 export function useStartGeneration(sessionId: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ idempotencyKey, photoId }: { idempotencyKey: string; photoId?: string | null }) =>
+    mutationFn: ({ idempotencyKey, photoId, modelKey, quality }: { idempotencyKey: string; photoId?: string | null; modelKey?: string | null; quality?: string | null }) =>
       unwrap(
         api.POST('/api/v1/sessions/{id}/generations', {
           params: { path: { id: sessionId }, header: { 'Idempotency-Key': idempotencyKey } },
-          body: { photoId: photoId ?? null, allowVariation: false },
+          body: { photoId: photoId ?? null, allowVariation: false, modelKey: modelKey ?? null, quality: quality ?? null },
         }),
       ),
     onSuccess: (job) => {
@@ -276,6 +276,8 @@ export type ProductsQuery = {
   q?: string;
   status?: 'active' | 'inactive' | 'all';
   selectable?: boolean;
+  /** Tek ürün giydirme: hazır takımlar + tüm vücut tekil ürünler (kaftan). */
+  tryOn?: boolean;
   sort?: 'recommended' | 'name' | 'code' | 'newest';
   pageSize?: number;
 };

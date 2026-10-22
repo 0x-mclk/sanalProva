@@ -18,6 +18,8 @@ internal sealed class GenerationJobConfiguration : IEntityTypeConfiguration<Gene
         builder.Property(x => x.ProviderRequestId).HasMaxLength(120);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(64);
         builder.Property(x => x.RequestFingerprint).HasMaxLength(64);
+        builder.Property(x => x.ModelKey).HasMaxLength(60);
+        builder.Property(x => x.Quality).HasMaxLength(20);
         builder.HasIndex(x => new { x.SessionId, x.RequestFingerprint });
         builder.Property(x => x.ErrorMessage).HasMaxLength(500);
 
@@ -68,6 +70,7 @@ internal sealed class AiUsageLogConfiguration : IEntityTypeConfiguration<AiUsage
         builder.Property(x => x.EstimatedCostUsd).HasPrecision(10, 4);
         builder.Property(x => x.ActualCostUsd).HasPrecision(10, 4);
         builder.Property(x => x.ProviderRequestId).HasMaxLength(120);
+        builder.Property(x => x.Quality).HasMaxLength(20);
         builder.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
         builder.HasIndex(x => new { x.StoreId, x.CreatedAt });
 
