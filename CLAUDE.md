@@ -131,7 +131,7 @@ Demo hesaplar: `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@
 
 ## Sıradaki işler
 
-**Aşama 3, 4 ve 4b kodu tamamlandı.** 4b canlı testi (Seedream/GPT/Pruna, ≈ 0,06 $) onay bekliyor (docs/12 §6). Aşama 4'ün canlı API testi onay bekliyor (docs/11 §5); Aşama 5 (SAM 2 + OpenCV + maskeli birleştirme) onaysız başlanmaz. Açık: gerçek mağaza TV'sinde uyumluluk denemesi (WebSocket/SSE, ES2019, CSS değişkenleri, `localStorage`), QR ile eşleştirme (bağımlılık gerektirir, yapılmadı), çoklu sunucu için SignalR backplane. Aşağıdaki Aşama 3 listesi tarihçedir.
+**Aşama 3, 4 ve 4b kodu tamamlandı.** 4b canlı testi onay bekliyor (docs/12 §6): ilk aşama yalnızca Seedream + GPT Image medium (≈ 0,05–0,06 $); anahtarlar API projesinin User Secrets kaydında (`Ai:Fal:ApiKey`); Pruna ayrı kapı (`SANALPROVA_LIVE_PRUNA=SENTETIK-GORSEL`) ve sentetik görsel ister. Aşama 4'ün canlı API testi onay bekliyor (docs/11 §5); Aşama 5 (SAM 2 + OpenCV + maskeli birleştirme) onaysız başlanmaz. Açık: gerçek mağaza TV'sinde uyumluluk denemesi (WebSocket/SSE, ES2019, CSS değişkenleri, `localStorage`), QR ile eşleştirme (bağımlılık gerektirir, yapılmadı), çoklu sunucu için SignalR backplane. Aşağıdaki Aşama 3 listesi tarihçedir.
 
 **Aşama 3 — TV senkronizasyonu** (tasarım: [06-tv-signalr](docs/06-tv-signalr.md), görevler: [09 §Aşama 3](docs/09-gorev-listesi.md)):
 

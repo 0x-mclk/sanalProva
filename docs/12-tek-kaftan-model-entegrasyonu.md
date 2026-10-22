@@ -132,9 +132,24 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
 ## 6. Canlı test planı — **ONAY BEKLİYOR**
 
 Koşucu: `LiveAiTests` (varsayılan **atlanır**).
-- **Kapı:** `SANALPROVA_LIVE_AI=ODEME-ONAYLANDI`, `Ai__Fal__ApiKey`, `Ai__Pruna__ApiKey`.
-- **Girdiler:** `testdata/ai-live/person.jpg` ve `kaftan.jpg`. İzinli test görselleri kullanılır; klasör git'e girmez.
-- **Bütçe tavanı:** `SANALPROVA_LIVE_AI_BUDGET_USD` (varsayılan 0,50 $). Her çağrıdan önce en kötü durum maliyeti kalan bütçeyle karşılaştırılır.
+
+- **Kapı:** `SANALPROVA_LIVE_AI=ODEME-ONAYLANDI` (yalnızca o PowerShell oturumunda).
+- **Anahtarlar:** API projesinin .NET User Secrets kaydı (`Ai:Fal:ApiKey`, `Ai:Pruna:ApiKey`) veya aynı adlı ortam değişkenleri (`Ai__Fal__ApiKey`; ortam değişkeni önceliklidir).
+  - Kaynağa, git'e ve kayda yazılmaz; anahtar yoksa koşucu çağrı yapmadan durur.
+  - Aynı kayıt uygulamanın kendisi (Development) tarafından da okunur. Uygulamada ücretli çağrı yine `UseMockProviders=false` + `AllowPaidCalls=true` ister.
+- **Girdiler:** `testdata/ai-live/person.jpg` ve `kaftan.jpg`. İzinli veya sentetik test görselleri kullanılır, gerçek müşteri fotoğrafı kullanılmaz; klasör git'e girmez.
+  - Görseller gönderilmeden önce uygulamadaki yükleme hattıyla doğrulanır ve yeniden kodlanır: EXIF/konum silinir; kişi en fazla 2048 px, ürün 1600 px.
+- **Bütçe:**
+  - Toplam: `SANALPROVA_LIVE_AI_BUDGET_USD` (varsayılan 0,50 $).
+  - Çağrı başı: `SANALPROVA_LIVE_AI_MAX_CALL_USD` (varsayılan 0,10 $).
+  - Her çağrıdan önce gerçek görsel boyutlarıyla en kötü durum ikisiyle de karşılaştırılır.
+- **Maliyet kaydı:** Her adımdan sonra `docs/ai-benchmark/runs/<zaman>/kayit.md` ve `kayit.json` yazılır.
+  - Kayıtta adım, durum, model, parametre, süre, tahmini ve en kötü tutar, istek kimliği yer alır.
+  - Başarısız çağrı en kötü durum tutarıyla sayılır ve istek kimliği kaydedilir; koşucu orada durur.
+- **Varsayılan adımlar:** `seedream,gpt-medium`.
+- **Pruna:** Ayrıca `SANALPROVA_LIVE_PRUNA=SENTETIK-GORSEL` ister. Görseller Pruna'ya dosya olarak yüklenir (§4); yalnızca sentetik görselle ve ayrı onayla çalıştırılır.
+
+**İlk aşama (onay bekliyor):** Seedream 5 Flash + GPT Image 2.5 medium. Tahmini ≈ 0,05–0,06 $, en kötü ≈ 0,08 $. Önerilen tavan: toplam 0,15 $, çağrı başı 0,06 $.
 
 | Adım | Model / kalite | Tahmini | En kötü |
 |---|---|---|---|
@@ -144,7 +159,7 @@ Koşucu: `LiveAiTests` (varsayılan **atlanır**).
 | isteğe bağlı `gpt-low` / `gpt-high` / `pruna-turbo` | | ≈ 0,025 / 0,075 / 0,008 $ | ≤ 0,034 / 0,123 / 0,008 $ |
 | isteğe bağlı, pahalı `gpt-auto` / `gpt-xhigh` / `gpt-max` | | ≈ 0,075 / 0,118 / 0,240 $ | ≤ 0,423 / 0,200 / 0,423 $ |
 
-- **Varsayılan üç adım:** tahmini **≈ 0,06–0,08 $**, en kötü ≈ 0,09 $.
+- **Pruna eklenirse (sonraki aşama):** +0,015 $ (turbo 0,008 $).
 - **Low/high/turbo eklenince (altı adım):** ≈ 0,15 $ civarı, en kötü ≈ 0,26 $.
 - **Pahalı üç adım** (auto/xhigh/max) en kötü durumda birlikte ≈ 1,05 $ eder. 0,50 $ tavanı aşar; bu adımlar için ayrı onay ve daha yüksek tavan (`SANALPROVA_LIVE_AI_BUDGET_USD`) gerekir. Tavan aşılacaksa koşucu çağrı yapmadan durur.
 - Bütçe koruması her adımda gerçek test görsellerinin boyutuyla en kötü durumu hesaplar.
