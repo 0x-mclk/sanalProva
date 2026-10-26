@@ -1637,6 +1637,133 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/cost-cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    state?: components["schemas"]["CostReconciliationState"];
+                    take?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCaseDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/cost-cases/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCaseDetail"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/cost-cases/{id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "Idempotency-Key"?: string;
+                };
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CostDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCaseDetail"];
+                    };
+                };
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCaseDetail"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/ai-quality": {
         parameters: {
             query?: never;
@@ -2071,6 +2198,63 @@ export interface components {
             guardianConsent: null | boolean;
             method: components["schemas"]["ConsentMethod"];
         };
+        CostCaseDetail: {
+            case: components["schemas"]["CostCaseDto"];
+            decisions: components["schemas"]["CostDecisionDto"][];
+        };
+        CostCaseDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            organizationId: string;
+            organizationName: string;
+            /** Format: uuid */
+            storeId: string;
+            /** Format: uuid */
+            jobId: null | string;
+            provider: string;
+            model: string;
+            quality: null | string;
+            operation: string;
+            /** Format: int32 */
+            attempt: number;
+            providerRequestId: null | string;
+            /** Format: double */
+            reservedCostUsd: number;
+            /** Format: double */
+            effectiveCostUsd: number;
+            state: components["schemas"]["CostReconciliationState"];
+            /** Format: int32 */
+            decisionCount: number;
+            /** Format: date-time */
+            occurredAt: string;
+        };
+        /** @enum {unknown} */
+        CostDecision: "ConfirmedCharged" | "ConfirmedNotCharged" | "WrittenOff";
+        CostDecisionDto: {
+            /** Format: int32 */
+            sequence: number;
+            decision: components["schemas"]["CostDecision"];
+            /** Format: double */
+            effectiveCostUsd: number;
+            /** Format: double */
+            confirmedAmountUsd: null | number;
+            note: null | string;
+            /** Format: uuid */
+            decidedByUserId: string;
+            /** Format: date-time */
+            decidedAt: string;
+        };
+        CostDecisionRequest: {
+            decision: components["schemas"]["CostDecision"];
+            /** Format: double */
+            amountUsd: null | number;
+            note: null | string;
+            /** Format: int32 */
+            expectedSequence: number;
+        };
+        /** @enum {unknown} */
+        CostReconciliationState: "Open" | "ConfirmedCharged" | "ConfirmedNotCharged" | "WrittenOff";
         CreateSessionRequest: {
             customerLabel: null | string;
         };

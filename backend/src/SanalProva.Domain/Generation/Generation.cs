@@ -89,6 +89,12 @@ public sealed class GenerationJob : Entity, IStoreOwned
     /// </summary>
     public DateTimeOffset? ProviderSubmitStartedAt { get; set; }
 
+    /// <summary>
+    /// Ücretli gönderim niyetiyle <b>aynı kayıtta</b> yazılan en kötü durum maliyeti (USD). Çökme/kurtarma sırasında işlemci yeniden hesaplayamaz;
+    /// sonucu belirsiz iş bu tutarla (SQL tarafında bile) bütçeye yazılır. Null: niyet yazılmamış veya eski kayıt.
+    /// </summary>
+    public decimal? ReservedCostUsd { get; set; }
+
     public GenerationStage? Stage { get; set; }
 
     /// <summary>Aynı fotoğraf + aynı seçim + aynı iş tipi için özet. Gerçek sağlayıcıda aynı isteğin ikinci kez ücretlendirilmesini önler.</summary>
@@ -180,4 +186,86 @@ public sealed class AiUsageLog : Entity, IStoreOwned
     public string? ProviderRequestId { get; init; }
 
     public GenerationErrorCode? ErrorCode { get; init; }
+
+    /// <summary>
+    /// Sistemin ürettiği olayın benzersiz anahtarı (ör. <c>uncertain:{jobId}</c>, <c>reconcile:{kararId}</c>). Aynı olay ikinci kez yazılamaz:
+    /// veritabanı filtreli benzersiz indeksiyle zorunludur. Sıradan deneme kayıtlarında boştur (bir iş birden çok deneme yazar).
+    /// </summary>
+    public string? EventKey { get; init; }
+
+    /// <summary>Düzeltme satırı: kayıt silinmez/değiştirilmez, fark (±) yeni satır olarak eklenir. Çağrı sayacına girmez, tutar toplamlarına girer.</summary>
+    public bool IsAdjustment { get; init; }
+
+    /// <summary>Düzeltmenin ilişkili olduğu ilk (belirsiz) kayıt.</summary>
+    public Guid? AdjustsLogId { get; init; }
+
+    /// <summary>
+    /// Maliyetin doğduğu an (muhasebe tarihi). Düzeltme satırlarında asıl kaydın zamanıdır: bir günün/ayın bütçesi, kararın verildiği güne değil
+    /// harcamanın doğduğu güne yazılır. Boşsa <see cref="Entity.CreatedAt"/> geçerlidir.
+    /// </summary>
+    public DateTimeOffset? OccurredAt { get; init; }
+
+    /// <summary>Yalnızca sonucu belirsiz kayıtlarda dolu: mutabakat durumu (Open → platform yöneticisinin son kararı).</summary>
+    public CostReconciliationState? ReconciliationState { get; set; }
+}
+
+/// <summary>Sonucu belirsiz maliyetin mutabakat durumu.</summary>
+public enum CostReconciliationState
+{
+    /// <summary>Sağlayıcıda ücretlenip ücretlenmediği bilinmiyor; en kötü durum tutarı bütçede tutuluyor.</summary>
+    Open,
+
+    /// <summary>Sağlayıcı faturasında/panelinde ücretlendiği görüldü; tutar gerçek değere çekildi.</summary>
+    ConfirmedCharged,
+
+    /// <summary>Sağlayıcıda ücretlenmediği görüldü; bütçeden düşüldü.</summary>
+    ConfirmedNotCharged,
+
+    /// <summary>Kanıtlanamadı; maliyet platformun zararı olarak kapatıldı (müşteriye yansıtılmaz).</summary>
+    WrittenOff,
+}
+
+/// <summary>Platform yöneticisinin verebileceği mutabakat kararları (<see cref="CostReconciliationState.Open"/> karar değildir).</summary>
+public enum CostDecision
+{
+    ConfirmedCharged,
+    ConfirmedNotCharged,
+    WrittenOff,
+}
+
+/// <summary>
+/// Belirsiz maliyet için verilmiş değişmez karar kaydı. Ekleme-yalnızca: düzeltme yeni <see cref="Sequence"/> ile yeni karar eklemektir.
+/// Oturum silinse bile kalır (muhasebe kaydı; kişisel veri içermez), bu yüzden işe yabancı anahtarı yoktur.
+/// </summary>
+public sealed class AiCostReconciliation : Entity, ITenantOwned
+{
+    public Guid OrganizationId { get; init; }
+
+    /// <summary>Belirsiz maliyet kaydı (ilk <see cref="AiUsageLog"/> satırı).</summary>
+    public Guid UsageLogId { get; init; }
+
+    /// <summary>Bilgi amaçlı iş kimliği (oturum silinince iş kaybolur; anahtar değildir).</summary>
+    public Guid? JobId { get; init; }
+
+    /// <summary>Bu vakadaki kararın sırası (1, 2, 3…). (UsageLogId, Sequence) benzersizdir: iki yönetici aynı sırayı yazamaz.</summary>
+    public int Sequence { get; init; }
+
+    public CostDecision Decision { get; init; }
+
+    /// <summary>Karar sonrası bu vakanın geçerli (efektif) maliyeti (USD). Sonraki karar farkı buna göre hesaplar.</summary>
+    public decimal EffectiveCostUsd { get; init; }
+
+    /// <summary>Sağlayıcının gerçek tutarı (yalnızca ConfirmedCharged).</summary>
+    public decimal? ConfirmedAmountUsd { get; init; }
+
+    /// <summary>Kısa açıklama (≤ 200 karakter). Kişisel veri yazılmaz; arayüz bunu hatırlatır.</summary>
+    public string? Note { get; init; }
+
+    public Guid DecidedByUserId { get; init; }
+
+    /// <summary>İstemcinin Idempotency-Key'i: aynı anahtar aynı kararı tekrar yazmaz, farklı gövdeyle kullanılırsa reddedilir.</summary>
+    public required string IdempotencyKey { get; init; }
+
+    /// <summary>İstek gövdesinin özeti: aynı anahtarla farklı karar gönderilirse yakalanır.</summary>
+    public required string RequestHash { get; init; }
 }

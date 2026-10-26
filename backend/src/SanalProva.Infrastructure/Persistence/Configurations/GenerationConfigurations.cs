@@ -27,6 +27,7 @@ internal sealed class GenerationJobConfiguration : IEntityTypeConfiguration<Gene
         builder.Property(x => x.Model).HasMaxLength(80);
         builder.Property(x => x.PromptTemplateVersion).HasMaxLength(40);
         builder.Property(x => x.ProviderRequestId).HasMaxLength(120);
+        builder.Property(x => x.ReservedCostUsd).HasPrecision(10, 4);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(64);
         builder.Property(x => x.RequestFingerprint).HasMaxLength(64);
         builder.Property(x => x.DedupeKey).HasMaxLength(64);
@@ -99,11 +100,48 @@ internal sealed class AiUsageLogConfiguration : IEntityTypeConfiguration<AiUsage
         builder.Property(x => x.ActualCostUsd).HasPrecision(10, 4);
         builder.Property(x => x.ProviderRequestId).HasMaxLength(120);
         builder.Property(x => x.Quality).HasMaxLength(20);
+        builder.Property(x => x.EventKey).HasMaxLength(100);
         builder.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
         builder.HasIndex(x => new { x.StoreId, x.CreatedAt });
+
+        // Aynı sistem olayı (belirsiz maliyet, mutabakat düzeltmesi) ikinci kez yazılamaz. Kurtarma SQL'i, süpürücü ve işlemci aynı anahtarı kullanır:
+        // hangisi önce yazarsa diğerleri sessizce atlar. Sıradan deneme satırlarında anahtar boştur (filtreli indeks onları kapsamaz).
+        builder.HasIndex(x => x.EventKey).IsUnique().HasFilter("[event_key] IS NOT NULL").HasDatabaseName("ux_ai_usage_logs_event_key");
+
+        // Mutabakat bekleyen/kapanmış belirsiz kayıtların listesi (platform yöneticisi)
+        builder.HasIndex(x => x.ReconciliationState).HasFilter("[reconciliation_state] IS NOT NULL").HasDatabaseName("ix_ai_usage_logs_reconciliation");
+
+        // Düzeltme satırı asıl kayda ve olay anahtarına bağlıdır
+        builder.ToTable(t => t.HasCheckConstraint("ck_ai_usage_logs_adjustment", "[is_adjustment] = 0 OR ([adjusts_log_id] IS NOT NULL AND [event_key] IS NOT NULL)"));
 
         // Oturum silindiğinde maliyet kaydı kalır, iş bağlantısı koparılır
         builder.HasOne<GenerationJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.SetNull);
         builder.HasOne<Store>().WithMany().HasForeignKey(x => x.StoreId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => x.AdjustsLogId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class AiCostReconciliationConfiguration : IEntityTypeConfiguration<AiCostReconciliation>
+{
+    public void Configure(EntityTypeBuilder<AiCostReconciliation> builder)
+    {
+        builder.Property(x => x.EffectiveCostUsd).HasPrecision(10, 4);
+        builder.Property(x => x.ConfirmedAmountUsd).HasPrecision(10, 4);
+        builder.Property(x => x.Note).HasMaxLength(200);
+        builder.Property(x => x.IdempotencyKey).HasMaxLength(64);
+        builder.Property(x => x.RequestHash).HasMaxLength(64);
+
+        // Karar sırası vaka başına benzersiz: iki yönetici aynı sırayı yazamaz (ikincisi 409 alır). Aynı Idempotency-Key ikinci karar üretmez.
+        builder.HasIndex(x => new { x.UsageLogId, x.Sequence }).IsUnique().HasDatabaseName("ux_ai_cost_reconciliations_case_sequence");
+        builder.HasIndex(x => new { x.UsageLogId, x.IdempotencyKey }).IsUnique().HasDatabaseName("ux_ai_cost_reconciliations_case_key");
+        builder.HasIndex(x => x.OrganizationId);
+        builder.ToTable(t =>
+        {
+            t.HasCheckConstraint("ck_ai_cost_reconciliations_sequence", "[sequence] >= 1");
+            t.HasCheckConstraint("ck_ai_cost_reconciliations_amount", "[effective_cost_usd] >= 0 AND ([confirmed_amount_usd] IS NULL OR [confirmed_amount_usd] > 0)");
+        });
+
+        // Muhasebe kaydı oturum silinince de kalır: işe anahtar yok; belirsiz maliyet satırına bağlıdır (o da silinmez)
+        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => x.UsageLogId).OnDelete(DeleteBehavior.Restrict);
     }
 }

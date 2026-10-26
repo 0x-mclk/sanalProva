@@ -48,6 +48,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<GenerationJob> GenerationJobs => Set<GenerationJob>();
     public DbSet<GeneratedImage> GeneratedImages => Set<GeneratedImage>();
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
+    public DbSet<AiCostReconciliation> AiCostReconciliations => Set<AiCostReconciliation>();
 
     public DbSet<DisplayDevice> DisplayDevices => Set<DisplayDevice>();
     public DbSet<DisplayPairing> DisplayPairings => Set<DisplayPairing>();

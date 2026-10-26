@@ -732,6 +732,98 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SanalProva.Domain.Generation.AiCostReconciliation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal?>("ConfirmedAmountUsd")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("confirmed_amount_usd");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("decided_by_user_id");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("decision");
+
+                    b.Property<decimal>("EffectiveCostUsd")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("effective_cost_usd");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("job_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int")
+                        .HasColumnName("sequence");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid>("UsageLogId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("usage_log_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_ai_cost_reconciliations");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_ai_cost_reconciliations_organization_id");
+
+                    b.HasIndex("UsageLogId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_ai_cost_reconciliations_case_key");
+
+                    b.HasIndex("UsageLogId", "Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("ux_ai_cost_reconciliations_case_sequence");
+
+                    b.ToTable("ai_cost_reconciliations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_ai_cost_reconciliations_amount", "[effective_cost_usd] >= 0 AND ([confirmed_amount_usd] IS NULL OR [confirmed_amount_usd] > 0)");
+
+                            t.HasCheckConstraint("ck_ai_cost_reconciliations_decision", "[decision] IN (N'ConfirmedCharged', N'ConfirmedNotCharged', N'WrittenOff')");
+
+                            t.HasCheckConstraint("ck_ai_cost_reconciliations_sequence", "[sequence] >= 1");
+                        });
+                });
+
             modelBuilder.Entity("SanalProva.Domain.Generation.AiUsageLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -743,6 +835,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasPrecision(10, 4)
                         .HasColumnType("decimal(10,4)")
                         .HasColumnName("actual_cost_usd");
+
+                    b.Property<Guid?>("AdjustsLogId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("adjusts_log_id");
 
                     b.Property<int>("Attempt")
                         .HasColumnType("int")
@@ -771,9 +867,18 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(10,4)")
                         .HasColumnName("estimated_cost_usd");
 
+                    b.Property<string>("EventKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("event_key");
+
                     b.Property<int?>("InputTokens")
                         .HasColumnType("int")
                         .HasColumnName("input_tokens");
+
+                    b.Property<bool>("IsAdjustment")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_adjustment");
 
                     b.Property<Guid?>("JobId")
                         .HasColumnType("uniqueidentifier")
@@ -784,6 +889,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)")
                         .HasColumnName("model");
+
+                    b.Property<DateTimeOffset?>("OccurredAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("occurred_at");
 
                     b.Property<string>("Operation")
                         .IsRequired()
@@ -815,6 +924,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(20)")
                         .HasColumnName("quality");
 
+                    b.Property<string>("ReconciliationState")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("reconciliation_state");
+
                     b.Property<Guid>("StoreId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("store_id");
@@ -830,8 +944,20 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_ai_usage_logs");
 
+                    b.HasIndex("AdjustsLogId")
+                        .HasDatabaseName("ix_ai_usage_logs_adjusts_log_id");
+
+                    b.HasIndex("EventKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_ai_usage_logs_event_key")
+                        .HasFilter("[event_key] IS NOT NULL");
+
                     b.HasIndex("JobId")
                         .HasDatabaseName("ix_ai_usage_logs_job_id");
+
+                    b.HasIndex("ReconciliationState")
+                        .HasDatabaseName("ix_ai_usage_logs_reconciliation")
+                        .HasFilter("[reconciliation_state] IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "CreatedAt")
                         .HasDatabaseName("ix_ai_usage_logs_organization_id_created_at");
@@ -841,7 +967,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.ToTable("ai_usage_logs", null, t =>
                         {
+                            t.HasCheckConstraint("ck_ai_usage_logs_adjustment", "[is_adjustment] = 0 OR ([adjusts_log_id] IS NOT NULL AND [event_key] IS NOT NULL)");
+
                             t.HasCheckConstraint("ck_ai_usage_logs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
+
+                            t.HasCheckConstraint("ck_ai_usage_logs_reconciliation_state", "[reconciliation_state] IN (N'Open', N'ConfirmedCharged', N'ConfirmedNotCharged', N'WrittenOff')");
                         });
                 });
 
@@ -1046,6 +1176,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RequestedByUserId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("requested_by_user_id");
+
+                    b.Property<decimal?>("ReservedCostUsd")
+                        .HasPrecision(10, 4)
+                        .HasColumnType("decimal(10,4)")
+                        .HasColumnName("reserved_cost_usd");
 
                     b.Property<string>("RevisionParams")
                         .HasColumnType("nvarchar(max)")
@@ -1614,6 +1749,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("is_active");
 
+                    b.Property<bool>("IsPlatformAdmin")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_platform_admin");
+
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("bit")
                         .HasColumnName("lockout_enabled");
@@ -1862,8 +2001,24 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_stored_files_organizations_organization_id");
                 });
 
+            modelBuilder.Entity("SanalProva.Domain.Generation.AiCostReconciliation", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Generation.AiUsageLog", null)
+                        .WithMany()
+                        .HasForeignKey("UsageLogId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id");
+                });
+
             modelBuilder.Entity("SanalProva.Domain.Generation.AiUsageLog", b =>
                 {
+                    b.HasOne("SanalProva.Domain.Generation.AiUsageLog", null)
+                        .WithMany()
+                        .HasForeignKey("AdjustsLogId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_ai_usage_logs_ai_usage_logs_adjusts_log_id");
+
                     b.HasOne("SanalProva.Domain.Generation.GenerationJob", null)
                         .WithMany()
                         .HasForeignKey("JobId")

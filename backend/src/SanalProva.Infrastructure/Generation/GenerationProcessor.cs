@@ -160,12 +160,7 @@ public sealed class GenerationProcessor(
                 .SetProperty(j => j.NextAttemptAt, now), ct);
 
             // Çözüm geçişinde de çökerse: sonuç bilinmiyor (maliyet kaydı yazılamadı, kimlik mutabakat için işte kalır)
-            await uncertain.Where(j => j.ErrorCode == GenerationErrorCode.OutcomeUncertain).ExecuteUpdateAsync(s => s
-                .SetProperty(j => j.Status, GenerationJobStatus.Failed)
-                .SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
-                .SetProperty(j => j.ErrorMessage, "Sağlayıcıdaki işlemin sonucu bilinmiyor; çift ücret olmaması için otomatik yeniden denenmedi.")
-                .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
-                .SetProperty(j => j.FinishedAt, now), ct);
+            await FailUncertainWithCostAsync(db, now, ct);
 
             await lastAttempt.Where(j => j.ProviderSubmitStartedAt == null && j.ProviderRequestId == null).ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, GenerationJobStatus.Failed)
@@ -191,6 +186,43 @@ public sealed class GenerationProcessor(
     /// </list>
     /// Kilitlenme kurbanı olursa deyim geri alınmıştır: iş alınmamış sayılır, sonraki döngü tekrar dener.
     /// </summary>
+    /// <summary>Belirsiz maliyet kaydının olay anahtarı: iş başına tek. İşlemci, kurtarma SQL'i ve süpürücü aynı biçimi kullanır (SQL tarafı: <c>CONCAT(N'uncertain:', LOWER(CONVERT(nvarchar(36), id)))</c>).</summary>
+    internal static string UncertainEventKey(Guid jobId) => $"uncertain:{jobId}";
+
+    internal const string UncertainMessage = "Sağlayıcıdaki işlemin sonucu bilinmiyor; çift ücret olmaması için otomatik yeniden denenmedi.";
+
+    /// <summary>
+    /// Çözüm geçişi verilmiş ve yine kilidi dolmuş (ikinci çökme) işi <c>Failed/OutcomeUncertain</c> yapar <b>ve aynı transaction'da</b> en kötü durum
+    /// maliyet satırını yazar: iş "belirsiz" ama bütçe harcamayı görmüyor durumu oluşamaz. Tek T-SQL toplu işi: <c>UPDATE … OUTPUT INTO</c> ile taşınan
+    /// satırlar tablo değişkenine alınır, ardından <c>INSERT … SELECT</c> yapılır; <c>XACT_ABORT</c> hatada hepsini geri alır.
+    /// Tekrar çalıştırılabilir: iş artık <c>Running</c> olmadığı için ikinci çalıştırma satır bulmaz; olay anahtarı filtreli benzersiz indeksle korunur.
+    /// Tutar <c>reserved_cost_usd</c>'dir (niyetle birlikte yazıldı); eski kayıtlarda boşsa iş başı bütçe sınırı (güvenli üst sınır) kullanılır.
+    /// </summary>
+    private async Task FailUncertainWithCostAsync(AppDbContext db, DateTimeOffset now, CancellationToken ct)
+    {
+        var fallback = settings.CurrentValue.Budget.MaxJobCostUsd;
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
+            SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+            DECLARE @moved TABLE (id uniqueidentifier, organization_id uniqueidentifier, store_id uniqueidentifier, job_type nvarchar(60),
+                provider nvarchar(40), model nvarchar(80), quality nvarchar(20), attempt int, provider_request_id nvarchar(120), reserved decimal(10,4));
+            UPDATE generation_jobs
+               SET status = N'Failed', error_code = N'OutcomeUncertain', error_message = {UncertainMessage}, lease_until = NULL, finished_at = {now}, updated_at = {now}
+            OUTPUT inserted.id, inserted.organization_id, inserted.store_id, inserted.job_type, inserted.provider, inserted.model, inserted.quality,
+                   inserted.attempt, inserted.provider_request_id, COALESCE(inserted.reserved_cost_usd, {fallback})
+              INTO @moved
+             WHERE status = N'Running' AND lease_until < {now} AND attempt >= max_attempts AND error_code = N'OutcomeUncertain'
+               AND (provider_submit_started_at IS NOT NULL OR provider_request_id IS NOT NULL);
+            INSERT INTO ai_usage_logs (id, created_at, updated_at, organization_id, store_id, job_id, provider, model, operation, quality, attempt, success,
+                                       duration_ms, estimated_cost_usd, provider_request_id, error_code, event_key, is_adjustment, reconciliation_state)
+            SELECT NEWID(), {now}, {now}, m.organization_id, m.store_id, m.id, COALESCE(m.provider, N'unknown'), COALESCE(m.model, N'unknown'), m.job_type, m.quality,
+                   m.attempt, 0, 0, m.reserved, m.provider_request_id, N'OutcomeUncertain', CONCAT(N'uncertain:', LOWER(CONVERT(nvarchar(36), m.id))), 0, N'Open'
+              FROM @moved AS m
+             WHERE NOT EXISTS (SELECT 1 FROM ai_usage_logs AS u WHERE u.event_key = CONCAT(N'uncertain:', LOWER(CONVERT(nvarchar(36), m.id))));
+            COMMIT TRANSACTION;
+            """, ct);
+    }
+
     private async Task<Guid?> ClaimAsync(AppDbContext db, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
@@ -360,6 +392,7 @@ public sealed class GenerationProcessor(
                     // Önce yaz, sonra gönder: niyet kalıcı olmadan ücretli istek gönderilmez. Kayıt çit belirteciyle korunur
                     // (iş elden çıktıysa DbUpdateConcurrencyException: gönderim yapılmaz)
                     job.ProviderSubmitStartedAt = clock.GetUtcNow();
+                    job.ReservedCostUsd = worstCase; // tutar niyetle aynı kayıtta: çökme/kurtarma sırasında SQL tarafı da bu tutarı bilir
                     job.ProviderRequestId = null;
                     await db.SaveChangesAsync(CancellationToken.None);
                 },
@@ -778,22 +811,44 @@ public sealed class GenerationProcessor(
     /// <summary>
     /// Sağlayıcıdaki işlemin sonucu bilinmiyor: gerçekleşmiş ve ücretlendirilmiş olabilir. Sağlayıcılar gönderim için idempotency anahtarı
     /// belgelemediğinden "tam olarak bir kez" garanti edilemez; bu yüzden otomatik yeniden gönderim YAPILMAZ (çift ücret riski) ve maliyet
-    /// güvenli tarafta, en kötü durum tahminiyle kaydedilir (bütçe bunu harcanmış sayar; ileride kredi de bu tutarla tutulacak).
+    /// güvenli tarafta, en kötü durum tutarıyla kaydedilir (<see cref="GenerationJob.ReservedCostUsd"/>; bütçe bunu harcanmış sayar).
+    /// Kayıt <c>uncertain:{jobId}</c> olay anahtarıyla tekildir ve mutabakat durumu <see cref="CostReconciliationState.Open"/> olarak açılır:
+    /// platform yöneticisi sonucu sağlayıcı panelinden doğrulayıp karar verene kadar maliyet platformun üzerindedir (müşteri kredisi tüketilmez).
     /// İş "Failed / OutcomeUncertain" olur: aynı istek yeniden gönderildiğinde bu iş döner; personel bilinçli olarak "yeniden dene" diyebilir.
     /// Kimlik biliniyorsa (<see cref="GenerationJob.ProviderRequestId"/>) mutabakat için saklanır.
     /// </summary>
     private async Task MarkOutcomeUncertainAsync(
         AppDbContext db, GenerationJob job, ResolvedStrategy? resolved, decimal worstCase, long elapsedMs, Exception? exception, CancellationToken ct)
     {
-        db.AiUsageLogs.Add(new AiUsageLog
+        var key = UncertainEventKey(job.Id);
+        var log = new AiUsageLog
         {
             OrganizationId = job.OrganizationId, StoreId = job.StoreId, JobId = job.Id,
             Provider = resolved?.Provider ?? job.Provider ?? "unknown", Model = resolved?.Options.Model ?? job.Model ?? "unknown",
             Operation = job.JobType.ToString(), Quality = job.Quality, Attempt = job.Attempt, Success = false, DurationMs = (int)elapsedMs,
-            ErrorCode = GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = worstCase, ProviderRequestId = job.ProviderRequestId,
-        });
+            ErrorCode = GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = job.ReservedCostUsd ?? worstCase, ProviderRequestId = job.ProviderRequestId,
+            EventKey = key, ReconciliationState = CostReconciliationState.Open,
+        };
+
+        // Tekrar çalıştırılabilir: kayıt zaten varsa (kurtarma SQL'i veya süpürücü yazmış) ikinci kayıt eklenmez
+        var alreadyRecorded = await db.AiUsageLogs.IgnoreQueryFilters().AnyAsync(l => l.EventKey == key, CancellationToken.None);
+        if (!alreadyRecorded)
+        {
+            db.AiUsageLogs.Add(log);
+        }
+
         logger.LogWarning(exception, "Sağlayıcıdaki işlemin sonucu belirsiz; otomatik yeniden gönderilmedi: {JobId} (istek kimliği {ProviderRequestId})", job.Id, job.ProviderRequestId ?? "yok");
-        await FailAsync(db, job, GenerationErrorCode.OutcomeUncertain, "Sağlayıcıdaki işlemin sonucu bilinmiyor; çift ücret olmaması için otomatik yeniden denenmedi.", null, ct);
+        try
+        {
+            await FailAsync(db, job, GenerationErrorCode.OutcomeUncertain, UncertainMessage, null, ct);
+        }
+        catch (DbUpdateException ex) when (!alreadyRecorded && DbErrors.IsUniqueViolation(ex))
+        {
+            // Denetim ile yazma arasında başka bir yol (kurtarma SQL'i) aynı kaydı yazdı: benzersiz indeks ikincisini reddetti, hepsi geri alındı.
+            // Kayıt zaten var; yalnızca iş durumu yazılır.
+            db.Entry(log).State = EntityState.Detached;
+            await FailAsync(db, job, GenerationErrorCode.OutcomeUncertain, UncertainMessage, null, ct);
+        }
     }
 
     private async Task FailAsync(AppDbContext db, GenerationJob job, GenerationErrorCode code, string message, Exception? exception, CancellationToken ct)
@@ -847,12 +902,41 @@ public sealed class JobOwnershipLostException : Exception
 }
 
 /// <summary>Kuyruğu işleyen arka plan servisi: <see cref="GenerationSettings.MaxParallelJobs"/> kadar eşzamanlı döngü.</summary>
-public sealed class GenerationWorker(GenerationProcessor processor, IOptionsMonitor<GenerationSettings> settings, ILogger<GenerationWorker> logger) : BackgroundService
+public sealed class GenerationWorker(
+    GenerationProcessor processor, CostReconciliationSweep sweep, IOptionsMonitor<GenerationSettings> settings, ILogger<GenerationWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var loops = Math.Max(1, settings.CurrentValue.MaxParallelJobs);
-        await Task.WhenAll(Enumerable.Range(0, loops).Select(_ => LoopAsync(stoppingToken)));
+        await Task.WhenAll(Enumerable.Range(0, loops).Select(_ => LoopAsync(stoppingToken)).Append(SweepLoopAsync(stoppingToken)));
+    }
+
+    /// <summary>Belirsiz maliyet süpürücüsü: açılışta bir kez, sonra aralıkla. Her çalıştırma idempotenttir; hata sonraki turda yeniden denenir.</summary>
+    private async Task SweepLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var minutes = settings.CurrentValue.ReconciliationSweepMinutes;
+            if (minutes <= 0)
+            {
+                return;
+            }
+
+            try
+            {
+                await sweep.RunOnceAsync(ct);
+                await Task.Delay(TimeSpan.FromMinutes(minutes), ct);
+            }
+            catch (Exception) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Belirsiz maliyet süpürücüsü hata verdi; sonraki turda yeniden denenecek.");
+                await Task.Delay(TimeSpan.FromMinutes(Math.Max(1, minutes)), ct).ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task LoopAsync(CancellationToken ct)

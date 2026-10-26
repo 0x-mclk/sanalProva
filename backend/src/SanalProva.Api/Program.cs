@@ -137,6 +137,7 @@ api.MapSessionEndpoints();
 api.MapGenerationEndpoints();
 api.MapDisplayManagementEndpoints();
 api.MapUsageEndpoints();
+api.MapPlatformCostEndpoints();
 api.MapAiQualityEndpoints();
 api.MapAiModelEndpoints();
 app.MapDisplayDeviceEndpoints();

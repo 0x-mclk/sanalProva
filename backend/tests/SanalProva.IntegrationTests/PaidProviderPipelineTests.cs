@@ -560,6 +560,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         Assert.Empty(images);
         var log = Assert.Single(logs, l => l.ErrorCode == GenerationErrorCode.OutcomeUncertain);
         Assert.False(log.Success);
+        Assert.Equal(($"uncertain:{job.Id}", CostReconciliationState.Open, false), (log.EventKey, log.ReconciliationState, log.IsAdjustment)); // tekil olay + mutabakat bekliyor
         Assert.Equal(worstCase, log.EstimatedCostUsd); // ücretlenmiş olabilir: bütçe en kötü durumu harcanmış sayar
     }
 
@@ -772,6 +773,210 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
             Assert.Equal(1, claimed);
             Assert.Equal((GenerationJobStatus.Failed, GenerationErrorCode.Timeout, 3), timedOut); // ücretli adıma gelinmemişti
             Assert.Equal((GenerationJobStatus.Failed, GenerationErrorCode.OutcomeUncertain, 4), crashedTwice); // ikinci geçiş verilmez
+        }
+    }
+
+    // ---------------------------------------------------------------- M3.1: belirsiz maliyet kaydı (atomik, tekil, tekrar çalıştırılabilir)
+
+    private static ScriptedTryOn UncertainThenSuccess() => new(async (n, options, _) =>
+    {
+        await options.OnSubmitting!();
+        if (n == 1)
+        {
+            throw ProviderHttp.Uncertain(new ProviderException(GenerationErrorCode.Timeout, "yanıt yok", retryable: true));
+        }
+
+        await options.OnSubmitted!($"pred-{n}");
+        return Result("Fashn", "tryon-max", $"pred-{n}", 0.15m, 2, 0.15m);
+    });
+
+    private async Task<AiUsageLog> UncertainRowAsync(Guid jobId)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            return await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().SingleAsync(l => l.EventKey == $"uncertain:{jobId}", TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Belirsiz_islem_rezerve_tutarla_tekil_olay_anahtariyla_Open_kaydedilir_tekrar_calisinca_ikinci_kayit_olmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = UncertainThenSuccess();
+        await using var harness = BuildHarness(fashn);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Equal(0.15m, job.ReservedCostUsd); // tutar gönderim niyetiyle aynı kayıtta yazıldı
+        var row = await UncertainRowAsync(jobId);
+        Assert.Equal((0.15m, CostReconciliationState.Open, false), (row.EstimatedCostUsd, row.ReconciliationState, row.IsAdjustment));
+        Assert.Single(logs);
+
+        // Kurtarma/yeniden işleme: iş yeniden "Running" olup işlenirse aynı olay ikinci kez yazılmaz, sağlayıcı çağrılmaz
+        await ReclaimAsync(jobId);
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (again, againLogs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationErrorCode.OutcomeUncertain, again.ErrorCode);
+        Assert.Single(againLogs);
+        Assert.Equal(1, fashn.Calls);
+    }
+
+    [Fact]
+    public async Task Kurtarma_ikinci_cokmede_isi_belirsiz_yapar_maliyet_satirini_ayni_islemde_yazar_tekrar_calisinca_cogalmaz()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var (reserved, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (legacy, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet); // eski kayıt: tutar yazılmamış
+        var (live, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet); // kilidi geçerli: dokunulmaz
+        var expired = DateTimeOffset.UtcNow.AddMinutes(-1);
+
+        // Paylaşılan veritabanı: kurtarma geri alınan bir işlemde sınanır (ana worker'ın kuyruğuna bir şey bırakılmaz)
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            async Task Crashed(Guid id, decimal? reservedCost) => await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == id).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.MaxAttempts, 4).SetProperty(j => j.Attempt, 4).SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
+                .SetProperty(j => j.Provider, "Fashn").SetProperty(j => j.Model, "tryon-max").SetProperty(j => j.LeaseUntil, expired)
+                .SetProperty(j => j.ProviderSubmitStartedAt, expired).SetProperty(j => j.ReservedCostUsd, reservedCost), ct);
+            await Crashed(reserved, 0.15m);
+            await Crashed(legacy, null);
+
+            await harness.Processor.RecoverExpiredLeasesAsync(db, ct);
+            await harness.Processor.RecoverExpiredLeasesAsync(db, ct); // tekrar çalıştırma
+
+            foreach (var (id, expectedCost) in new[] { (reserved, 0.15m), (legacy, 0.5m) }) // eksik tutar: iş başı bütçe sınırı (0,5) güvenli üst sınır
+            {
+                var state = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == id).Select(j => new { j.Status, j.ErrorCode }).SingleAsync(ct);
+                Assert.Equal((GenerationJobStatus.Failed, GenerationErrorCode.OutcomeUncertain), (state.Status, state.ErrorCode));
+                var rows = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.JobId == id).ToListAsync(ct);
+                var row = Assert.Single(rows); // iş durumu ile aynı transaction: "belirsiz ama bütçe görmüyor" durumu yok; ikinci çalıştırma ikinci satır yazmadı
+                Assert.Equal(($"uncertain:{id}", expectedCost, CostReconciliationState.Open, "Fashn"), (row.EventKey, row.EstimatedCostUsd, row.ReconciliationState, row.Provider));
+                Assert.Equal(GenerationErrorCode.OutcomeUncertain, row.ErrorCode);
+            }
+
+            var untouched = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == live).Select(j => j.Status).SingleAsync(ct);
+            Assert.Equal(GenerationJobStatus.Running, untouched);
+            Assert.Empty(await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.JobId == live).ToListAsync(ct));
+            await transaction.RollbackAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task Suprucu_eksik_maliyet_satirini_ekler_eski_kaydi_duzeltir_ikinci_calistirmada_hicbir_sey_degismez()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (tenant, client, catalog) = await TenantAsync();
+        var (missing, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (legacy, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var sweep = Services.GetRequiredService<CostReconciliationSweep>();
+
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            foreach (var id in new[] { missing, legacy })
+            {
+                await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == id).ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
+                    .SetProperty(j => j.Provider, "Fashn").SetProperty(j => j.Model, "tryon-max").SetProperty(j => j.ReservedCostUsd, 0.15m).SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null), ct);
+            }
+
+            // R4 döneminde yazılmış kayıt: olay anahtarı ve mutabakat durumu yok
+            db.AiUsageLogs.Add(new AiUsageLog
+            {
+                OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, JobId = legacy, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet",
+                Attempt = 1, Success = false, ErrorCode = GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = 0.15m,
+            });
+            await db.SaveChangesAsync(ct);
+
+            async Task<List<AiUsageLog>> RowsAsync(Guid id) => await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.JobId == id).ToListAsync(ct);
+            var first = await sweep.RunOnceAsync(db, ct);
+            Assert.True(first.MissingCostRows >= 1 && first.LegacyKeyed >= 1);
+
+            var missingRow = Assert.Single(await RowsAsync(missing));
+            Assert.Equal(($"uncertain:{missing}", 0.15m, CostReconciliationState.Open), (missingRow.EventKey, missingRow.EstimatedCostUsd, missingRow.ReconciliationState));
+            var legacyRow = Assert.Single(await RowsAsync(legacy)); // ikinci satır eklenmedi: eski satır düzeltildi
+            Assert.Equal(($"uncertain:{legacy}", CostReconciliationState.Open), (legacyRow.EventKey, legacyRow.ReconciliationState));
+
+            await sweep.RunOnceAsync(db, ct); // tekrar çalıştırma
+            Assert.Equal(missingRow.Id, Assert.Single(await RowsAsync(missing)).Id);
+            Assert.Equal(legacyRow.Id, Assert.Single(await RowsAsync(legacy)).Id);
+            await transaction.RollbackAsync(ct);
+        }
+    }
+
+    [Fact]
+    public async Task Belirsiz_maliyet_butceyi_tutar_ucretlenmedi_karari_butceyi_serbest_birakir_yeni_is_ancak_o_zaman_gecer()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = UncertainThenSuccess();
+        await using var harness = BuildHarness(fashn, daily: 0.20m); // tek çağrının en kötü tutarı 0,15
+        var (first, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (blocked, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (after, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var budget = harness.Services.GetRequiredService<BudgetGuard>();
+
+        await harness.Processor.ProcessClaimedAsync(first, TestContext.Current.CancellationToken);
+        await harness.Processor.ProcessClaimedAsync(blocked, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(blocked)).Job.ErrorCode); // belirsiz 0,15 bütçede tutuluyor
+        Assert.Equal(1, fashn.Calls);
+
+        var caseRow = await UncertainRowAsync(first);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            Assert.Equal(0.15m, (await budget.GetSpendAsync(db, tenant.OrganizationId, null, TestContext.Current.CancellationToken)).Today);
+            var decided = await Services.GetRequiredService<CostReconciliationService>().DecideAsync(
+                db, caseRow.Id, Guid.NewGuid(), Guid.NewGuid().ToString("N"), new DecideCommand(CostDecision.ConfirmedNotCharged, null, "Panelde yok", 0), null, TestContext.Current.CancellationToken);
+            Assert.Equal(DecisionOutcome.Recorded, decided.Outcome);
+        }
+
+        (scope, db) = OpenDb();
+        using (scope)
+        {
+            Assert.Equal(0m, (await budget.GetSpendAsync(db, tenant.OrganizationId, null, TestContext.Current.CancellationToken)).Today); // düzeltme asıl günün bütçesine yazıldı
+        }
+
+        await harness.Processor.ProcessClaimedAsync(after, TestContext.Current.CancellationToken);
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(after)).Job.Status);
+    }
+
+    [Fact]
+    public async Task Belirsiz_maliyet_kaydi_oturum_silinse_de_kalir_mutabakat_yapilabilir()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(UncertainThenSuccess());
+        var (jobId, sessionId) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await harness.Processor.ProcessClaimedAsync(jobId, ct);
+        var caseRow = await UncertainRowAsync(jobId);
+
+        // KVKK silmesi: oturum ve bağlı işler gider; maliyet/mutabakat kaydı kişisel veri içermediği için kalır
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.TryOnSessions.IgnoreQueryFilters().Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
+        }
+
+        (scope, db) = OpenDb();
+        using (scope)
+        {
+            Assert.False(await db.GenerationJobs.IgnoreQueryFilters().AnyAsync(j => j.Id == jobId, ct));
+            var survived = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().SingleAsync(l => l.Id == caseRow.Id, ct);
+            Assert.Equal((null, CostReconciliationState.Open, 0.15m), (survived.JobId, survived.ReconciliationState, survived.EstimatedCostUsd));
+
+            var decided = await Services.GetRequiredService<CostReconciliationService>().DecideAsync(
+                db, caseRow.Id, Guid.NewGuid(), Guid.NewGuid().ToString("N"), new DecideCommand(CostDecision.ConfirmedCharged, 0.12m, null, 0), null, ct);
+            Assert.Equal(DecisionOutcome.Recorded, decided.Outcome);
+            Assert.Null(decided.Decision!.JobId);
         }
     }
 

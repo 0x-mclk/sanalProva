@@ -23,6 +23,12 @@ public sealed class GenerationSettings
     /// <summary>Çalışan işin iptal edilip edilmediğinin denetim aralığı.</summary>
     public int CancelPollMs { get; set; } = 1500;
 
+    /// <summary>Belirsiz maliyet süpürücüsünün çalışma aralığı (dakika). 0 = kapalı (testler elle çalıştırır).</summary>
+    public int ReconciliationSweepMinutes { get; set; } = 10;
+
+    /// <summary>Mutabakat bekleyen vaka bu kadar günü aşarsa süpürücü uyarı yazar (veri değişmez).</summary>
+    public int ReconciliationStaleDays { get; set; } = 7;
+
     /// <summary>Geçici hatada bekleme: taban × 2^deneme saniye (2, 4, 8...).</summary>
     public double RetryBackoffBaseSeconds { get; set; } = 2;
 

@@ -99,6 +99,8 @@ public static class DependencyInjection
         // Üretim hattı ve KVKK saklama süresi temizliği
         services.AddSingleton<Generation.IJobNotifier, Generation.NullJobNotifier>();
         services.AddSingleton<Generation.GenerationProcessor>();
+        services.AddSingleton<Generation.CostReconciliationSweep>();
+        services.AddSingleton<Generation.CostReconciliationService>();
         services.AddHostedService<Generation.GenerationWorker>();
         services.AddOptions<Retention.RetentionSettings>().Bind(configuration.GetSection(Retention.RetentionSettings.Section));
         services.AddScoped<Retention.SessionPurger>();

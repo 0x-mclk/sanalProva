@@ -28,6 +28,9 @@ public sealed class AuditTrail(AppDbContext db, CurrentUser user, IHttpContextAc
         });
     }
 
+    /// <summary>İsteğin IP özeti (ham IP asla yazılmaz). Başka bir bağlamda denetim kaydı yazan servisler için.</summary>
+    public string? RequestIpHash() => HashIp(http.HttpContext?.Connection.RemoteIpAddress?.ToString());
+
     private string? HashIp(string? ip)
     {
         if (string.IsNullOrEmpty(ip))

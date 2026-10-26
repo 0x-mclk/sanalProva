@@ -18,6 +18,12 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? PinHash { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// Platform (SaaS işletmecisi) yöneticisi. Mağaza rollerinden ayrıdır ve hiçbir API ile verilemez: yalnızca veritabanında/dağıtım betiğiyle ayarlanır.
+    /// Her istekte veritabanından okunur (rol geri alınınca çerez süresini beklemez).
+    /// </summary>
+    public bool IsPlatformAdmin { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

@@ -1587,6 +1587,133 @@
         }
       }
     },
+    "/api/v1/platform/cost-cases": {
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CostReconciliationState"
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CostCaseDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/cost-cases/{id}": {
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostCaseDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/cost-cases/{id}/decisions": {
+      "post": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CostDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostCaseDetail"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostCaseDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/ai-quality": {
       "get": {
         "tags": [
@@ -2330,6 +2457,207 @@
             "$ref": "#/components/schemas/ConsentMethod"
           }
         }
+      },
+      "CostCaseDetail": {
+        "required": [
+          "case",
+          "decisions"
+        ],
+        "type": "object",
+        "properties": {
+          "case": {
+            "$ref": "#/components/schemas/CostCaseDto"
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CostDecisionDto"
+            }
+          }
+        }
+      },
+      "CostCaseDto": {
+        "required": [
+          "id",
+          "organizationId",
+          "organizationName",
+          "storeId",
+          "jobId",
+          "provider",
+          "model",
+          "quality",
+          "operation",
+          "attempt",
+          "providerRequestId",
+          "reservedCostUsd",
+          "effectiveCostUsd",
+          "state",
+          "decisionCount",
+          "occurredAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationName": {
+            "type": "string"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "quality": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "operation": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "providerRequestId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reservedCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "effectiveCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CostReconciliationState"
+          },
+          "decisionCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CostDecision": {
+        "enum": [
+          "ConfirmedCharged",
+          "ConfirmedNotCharged",
+          "WrittenOff"
+        ]
+      },
+      "CostDecisionDto": {
+        "required": [
+          "sequence",
+          "decision",
+          "effectiveCostUsd",
+          "confirmedAmountUsd",
+          "note",
+          "decidedByUserId",
+          "decidedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/CostDecision"
+          },
+          "effectiveCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "confirmedAmountUsd": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "decidedByUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CostDecisionRequest": {
+        "required": [
+          "decision",
+          "amountUsd",
+          "note",
+          "expectedSequence"
+        ],
+        "type": "object",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/CostDecision"
+          },
+          "amountUsd": {
+            "type": [
+              "null",
+              "number"
+            ],
+            "format": "double"
+          },
+          "note": {
+            "maxLength": 200,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "expectedSequence": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CostReconciliationState": {
+        "enum": [
+          "Open",
+          "ConfirmedCharged",
+          "ConfirmedNotCharged",
+          "WrittenOff"
+        ]
       },
       "CreateSessionRequest": {
         "required": [
@@ -4501,6 +4829,9 @@
     },
     {
       "name": "Display"
+    },
+    {
+      "name": "Platform"
     },
     {
       "name": "Dev"

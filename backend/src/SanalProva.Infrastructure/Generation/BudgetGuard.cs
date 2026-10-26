@@ -13,7 +13,9 @@ public sealed record SpendSummary(decimal Today, decimal Month, decimal Job);
 /// Ücretli bir sağlayıcı çağrısından <b>önce</b> çalışan kapı. İki katman:
 /// 1) <see cref="BudgetSettings.AllowPaidCalls"/> kapalıysa hiçbir ücretli çağrı yapılmaz (varsayılan);
 /// 2) firmanın günlük/aylık tahmini harcaması ve işin kendi toplamı, bu çağrının <b>en kötü durum</b> tahminiyle birlikte sınırları aşıyorsa çağrı yapılmaz.
-/// Harcama <c>ai_usage_logs.estimated_cost_usd</c> toplamıdır (başarısız-ücretli çağrılar ve iptal edilen çağrılar dahil).
+/// Harcama <c>ai_usage_logs.estimated_cost_usd</c> toplamıdır (başarısız-ücretli çağrılar, iptal edilen çağrılar, sonucu belirsiz işlemlerin en kötü durum
+/// tutarı ve mutabakat düzeltmeleri dahil). Düzeltme satırları (±) asıl harcamanın doğduğu güne/aya yazılır (<see cref="AiUsageLog.OccurredAt"/>):
+/// üç gün sonra verilen "ücretlenmedi" kararı bugünün bütçesini değil, o günün bütçesini serbest bırakır.
 /// Eşzamanlı işlerde aşım en fazla <c>MaxParallelJobs × çağrı başı en kötü maliyet</c> kadardır (kilitsiz denetim; bilinçli sade tasarım).
 /// </summary>
 public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, TimeProvider clock)
@@ -25,9 +27,9 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
         var dayStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
         var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
 
-        var logs = db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.OrganizationId == organizationId && l.CreatedAt >= monthStart);
+        var logs = db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.OrganizationId == organizationId && (l.OccurredAt ?? l.CreatedAt) >= monthStart);
         var month = await logs.SumAsync(l => (decimal?)l.EstimatedCostUsd, ct) ?? 0m;
-        var today = await logs.Where(l => l.CreatedAt >= dayStart).SumAsync(l => (decimal?)l.EstimatedCostUsd, ct) ?? 0m;
+        var today = await logs.Where(l => (l.OccurredAt ?? l.CreatedAt) >= dayStart).SumAsync(l => (decimal?)l.EstimatedCostUsd, ct) ?? 0m;
         var job = jobId is null ? 0m : await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().Where(l => l.JobId == jobId).SumAsync(l => (decimal?)l.EstimatedCostUsd, ct) ?? 0m;
         return new SpendSummary(today, month, job);
     }

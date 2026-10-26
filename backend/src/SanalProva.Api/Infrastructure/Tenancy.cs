@@ -156,8 +156,45 @@ public sealed class OrganizationRoleFilter(StoreRole minimum) : IEndpointFilter
     }
 }
 
+/// <summary>
+/// Platform (SaaS işletmecisi) yöneticisi yetkisi. Mağaza rollerinden bağımsızdır: Owner bile platform yöneticisi olamaz ve hiçbir API bu bayrağı veremez
+/// (<see cref="AppUser.IsPlatformAdmin"/> yalnızca veritabanında/dağıtım betiğiyle ayarlanır). Bayrak <b>her istekte</b> veritabanından okunur:
+/// yetki geri alınınca çerezin süresini beklemez. Pasif hesap reddedilir. Reddedilen isteklerde yanıt aynıdır (yetki yapısı sızdırılmaz).
+/// </summary>
+public sealed class PlatformAdminFilter : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(next);
+        var http = context.HttpContext;
+        var userId = http.User.GetUserId();
+        var organizationId = http.User.GetOrganizationId();
+        if (userId is null || organizationId is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var db = http.RequestServices.GetRequiredService<AppDbContext>();
+        var allowed = await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.OrganizationId == organizationId && u.IsActive && u.IsPlatformAdmin, http.RequestAborted);
+        if (!allowed)
+        {
+            return StoreAccessFilter.Problem(StatusCodes.Status403Forbidden, "PLATFORM_ADMIN_REQUIRED", "Bu işlem için yetkiniz yok.");
+        }
+
+        var current = http.RequestServices.GetRequiredService<CurrentUser>();
+        current.UserId = userId.Value;
+        current.OrganizationId = organizationId.Value;
+        return await next(context);
+    }
+}
+
 public static class AccessExtensions
 {
+    public static TBuilder RequirePlatformAdmin<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder =>
+        builder.RequireAuthorization().AddEndpointFilter(new PlatformAdminFilter());
+
     public static TBuilder RequireStore<TBuilder>(this TBuilder builder, StoreRole minimum = StoreRole.Staff)
         where TBuilder : IEndpointConventionBuilder =>
         builder.RequireAuthorization().AddEndpointFilter(new StoreAccessFilter(minimum));

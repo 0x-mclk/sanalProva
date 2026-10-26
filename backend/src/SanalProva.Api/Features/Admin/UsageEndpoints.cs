@@ -49,15 +49,20 @@ public static class UsageEndpoints
         var endUtc = new DateTimeOffset(end.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
 
         // Firma filtresi sorgu filtresinden gelir (ITenantOwned); kayıtlar bellekte gruplanır (rol/enum metin olarak saklanır)
-        var rows = await db.AiUsageLogs.AsNoTracking().Where(l => l.CreatedAt >= startUtc && l.CreatedAt < endUtc).OrderBy(l => l.CreatedAt).Take(20_000).ToListAsync(ct);
+        var rows = await db.AiUsageLogs.AsNoTracking().Where(l => (l.OccurredAt ?? l.CreatedAt) >= startUtc && (l.OccurredAt ?? l.CreatedAt) < endUtc).OrderBy(l => l.OccurredAt ?? l.CreatedAt).Take(20_000).ToListAsync(ct);
 
-        static UsageTotals Totals(IReadOnlyCollection<AiUsageLog> items) => new(
-            items.Count, items.Count(i => i.Success), items.Count(i => !i.Success), items.Count(i => i.Attempt > 1),
-            items.Count == 0 ? 0 : items.Average(i => i.DurationMs), items.Sum(i => i.CreditsUsed ?? 0), items.Sum(i => i.InputTokens ?? 0), items.Sum(i => i.OutputTokens ?? 0),
-            items.Sum(i => i.EstimatedCostUsd), items.Sum(i => i.ActualCostUsd ?? 0));
+        // Mutabakat düzeltme satırları (±) yalnızca tutar toplamlarına girer; çağrı/hata/deneme sayaçları gerçek çağrıları sayar
+        static UsageTotals Totals(IReadOnlyCollection<AiUsageLog> items)
+        {
+            var calls = items.Where(i => !i.IsAdjustment).ToList();
+            return new(
+                calls.Count, calls.Count(i => i.Success), calls.Count(i => !i.Success), calls.Count(i => i.Attempt > 1),
+                calls.Count == 0 ? 0 : calls.Average(i => i.DurationMs), items.Sum(i => i.CreditsUsed ?? 0), items.Sum(i => i.InputTokens ?? 0), items.Sum(i => i.OutputTokens ?? 0),
+                items.Sum(i => i.EstimatedCostUsd), items.Sum(i => i.ActualCostUsd ?? 0));
+        }
 
-        var byDay = rows.GroupBy(r => DateOnly.FromDateTime(r.CreatedAt.UtcDateTime)).OrderBy(g => g.Key)
-            .Select(g => new UsageByDay(g.Key, g.Count(), g.Count(i => !i.Success), g.Sum(i => i.EstimatedCostUsd))).ToList();
+        var byDay = rows.GroupBy(r => DateOnly.FromDateTime((r.OccurredAt ?? r.CreatedAt).UtcDateTime)).OrderBy(g => g.Key)
+            .Select(g => new UsageByDay(g.Key, g.Count(i => !i.IsAdjustment), g.Count(i => !i.IsAdjustment && !i.Success), g.Sum(i => i.EstimatedCostUsd))).ToList();
         var byModel = rows.GroupBy(r => (r.Provider, r.Model, r.Quality)).OrderByDescending(g => g.Sum(i => i.EstimatedCostUsd)).Select(g =>
         {
             var t = Totals(g.ToList());
