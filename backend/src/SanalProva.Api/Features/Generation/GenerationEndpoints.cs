@@ -152,7 +152,8 @@ public static class GenerationEndpoints
         }
 
         var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey);
-        var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, ct);
+        // Sonucu belirsiz (ücretlenmiş olabilir) aynı istek de "etkin" sayılır: tekrar tıklamak yeni ücretli iş açmaz, o iş ve uyarısı döner
+        var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, includeUncertain: true, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
     }
 
@@ -170,7 +171,7 @@ public static class GenerationEndpoints
     /// </summary>
     private static async Task<Admission> AdmitAsync(
         AppDbContext db, SessionReader reader, CurrentUser user, TryOnSession session, GenerationJob job, OutfitSelection? selection,
-        string auditAction, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+        string auditAction, AuditTrail audit, TimeProvider clock, bool includeUncertain, CancellationToken ct)
     {
         try
         {
@@ -178,7 +179,7 @@ public static class GenerationEndpoints
             await AppLocks.AcquireExclusiveAsync(db, AppLocks.StoreAdmission(session.StoreId), AdmissionLockTimeout, ct);
 
             // Kilit altında yeniden: aynı anahtarlı veya aynı ücretli istek için etkin iş varsa o döner (hiçbir şey yazılmaz)
-            if (await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, ct) is { } existing)
+            if (await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, includeUncertain, ct) is { } existing)
             {
                 return new Admission(existing, Created: false, Problem: null);
             }
@@ -204,7 +205,7 @@ public static class GenerationEndpoints
         {
             // Kilidi kullanmayan bir yazma yarışı kazandıysa veritabanı ikinci işi reddetti: kazananı döndür
             db.ChangeTracker.Clear();
-            var winner = await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, ct)
+            var winner = await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, includeUncertain, ct)
                 ?? throw new InvalidOperationException("Benzersizlik ihlali oluştu ama mevcut iş bulunamadı.", ex);
             return new Admission(winner, Created: false, Problem: null);
         }
@@ -217,7 +218,9 @@ public static class GenerationEndpoints
         }
     }
 
-    private static async Task<GenerationJob?> FindExistingAsync(AppDbContext db, Guid sessionId, string idempotencyKey, string? dedupeKey, CancellationToken ct)
+    /// <param name="includeUncertain">Sonucu belirsiz (<see cref="GenerationErrorCode.OutcomeUncertain"/>) iş de etkin sayılsın mı. Yeni istekte evet;
+    /// personelin bilinçli "yeniden dene" isteğinde hayır (iletide ikinci ücret olasılığı açıkça yazar).</param>
+    private static async Task<GenerationJob?> FindExistingAsync(AppDbContext db, Guid sessionId, string idempotencyKey, string? dedupeKey, bool includeUncertain, CancellationToken ct)
     {
         var sameKey = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.SessionId == sessionId && j.IdempotencyKey == idempotencyKey, ct);
         if (sameKey is not null || dedupeKey is null)
@@ -227,7 +230,8 @@ public static class GenerationEndpoints
 
         return await db.GenerationJobs.AsNoTracking()
             .Where(j => j.SessionId == sessionId && j.DedupeKey == dedupeKey
-                && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running || j.Status == GenerationJobStatus.Succeeded))
+                && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running || j.Status == GenerationJobStatus.Succeeded
+                    || (includeUncertain && j.Status == GenerationJobStatus.Failed && j.ErrorCode == GenerationErrorCode.OutcomeUncertain)))
             .OrderByDescending(j => j.CreatedAt)
             .FirstOrDefaultAsync(ct);
     }
@@ -392,7 +396,8 @@ public static class GenerationEndpoints
         var live = strategy.Resolve(failed.JobType).Provider != GenerationStrategy.MockProvider;
         var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
             failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null);
-        var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, ct);
+        // Bilinçli personel kararı: sonucu belirsiz iş yeniden denenebilir (ikinci ücret olasılığı iletide yazar); etkin aynı iş varsa yine o döner
+        var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, includeUncertain: false, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
     }
 

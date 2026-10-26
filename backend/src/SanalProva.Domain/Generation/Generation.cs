@@ -43,6 +43,13 @@ public enum GenerationErrorCode
     /// <summary>Bu iş tipinin motoru henüz uygulanmadı (ör. renk değişimi — Aşama 5).</summary>
     NotImplemented,
 
+    /// <summary>
+    /// Sağlayıcıdaki işlemin sonucu bilinmiyor: ücretli istek gönderildi ama kabul edilip edilmediği (kimlik dönmedi) veya nasıl bittiği
+    /// öğrenilemedi. İşlem gerçekleşmiş ve ücretlendirilmiş olabilir; çift ücret olmaması için otomatik yeniden gönderilmez,
+    /// en kötü durum maliyeti kaydedilir. "Kesin başarısız" değildir.
+    /// </summary>
+    OutcomeUncertain,
+
     /// <summary>Günlük/aylık/iş başı AI bütçe sınırı aşılacaktı; sağlayıcı çağrılmadı (ücret yok).</summary>
     BudgetExceeded,
 
@@ -74,6 +81,13 @@ public sealed class GenerationJob : Entity, IStoreOwned
     public string? Model { get; set; }
     public string? PromptTemplateVersion { get; set; }
     public string? ProviderRequestId { get; set; }
+
+    /// <summary>
+    /// Ücretli gönderim niyeti (önce yaz, sonra gönder): sağlayıcıya POST yapılmadan hemen önce yazılır. Doluysa ve <see cref="ProviderRequestId"/>
+    /// boşsa gönderimin sonucu bilinmiyordur (yanıt kayboldu, süreç çöktü): iş yeniden gönderilmez, <see cref="GenerationErrorCode.OutcomeUncertain"/> olur.
+    /// Sağlayıcı isteği kesin reddettiğinde veya istek kesin bittiğinde temizlenir.
+    /// </summary>
+    public DateTimeOffset? ProviderSubmitStartedAt { get; set; }
 
     public GenerationStage? Stage { get; set; }
 

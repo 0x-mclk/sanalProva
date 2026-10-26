@@ -17,12 +17,15 @@ public sealed record GarmentReference(
 /// <summary>Sağlayıcıya özgü çağrı seçenekleri. Model ve parametreler yapılandırmadan gelir.</summary>
 /// <param name="ResumeRequestId">Önceki denemede sağlayıcıya gönderilmiş ama sonucu alınamamış tahminin kimliği. Verilirse yeni (ücretli) istek açılmaz, aynı tahmin sorgulanır.</param>
 /// <param name="OnSubmitted">Sağlayıcı isteği kabul edip kimlik verdiği anda çağrılır; çağıran kimliği hemen saklar (çökme/zaman aşımında çift ücreti önler).</param>
+/// <param name="OnSubmitting">Ücretli istek gönderilmeden HEMEN önce çağrılır (ücretsiz ön adımlardan, ör. dosya yüklemeden sonra). Çağıran gönderim
+/// niyetini kalıcı yazar: yanıt kaybolur veya süreç çökerse iş yeniden gönderilmez, sonucu belirsiz sayılır.</param>
 public sealed record ProviderRequestOptions(
     string Model,
     IReadOnlyDictionary<string, string> Parameters,
     int? Seed = null,
     string? ResumeRequestId = null,
-    Func<string, Task>? OnSubmitted = null);
+    Func<string, Task>? OnSubmitted = null,
+    Func<Task>? OnSubmitting = null);
 
 public sealed record GeneratedOutput(byte[] Content, string ContentType);
 
@@ -59,6 +62,18 @@ public sealed class ProviderException : Exception
 
     /// <summary>Hata anında bilinen sağlayıcı istek/tahmin kimliği.</summary>
     public string? ProviderRequestId { get; init; }
+
+    /// <summary>
+    /// Ücretli gönderim yapıldı ama sağlayıcının isteği kabul edip etmediği bilinmiyor ve kimlik dönmedi: yanıt gelmedi (zaman aşımı, bağlantı kopması),
+    /// sunucu hatası (belgesi kabul edilmediğini garanti etmeyen sağlayıcılarda 5xx) veya kimliksiz başarılı yanıt. İşleyici yeniden göndermez.
+    /// </summary>
+    public bool SubmissionUncertain { get; init; }
+
+    /// <summary>
+    /// Kimliği bilinen istek sağlayıcıda kesin olarak sona erdi (başarısız, iptal, bulunamadı, süresi doldu): aynı kimlik artık sorgulanmaz ve yeni
+    /// gönderim güvenlidir. İşaretsiz hatalarda (ağ hatası, zaman aşımı, 5xx) kimlik korunur, sonraki deneme aynı isteği sorgular.
+    /// </summary>
+    public bool RequestEnded { get; init; }
 }
 
 /// <summary>Kişi fotoğrafı + tek ürün görseli ile giydirme (ör. FASHN Try-On Max — hazır takım).</summary>

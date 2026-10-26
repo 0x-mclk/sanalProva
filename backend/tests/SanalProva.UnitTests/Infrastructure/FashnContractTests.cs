@@ -194,14 +194,17 @@ public sealed class FashnContractTests
     }
 
     [Fact]
-    public async Task Bozuk_yanit_gecici_hata_sayilir()
+    public async Task Bozuk_basarili_gonderim_yaniti_belirsiz_sayilir_yeniden_denenmez()
     {
+        // 200 yanıtı gelmiş ama kimlik okunamıyor: tahmin açılmış ve kredi harcanıyor olabilir. Yeniden göndermek çift ücret riskidir.
         var handler = new StubHandler().Json(HttpStatusCode.OK, "<html>bakım</html>");
 
         var ex = await Assert.ThrowsAsync<ProviderException>(() => Create(handler).TryOnAsync(Person, Garment, Request(), CancellationToken.None));
 
         Assert.Equal(GenerationErrorCode.ProviderUnavailable, ex.Code);
-        Assert.True(ex.Retryable);
+        Assert.True(ex.SubmissionUncertain);
+        Assert.False(ex.Retryable);
+        Assert.Single(handler.Requests);
         _ = JsonSerializer.Serialize(ex.Message);
     }
 }

@@ -34,6 +34,11 @@ public abstract class FalTryOnProviderBase(FalQueueClient client, IOptionsMonito
         var requestId = options.ResumeRequestId;
         if (string.IsNullOrEmpty(requestId))
         {
+            if (options.OnSubmitting is { } onSubmitting)
+            {
+                await onSubmitting(); // gönderim niyeti kalıcı: yanıt kaybolursa iş yeniden gönderilmez
+            }
+
             requestId = await client.SubmitAsync(options.Model, input, ct);
             if (options.OnSubmitted is { } onSubmitted)
             {

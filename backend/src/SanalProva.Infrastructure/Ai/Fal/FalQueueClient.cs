@@ -43,17 +43,34 @@ public sealed class FalQueueClient(HttpClient http, IOptions<FalOptions> configu
         return parts.Length >= 2 ? $"{parts[0]}/{parts[1]}" : modelId;
     }
 
+    /// <summary>
+    /// Ücretli isteği kuyruğa gönderir. fal gönderim için idempotency anahtarı belgelemiyor: sonucu bilinmeyen gönderim yeniden yapılmaz.
+    /// Kesin ret: yanıtlı 4xx (istek kuyruğa alınmadı). Belirsiz: yanıt yok, 5xx (ağ geçidi isteği iletmiş olabilir) veya kimliksiz başarılı yanıt.
+    /// </summary>
     /// <returns>fal istek kimliği.</returns>
     public async Task<string> SubmitAsync(string modelId, IReadOnlyDictionary<string, object> input, CancellationToken ct)
     {
         using var message = Request(HttpMethod.Post, modelId);
         message.Content = new StringContent(JsonSerializer.Serialize(input), Encoding.UTF8, "application/json");
-        using var response = await SendCheckedAsync(message, submitting: true, resuming: false, ct);
-        using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
-        var id = json.RootElement.TryGetProperty("request_id", out var r) ? r.GetString() : null;
-        return string.IsNullOrEmpty(id)
-            ? throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "fal.ai istek kimliği döndürmedi.", retryable: true)
-            : id;
+        using var response = await ProviderHttp.SendSubmitAsync(http, message, Options.RequestTimeoutSeconds, Provider, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = MapHttpError((int)response.StatusCode, await ProviderHttp.TryReadBodyAsync(response, ct), submitting: true);
+            throw (int)response.StatusCode >= 500 ? ProviderHttp.Uncertain(error) : error;
+        }
+
+        string? id;
+        try
+        {
+            using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
+            id = json.RootElement.TryGetProperty("request_id", out var r) ? r.GetString() : null;
+        }
+        catch (ProviderException)
+        {
+            throw ProviderHttp.UncertainWithoutId(Provider);
+        }
+
+        return string.IsNullOrEmpty(id) ? throw ProviderHttp.UncertainWithoutId(Provider) : id;
     }
 
     /// <summary>İstek tamamlanana kadar yoklar ve sonuç gövdesini döner. Süre aşılırsa yeniden denenebilir zaman aşımı (istek kimliği çağıranda saklıdır).</summary>
@@ -160,7 +177,10 @@ public sealed class FalQueueClient(HttpClient http, IOptions<FalOptions> configu
             if (!submitting && response.StatusCode == HttpStatusCode.NotFound)
             {
                 // İstek kimliği artık yok: yeniden göndermek ikinci ücret olabilir; otomatik denenmez
-                throw new ProviderException(GenerationErrorCode.InvalidOutput, resuming ? "Önceki fal.ai sonucu artık alınamıyor." : "fal.ai isteği bulunamadı.", retryable: false);
+                throw new ProviderException(GenerationErrorCode.InvalidOutput, resuming ? "Önceki fal.ai sonucu artık alınamıyor." : "fal.ai isteği bulunamadı.", retryable: false)
+                {
+                    RequestEnded = true,
+                };
             }
 
             var body = await ProviderHttp.TryReadBodyAsync(response, ct);
@@ -185,23 +205,26 @@ public sealed class FalQueueClient(HttpClient http, IOptions<FalOptions> configu
         };
     }
 
-    /// <summary>Tamamlanmış ama başarısız istek (<c>error_type</c>). fal hata türü listesi bu projede doğrulanmadı: anahtar kelimeye göre sınıflandırılır.</summary>
+    /// <summary>
+    /// Tamamlanmış ama başarısız istek (<c>error_type</c>): istek sağlayıcıda kesin bitti (<see cref="ProviderException.RequestEnded"/>), yeniden denemede
+    /// yeni istek açılabilir. fal hata türü listesi ve başarısız isteğin ücretlendirilip ücretlendirilmediği bu projede doğrulanmadı.
+    /// </summary>
     internal static ProviderException MapRuntimeError(string? errorType)
     {
         var type = errorType ?? string.Empty;
         if (type.Contains("content_policy", StringComparison.OrdinalIgnoreCase) || type.Contains("safety", StringComparison.OrdinalIgnoreCase) || type.Contains("nsfw", StringComparison.OrdinalIgnoreCase))
         {
-            return new(GenerationErrorCode.ContentRejected, "fal.ai içeriği güvenlik nedeniyle reddetti.", retryable: false);
+            return new(GenerationErrorCode.ContentRejected, "fal.ai içeriği güvenlik nedeniyle reddetti.", retryable: false) { RequestEnded = true };
         }
 
         if (type.Contains("image", StringComparison.OrdinalIgnoreCase) || type.Contains("file", StringComparison.OrdinalIgnoreCase) || type.Contains("validation", StringComparison.OrdinalIgnoreCase))
         {
-            return new(GenerationErrorCode.InvalidInput, "fal.ai girdiyi işleyemedi.", retryable: false);
+            return new(GenerationErrorCode.InvalidInput, "fal.ai girdiyi işleyemedi.", retryable: false) { RequestEnded = true };
         }
 
         return type.Contains("timeout", StringComparison.OrdinalIgnoreCase)
-            ? new(GenerationErrorCode.Timeout, "fal.ai işlemi zaman aşımına uğradı.", retryable: true)
-            : new(GenerationErrorCode.ProviderUnavailable, "fal.ai üretimi başarısız oldu.", retryable: true);
+            ? new(GenerationErrorCode.Timeout, "fal.ai işlemi zaman aşımına uğradı.", retryable: true) { RequestEnded = true }
+            : new(GenerationErrorCode.ProviderUnavailable, "fal.ai üretimi başarısız oldu.", retryable: true) { RequestEnded = true };
     }
 
 }

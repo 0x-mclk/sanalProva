@@ -26,6 +26,33 @@ internal static class ProviderHttp
         }
     }
 
+    /// <summary>Ücretli gönderimin sonucu bilinmiyor: aynı hata kodu/iletisi, <see cref="ProviderException.SubmissionUncertain"/> işaretiyle.</summary>
+    public static ProviderException Uncertain(ProviderException exception) =>
+        new(exception.Code, exception.Message, exception.Retryable, exception.InnerException)
+        {
+            SubmissionUncertain = true, ChargedUsd = exception.ChargedUsd, ProviderRequestId = exception.ProviderRequestId,
+        };
+
+    /// <summary>Başarılı yanıt geldi ama istek kimliği okunamadı: istek büyük olasılıkla kabul edildi, sorgulanamaz.</summary>
+    public static ProviderException UncertainWithoutId(string provider) =>
+        new(GenerationErrorCode.ProviderUnavailable, $"{provider} isteği kabul etti ama kimlik döndürmedi.", retryable: false) { SubmissionUncertain = true };
+
+    /// <summary>
+    /// Ücretli gönderim: yanıt yoksa (zaman aşımı, bağlantı) sonuç belirsizdir. Yanıt varsa olduğu gibi döner; durum kodunun kesin ret mi belirsiz mi
+    /// sayılacağına adapter karar verir (sağlayıcı belgesine göre).
+    /// </summary>
+    public static async Task<HttpResponseMessage> SendSubmitAsync(HttpClient http, HttpRequestMessage message, int timeoutSeconds, string provider, CancellationToken ct)
+    {
+        try
+        {
+            return await SendAsync(http, message, timeoutSeconds, provider, ct);
+        }
+        catch (ProviderException ex)
+        {
+            throw Uncertain(ex);
+        }
+    }
+
     public static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, string provider, CancellationToken ct)
     {
         try

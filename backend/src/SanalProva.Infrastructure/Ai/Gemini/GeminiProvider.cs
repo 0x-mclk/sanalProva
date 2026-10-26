@@ -73,6 +73,13 @@ public sealed class GeminiProvider(HttpClient http, IOptions<GeminiOptions> conf
         message.Headers.Add("x-goog-api-key", config.ApiKey);
         message.Headers.Add("Api-Revision", config.ApiRevision);
 
+        // Senkron çağrı: yanıt sonucu da taşır, sorgulanacak istek kimliği yoktur (store:false). Yanıt gelmezse, 5xx gelirse veya başarılı yanıt
+        // okunamazsa istek işlenmiş ve ücretlendirilmiş olabilir: sonuç belirsizdir, yeniden gönderilmez
+        if (request.OnSubmitting is { } onSubmitting)
+        {
+            await onSubmitting();
+        }
+
         HttpResponseMessage response;
         try
         {
@@ -82,12 +89,11 @@ public sealed class GeminiProvider(HttpClient http, IOptions<GeminiOptions> conf
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // İstek Google'a ulaşmış olabilir (ücretlendirme belirsiz): kayıt işleyicide tutulur
-            throw new ProviderException(GenerationErrorCode.Timeout, "Gemini isteği zaman aşımına uğradı.", retryable: true);
+            throw ProviderHttp.Uncertain(new ProviderException(GenerationErrorCode.Timeout, "Gemini isteği zaman aşımına uğradı.", retryable: true));
         }
         catch (HttpRequestException ex)
         {
-            throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "Gemini'ye ulaşılamadı.", retryable: true, ex);
+            throw ProviderHttp.Uncertain(new ProviderException(GenerationErrorCode.ProviderUnavailable, "Gemini'ye ulaşılamadı.", retryable: true, ex));
         }
 
         using (response)
@@ -101,17 +107,17 @@ public sealed class GeminiProvider(HttpClient http, IOptions<GeminiOptions> conf
             {
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw MapHttpError((int)response.StatusCode, null);
+                    throw Classified((int)response.StatusCode, MapHttpError((int)response.StatusCode, null));
                 }
 
-                throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "Gemini yanıtı okunamadı.", retryable: true, ex);
+                throw ProviderHttp.Uncertain(new ProviderException(GenerationErrorCode.ProviderUnavailable, "Gemini yanıtı okunamadı.", retryable: true, ex));
             }
 
             using (json)
             {
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw MapHttpError((int)response.StatusCode, ReadErrorStatus(json.RootElement));
+                    throw Classified((int)response.StatusCode, MapHttpError((int)response.StatusCode, ReadErrorStatus(json.RootElement)));
                 }
 
                 return ParseResult(json.RootElement, request, size, images.Count, (int)stopwatch.ElapsedMilliseconds);
@@ -309,6 +315,9 @@ public sealed class GeminiProvider(HttpClient http, IOptions<GeminiOptions> conf
 
     private static string? ReadErrorStatus(JsonElement root) =>
         root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object && error.TryGetProperty("status", out var status) ? status.GetString() : null;
+
+    /// <summary>5xx: istek işlenmiş olabilir (senkron çağrıda kimlik yok): sonucu belirsiz. 4xx: kesin ret.</summary>
+    private static ProviderException Classified(int status, ProviderException error) => status >= 500 ? ProviderHttp.Uncertain(error) : error;
 
     /// <summary>Google API HTTP hataları. 400/403/404 yeniden denenmez; 429 ve 5xx denenir. Yanıt gövdesi iletiye eklenmez.</summary>
     internal static ProviderException MapHttpError(int status, string? googleStatus) => (status, googleStatus) switch

@@ -44,12 +44,27 @@ public sealed class FashnTryOnProvider(HttpClient http, IOptions<FashnOptions> c
         var id = options.ResumeRequestId;
         if (string.IsNullOrEmpty(id))
         {
-            using var run = await SendAsync(HttpMethod.Post, "v1/run", BuildRunBody(person, garment, options), config, ct);
-            using var runJson = await ReadJsonAsync(run, ct);
-            id = runJson.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+            if (options.OnSubmitting is { } onSubmitting)
+            {
+                await onSubmitting(); // gönderim niyeti kalıcı: yanıt kaybolursa iş yeniden gönderilmez
+            }
+
+            // FASHN Error Handling: yanıtlı API hatasında tahmin kimliği verilmez ve istek işlenmez (kesin ret). Yanıt hiç gelmezse veya
+            // başarılı yanıtta kimlik yoksa sonuç belirsizdir (idempotency anahtarı belgelenmemiş)
+            using var run = await SendAsync(HttpMethod.Post, "v1/run", BuildRunBody(person, garment, options), config, ct, submitting: true);
+            try
+            {
+                using var runJson = await ReadJsonAsync(run, ct);
+                id = runJson.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+            }
+            catch (ProviderException)
+            {
+                throw ProviderHttp.UncertainWithoutId("FASHN");
+            }
+
             if (string.IsNullOrEmpty(id))
             {
-                throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "FASHN tahmin kimliği döndürmedi.", retryable: true);
+                throw ProviderHttp.UncertainWithoutId("FASHN");
             }
 
             if (options.OnSubmitted is { } onSubmitted)
@@ -128,7 +143,8 @@ public sealed class FashnTryOnProvider(HttpClient http, IOptions<FashnOptions> c
     private static string ToDataUri(ImageInput image) =>
         $"data:{(string.IsNullOrWhiteSpace(image.ContentType) ? "image/jpeg" : image.ContentType)};base64,{Convert.ToBase64String(image.Content.Span)}";
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, FashnOptions config, CancellationToken ct, bool resuming = false)
+    /// <param name="submitting">Ücretli <c>/v1/run</c> gönderimi: yanıt gelmezse sonuç belirsizdir (<see cref="ProviderException.SubmissionUncertain"/>).</param>
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, string? body, FashnOptions config, CancellationToken ct, bool resuming = false, bool submitting = false)
     {
         using var message = new HttpRequestMessage(method, path);
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
@@ -146,11 +162,13 @@ public sealed class FashnTryOnProvider(HttpClient http, IOptions<FashnOptions> c
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new ProviderException(GenerationErrorCode.Timeout, "FASHN isteği zaman aşımına uğradı.", retryable: true);
+            var timedOut = new ProviderException(GenerationErrorCode.Timeout, "FASHN isteği zaman aşımına uğradı.", retryable: true);
+            throw submitting ? ProviderHttp.Uncertain(timedOut) : timedOut;
         }
         catch (HttpRequestException ex)
         {
-            throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "FASHN'a ulaşılamadı.", retryable: true, ex);
+            var unreachable = new ProviderException(GenerationErrorCode.ProviderUnavailable, "FASHN'a ulaşılamadı.", retryable: true, ex);
+            throw submitting ? ProviderHttp.Uncertain(unreachable) : unreachable;
         }
 
         if (response.IsSuccessStatusCode)
@@ -163,7 +181,7 @@ public sealed class FashnTryOnProvider(HttpClient http, IOptions<FashnOptions> c
             if (resuming && response.StatusCode == HttpStatusCode.NotFound)
             {
                 // Önceki tahmin artık yok (60 dk doldu): yeniden göndermek ikinci kez ücretlendirir. Otomatik denenmez.
-                throw new ProviderException(GenerationErrorCode.InvalidOutput, "Önceki sonuç artık alınamıyor. Gerekirse üretimi tekrar başlatın.", retryable: false);
+                throw new ProviderException(GenerationErrorCode.InvalidOutput, "Önceki sonuç artık alınamıyor. Gerekirse üretimi tekrar başlatın.", retryable: false) { RequestEnded = true };
             }
 
             var name = await TryReadErrorNameAsync(response, ct);
@@ -274,17 +292,17 @@ public sealed class FashnTryOnProvider(HttpClient http, IOptions<FashnOptions> c
         _ => new(GenerationErrorCode.Unknown, "FASHN beklenmeyen bir hata döndürdü.", retryable: false),
     };
 
-    /// <summary>Tahmin <c>failed</c> durumunda: hata adına göre. Başarısız tahmin kredi harcamaz.</summary>
+    /// <summary>Tahmin <c>failed</c> durumunda: hata adına göre. Tahmin sağlayıcıda kesin bitti; başarısız tahmin kredi harcamaz (FASHN belgesi).</summary>
     internal static ProviderException MapRuntimeError(JsonElement root)
     {
         var name = root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object && error.TryGetProperty("name", out var n) ? n.GetString() : null;
         return name switch
         {
-            "ContentModerationError" => new(GenerationErrorCode.ContentRejected, "FASHN girdiyi içerik politikası nedeniyle reddetti.", retryable: false),
-            "ImageLoadError" => new(GenerationErrorCode.InvalidInput, "FASHN görseli yükleyemedi.", retryable: false),
-            "InputValidationError" => new(GenerationErrorCode.InvalidInput, "FASHN girdi doğrulaması başarısız.", retryable: false),
-            "ThirdPartyError" or "UnavailableError" or "PipelineError" => new(GenerationErrorCode.ProviderUnavailable, "FASHN geçici olarak işleyemedi.", retryable: true),
-            _ => new(GenerationErrorCode.Unknown, "FASHN üretimi başarısız oldu.", retryable: true),
+            "ContentModerationError" => new(GenerationErrorCode.ContentRejected, "FASHN girdiyi içerik politikası nedeniyle reddetti.", retryable: false) { RequestEnded = true },
+            "ImageLoadError" => new(GenerationErrorCode.InvalidInput, "FASHN görseli yükleyemedi.", retryable: false) { RequestEnded = true },
+            "InputValidationError" => new(GenerationErrorCode.InvalidInput, "FASHN girdi doğrulaması başarısız.", retryable: false) { RequestEnded = true },
+            "ThirdPartyError" or "UnavailableError" or "PipelineError" => new(GenerationErrorCode.ProviderUnavailable, "FASHN geçici olarak işleyemedi.", retryable: true) { RequestEnded = true },
+            _ => new(GenerationErrorCode.Unknown, "FASHN üretimi başarısız oldu.", retryable: true) { RequestEnded = true },
         };
     }
 }

@@ -155,6 +155,46 @@ public sealed class AdmissionConcurrencyTests(ApiFactory factory) : ApiTestBase(
     }
 
     [Fact]
+    public async Task Sonucu_belirsiz_is_ayni_istekte_doner_yeniden_dene_ve_varyasyon_bilincli_yeni_is_acar()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (_, client, session) = await ReadyAsync(_real, _real.Services);
+        var uncertain = await StartGenerationAsync(client, session.Id);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == uncertain.Id).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
+                .SetProperty(j => j.ProviderSubmitStartedAt, DateTimeOffset.UtcNow), ct);
+        }
+
+        // Aynı istek (farklı Idempotency-Key, eşzamanlı): sağlayıcıda gerçekleşmiş olabilecek işlem ikinci kez ücretlendirilmez, aynı iş döner
+        var repeated = await Task.WhenAll(Enumerable.Range(0, ConcurrentRequests).Select(_ => StartGenerationAsync(client, session.Id)));
+        Assert.All(repeated, j => Assert.Equal(uncertain.Id, j.Id));
+        var shown = repeated[0];
+        Assert.Equal((GenerationJobStatus.Failed, GenerationErrorCode.OutcomeUncertain, true), (shown.Status, shown.ErrorCode, shown.Retryable));
+        Assert.Contains("ikinci bir ücret", shown.Message, StringComparison.Ordinal); // personel riski görerek karar verir
+
+        // Bilinçli yeniden deneme: tek yeni iş (eşzamanlı basışlarda da)
+        var retries = await Task.WhenAll(Enumerable.Range(0, ConcurrentRequests).Select(_ =>
+            client.PostAsync<JobDto>($"/api/v1/jobs/{uncertain.Id}/retry", new { }, HttpStatusCode.Accepted)));
+        var retried = Assert.Single(retries.Select(j => j.Id).Distinct());
+        Assert.NotEqual(uncertain.Id, retried);
+
+        // Bilinçli varyasyon: ayrı (ücretli) iş
+        var variation = await client.PostAsync<JobDto>($"/api/v1/sessions/{session.Id}/generations", new { allowVariation = true }, HttpStatusCode.Accepted,
+            r => r.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N")));
+        Assert.NotEqual(uncertain.Id, variation.Id);
+        Assert.NotEqual(retried, variation.Id);
+
+        (scope, db) = OpenDb();
+        using (scope)
+        {
+            Assert.Equal(3, await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == session.Id, ct));
+        }
+    }
+
+    [Fact]
     public async Task Kilit_atlanirsa_veritabani_ayni_ucretli_istek_icin_ikinci_etkin_isi_reddeder()
     {
         var ct = TestContext.Current.CancellationToken;

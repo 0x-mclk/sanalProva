@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -131,7 +131,7 @@ public sealed class GenerationProcessor(
         return renewed == 1;
     }
 
-    private async Task RecoverExpiredLeasesAsync(AppDbContext db, CancellationToken ct)
+    internal async Task RecoverExpiredLeasesAsync(AppDbContext db, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var expired = db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Status == GenerationJobStatus.Running && j.LeaseUntil < now);
@@ -144,7 +144,30 @@ public sealed class GenerationProcessor(
                 .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
                 .SetProperty(j => j.NextAttemptAt, now), ct);
 
-            await expired.Where(j => j.Attempt >= j.MaxAttempts).ExecuteUpdateAsync(s => s
+            // Son denemede ücretli gönderim başlamışsa (niyet veya kimlik kayıtlı) iş BİR KEZ çözüm geçişi için kuyruğa alınır: işleyici bilinen
+            // kimliği sorgular ya da sonucu belirsiz olarak en kötü durum maliyetiyle kaydeder. Bu geçişte yeni ücretli istek açılamaz (niyet varken
+            // gönderim yapılmaz, kesin bitişte deneme hakkı kalmaz). Deneme sınırı bir artırılır (ck_generation_jobs_attempts korunur);
+            // OutcomeUncertain kodu "çözüm geçişi verildi" işaretidir (mesaj yalnızca Failed işte gösterilir).
+            // Deyimlerin koşulları birbirini dışlar: deyimler arasında kilidi dolan iş, bir öncekinin payına düşeni yanlış sınıfa almaz
+            var lastAttempt = expired.Where(j => j.Attempt >= j.MaxAttempts);
+            var uncertain = lastAttempt.Where(j => j.ProviderSubmitStartedAt != null || j.ProviderRequestId != null);
+            await uncertain.Where(j => j.ErrorCode != GenerationErrorCode.OutcomeUncertain).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Queued)
+                .SetProperty(j => j.Stage, (GenerationStage?)null)
+                .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(j => j.MaxAttempts, j => j.MaxAttempts + 1)
+                .SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
+                .SetProperty(j => j.NextAttemptAt, now), ct);
+
+            // Çözüm geçişinde de çökerse: sonuç bilinmiyor (maliyet kaydı yazılamadı, kimlik mutabakat için işte kalır)
+            await uncertain.Where(j => j.ErrorCode == GenerationErrorCode.OutcomeUncertain).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Failed)
+                .SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
+                .SetProperty(j => j.ErrorMessage, "Sağlayıcıdaki işlemin sonucu bilinmiyor; çift ücret olmaması için otomatik yeniden denenmedi.")
+                .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(j => j.FinishedAt, now), ct);
+
+            await lastAttempt.Where(j => j.ProviderSubmitStartedAt == null && j.ProviderRequestId == null).ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, GenerationJobStatus.Failed)
                 .SetProperty(j => j.ErrorCode, GenerationErrorCode.Timeout)
                 .SetProperty(j => j.ErrorMessage, "İşlem zaman aşımına uğradı.")
@@ -313,6 +336,15 @@ public sealed class GenerationProcessor(
                 worstCase = tryOn is { } priced
                     ? TryOnModels.Price(priced.Model, priced.Quality, settings.CurrentValue.Pricing, ProviderHttp.CostInput(resolved.Options, inputs.Person, inputs.Garments[0].Image)).WorstCase
                     : costs.WorstCasePerCallUsd(resolved.ConfiguredProvider, resolved.Options.Model, resolved.Options.Parameters, inputs.Garments.Count + 1);
+
+                // Önceki denemede ücretli gönderim başlamış ama kimlik kaydedilememiş (yanıt kayboldu, süreç çöktü): istek sağlayıcıda işlenmiş
+                // olabilir. Sorgulanacak kimlik yok ve sağlayıcılar idempotency anahtarı belgelemiyor: yeniden gönderilmez, sonuç belirsizdir
+                if (resumeId is null && job.ProviderSubmitStartedAt is not null)
+                {
+                    await MarkOutcomeUncertainAsync(db, job, resolved, worstCase, stopwatch.ElapsedMilliseconds, null, ct);
+                    return;
+                }
+
                 if (resumeId is null)
                 {
                     await budget.EnsureAllowedAsync(db, job.OrganizationId, job.Id, worstCase, ct);
@@ -323,10 +355,28 @@ public sealed class GenerationProcessor(
             {
                 Seed = SeedFor(job.Id),
                 ResumeRequestId = resumeId,
+                OnSubmitting = async () =>
+                {
+                    // Önce yaz, sonra gönder: niyet kalıcı olmadan ücretli istek gönderilmez. Kayıt çit belirteciyle korunur
+                    // (iş elden çıktıysa DbUpdateConcurrencyException: gönderim yapılmaz)
+                    job.ProviderSubmitStartedAt = clock.GetUtcNow();
+                    job.ProviderRequestId = null;
+                    await db.SaveChangesAsync(CancellationToken.None);
+                },
                 OnSubmitted = async id =>
                 {
                     job.ProviderRequestId = id;
-                    await db.SaveChangesAsync(CancellationToken.None); // kimlik hemen kalıcı: çökmede aynı tahmin sorgulanır
+                    try
+                    {
+                        await db.SaveChangesAsync(CancellationToken.None); // kimlik hemen kalıcı: çökmede aynı tahmin sorgulanır
+                    }
+                    catch (Exception ex) when (ex is not DbUpdateConcurrencyException and not OperationCanceledException)
+                    {
+                        // Kimlik yazılamadı (ör. veritabanı kesintisi). Bellekte tutulur, sonuç kaydıyla birlikte yazılır; bu sırada süreç çökerse
+                        // gönderim niyeti kayıtlı olduğu için iş yeniden gönderilmez (sonucu belirsiz olur). Mutabakat için günlüğe yazılır
+                        // (sağlayıcı istek kimliği kişisel veri değildir)
+                        logger.LogWarning(ex, "Sağlayıcı istek kimliği kaydedilemedi: {JobId} → {ProviderRequestId}", job.Id, id);
+                    }
                 },
             };
 
@@ -396,7 +446,7 @@ public sealed class GenerationProcessor(
         }
         catch (ProviderException ex)
         {
-            await HandleProviderFailureAsync(db, job, resolved, ex, stopwatch.ElapsedMilliseconds, ct);
+            await HandleProviderFailureAsync(db, job, resolved, ex, worstCase, stopwatch.ElapsedMilliseconds, ct);
         }
         catch (ImageRejectedException ex)
         {
@@ -404,6 +454,13 @@ public sealed class GenerationProcessor(
         }
         catch (Exception ex)
         {
+            // Ücretli çağrı başladı ama sonuç alınamadan beklenmeyen hata: sağlayıcıdaki işlem sürüyor/ücretlenmiş olabilir → sonucu belirsiz
+            if (callStarted && paid is null && resolved is not null && resolved.Provider != GenerationStrategy.MockProvider)
+            {
+                await MarkOutcomeUncertainAsync(db, job, resolved, worstCase, stopwatch.ElapsedMilliseconds, ex, ct);
+                return;
+            }
+
             // Sağlayıcı sonucu üretti (ücret doğdu) ama kaydedilemediyse maliyet yine yazılır: bütçe kapısı gerçek harcamayı görür
             if (paid is not null)
             {
@@ -657,13 +714,39 @@ public sealed class GenerationProcessor(
         };
     }
 
-    private async Task HandleProviderFailureAsync(AppDbContext db, GenerationJob job, ResolvedStrategy? resolved, ProviderException ex, long elapsedMs, CancellationToken ct)
+    /// <summary>
+    /// Sağlayıcı hatası üç sınıfa ayrılır:
+    /// <list type="number">
+    /// <item><b>Sonucu bilinmeyen gönderim</b> (<see cref="ProviderException.SubmissionUncertain"/>): istek kabul edilmiş olabilir, kimlik yok →
+    /// yeniden gönderilmez, <see cref="GenerationErrorCode.OutcomeUncertain"/>.</item>
+    /// <item><b>Kesin sonuç</b>: istek hiç kabul edilmedi (kimlik yok, yanıtlı ret) veya kimlikli istek sağlayıcıda kesin bitti
+    /// (<see cref="ProviderException.RequestEnded"/>) → gönderim niyeti ve kimlik temizlenir; yeniden deneme yeni istek açabilir.</item>
+    /// <item><b>Kimlikli istek sürüyor olabilir</b> (yoklamada zaman aşımı, ağ hatası, 5xx) → kimlik korunur, sonraki deneme aynı isteği sorgular.
+    /// Deneme hakkı biterse sonuç bilinmediği için <see cref="GenerationErrorCode.OutcomeUncertain"/>.</item>
+    /// </list>
+    /// </summary>
+    private async Task HandleProviderFailureAsync(
+        AppDbContext db, GenerationJob job, ResolvedStrategy? resolved, ProviderException ex, decimal worstCase, long elapsedMs, CancellationToken ct)
     {
-        // Yalnızca zaman aşımında tahmin kimliği korunur (aynı tahmin sorgulanır); diğer hatalarda yeni deneme yeni tahmin açar (başarısız tahmin ücretsizdir)
-        var requestId = ex.ProviderRequestId ?? job.ProviderRequestId;
-        if (ex.Code != GenerationErrorCode.Timeout)
+        if (ex.SubmissionUncertain)
         {
+            await MarkOutcomeUncertainAsync(db, job, resolved, worstCase, elapsedMs, ex, ct);
+            return;
+        }
+
+        var requestId = ex.ProviderRequestId ?? job.ProviderRequestId;
+        if (ex.RequestEnded || job.ProviderRequestId is null)
+        {
+            // Sağlayıcıda süren istek yok: yeni gönderim güvenli
             job.ProviderRequestId = null;
+            job.ProviderSubmitStartedAt = null;
+        }
+
+        if (job.ProviderRequestId is not null && ex.Retryable && job.Attempt >= job.MaxAttempts)
+        {
+            // Deneme hakkı bitti ama kimliği bilinen istek sağlayıcıda hâlâ sürüyor/tamamlanmış olabilir: kesin başarısız değil, sonucu belirsiz
+            await MarkOutcomeUncertainAsync(db, job, resolved, worstCase, elapsedMs, ex, ct);
+            return;
         }
 
         db.AiUsageLogs.Add(new AiUsageLog
@@ -690,6 +773,27 @@ public sealed class GenerationProcessor(
         }
 
         await FailAsync(db, job, ex.Code, ex.Retryable ? "Sağlayıcı yanıt vermedi." : ex.Message, ex, ct);
+    }
+
+    /// <summary>
+    /// Sağlayıcıdaki işlemin sonucu bilinmiyor: gerçekleşmiş ve ücretlendirilmiş olabilir. Sağlayıcılar gönderim için idempotency anahtarı
+    /// belgelemediğinden "tam olarak bir kez" garanti edilemez; bu yüzden otomatik yeniden gönderim YAPILMAZ (çift ücret riski) ve maliyet
+    /// güvenli tarafta, en kötü durum tahminiyle kaydedilir (bütçe bunu harcanmış sayar; ileride kredi de bu tutarla tutulacak).
+    /// İş "Failed / OutcomeUncertain" olur: aynı istek yeniden gönderildiğinde bu iş döner; personel bilinçli olarak "yeniden dene" diyebilir.
+    /// Kimlik biliniyorsa (<see cref="GenerationJob.ProviderRequestId"/>) mutabakat için saklanır.
+    /// </summary>
+    private async Task MarkOutcomeUncertainAsync(
+        AppDbContext db, GenerationJob job, ResolvedStrategy? resolved, decimal worstCase, long elapsedMs, Exception? exception, CancellationToken ct)
+    {
+        db.AiUsageLogs.Add(new AiUsageLog
+        {
+            OrganizationId = job.OrganizationId, StoreId = job.StoreId, JobId = job.Id,
+            Provider = resolved?.Provider ?? job.Provider ?? "unknown", Model = resolved?.Options.Model ?? job.Model ?? "unknown",
+            Operation = job.JobType.ToString(), Quality = job.Quality, Attempt = job.Attempt, Success = false, DurationMs = (int)elapsedMs,
+            ErrorCode = GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = worstCase, ProviderRequestId = job.ProviderRequestId,
+        });
+        logger.LogWarning(exception, "Sağlayıcıdaki işlemin sonucu belirsiz; otomatik yeniden gönderilmedi: {JobId} (istek kimliği {ProviderRequestId})", job.Id, job.ProviderRequestId ?? "yok");
+        await FailAsync(db, job, GenerationErrorCode.OutcomeUncertain, "Sağlayıcıdaki işlemin sonucu bilinmiyor; çift ücret olmaması için otomatik yeniden denenmedi.", null, ct);
     }
 
     private async Task FailAsync(AppDbContext db, GenerationJob job, GenerationErrorCode code, string message, Exception? exception, CancellationToken ct)

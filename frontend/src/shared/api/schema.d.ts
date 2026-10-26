@@ -2161,7 +2161,7 @@ export interface components {
             aiModel: null | string;
         };
         /** @enum {unknown} */
-        GenerationErrorCode: "InvalidInput" | "ContentRejected" | "RateLimited" | "Timeout" | "ProviderUnavailable" | "InvalidOutput" | "MaskQualityLow" | "QuotaExceeded" | "NotImplemented" | "BudgetExceeded" | "ProviderNotConfigured" | "Unknown" | null;
+        GenerationErrorCode: "InvalidInput" | "ContentRejected" | "RateLimited" | "Timeout" | "ProviderUnavailable" | "InvalidOutput" | "MaskQualityLow" | "QuotaExceeded" | "NotImplemented" | "OutcomeUncertain" | "BudgetExceeded" | "ProviderNotConfigured" | "Unknown" | null;
         /** @enum {unknown} */
         GenerationJobStatus: "Queued" | "Running" | "Succeeded" | "Failed" | "Cancelled";
         /** @enum {unknown} */

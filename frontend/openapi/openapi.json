@@ -2692,6 +2692,7 @@
           "MaskQualityLow",
           "QuotaExceeded",
           "NotImplemented",
+          "OutcomeUncertain",
           "BudgetExceeded",
           "ProviderNotConfigured",
           "Unknown",

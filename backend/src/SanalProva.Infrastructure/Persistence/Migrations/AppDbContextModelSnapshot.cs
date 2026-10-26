@@ -841,7 +841,7 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.ToTable("ai_usage_logs", null, t =>
                         {
-                            t.HasCheckConstraint("ck_ai_usage_logs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
+                            t.HasCheckConstraint("ck_ai_usage_logs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
                         });
                 });
 
@@ -1029,6 +1029,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(120)")
                         .HasColumnName("provider_request_id");
 
+                    b.Property<DateTimeOffset?>("ProviderSubmitStartedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("provider_submit_started_at");
+
                     b.Property<string>("Quality")
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)")
@@ -1121,7 +1125,7 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_generation_jobs_attempts", "attempt >= 0 AND attempt <= max_attempts");
 
-                            t.HasCheckConstraint("ck_generation_jobs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
+                            t.HasCheckConstraint("ck_generation_jobs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
 
                             t.HasCheckConstraint("ck_generation_jobs_job_type", "[job_type] IN (N'OutfitSet', N'FreeCombination', N'Recolor', N'ProductSwap', N'VariantPreview')");
 

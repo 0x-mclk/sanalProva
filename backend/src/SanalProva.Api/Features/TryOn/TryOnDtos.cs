@@ -82,6 +82,7 @@ internal static class JobMessages
         GenerationErrorCode.BudgetExceeded => ("AI bütçe sınırına ulaşıldı. Yöneticiye bildirin; sağlayıcı çağrılmadı, ücret doğmadı.", false),
         GenerationErrorCode.ProviderNotConfigured => ("Bu üretim şu an etkin değil (gerçek AI kapalı veya bu işlem henüz desteklenmiyor). Yöneticiyle iletişime geçin.", false),
         GenerationErrorCode.NotImplemented => ("Bu işlem henüz desteklenmiyor.", false),
+        GenerationErrorCode.OutcomeUncertain => ("AI servisine gönderilen istek yanıtlanmadı; işlem gerçekleşmiş ve ücretlendirilmiş olabilir. Çift ücret olmaması için otomatik yeniden denenmedi. Yeniden denerseniz ikinci bir ücret oluşabilir.", true),
         _ => ("Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.", true),
     };
 

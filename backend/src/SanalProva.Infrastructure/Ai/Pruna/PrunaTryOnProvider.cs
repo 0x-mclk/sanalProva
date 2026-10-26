@@ -42,8 +42,14 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         var id = options.ResumeRequestId;
         if (string.IsNullOrEmpty(id))
         {
+            // Dosya yükleme ücretsiz ön adımdır (hatası normal yeniden denenir); ücretli adım tahmin isteğidir
             var personUrl = await UploadAsync(person, "person.jpg", config, ct);
             var garmentUrl = await UploadAsync(garment, "garment.jpg", config, ct);
+            if (options.OnSubmitting is { } onSubmitting)
+            {
+                await onSubmitting(); // gönderim niyeti kalıcı: yanıt kaybolursa iş yeniden gönderilmez
+            }
+
             id = await SubmitAsync(personUrl, garmentUrl, options, config, ct);
             if (options.OnSubmitted is { } onSubmitted)
             {
@@ -105,12 +111,28 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         message.Content = new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["input"] = input }), Encoding.UTF8);
         // Pruna "application/json; charset=utf-8" başlığını 400 ("specified Content-Type is not allowed") ile reddeder (2026-10-22 doğrulandı)
         message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using var response = await SendCheckedAsync(message, resuming: false, config, ct);
-        using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
-        var id = json.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
-        return string.IsNullOrEmpty(id)
-            ? throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "Pruna tahmin kimliği döndürmedi.", retryable: true)
-            : id;
+
+        // Pruna idempotency anahtarı ve tahmin listesi belgelemiyor: sonucu bilinmeyen gönderim yeniden yapılmaz.
+        // Kesin ret: yanıtlı 4xx. Belirsiz: yanıt yok, 5xx veya kimliksiz başarılı yanıt.
+        using var response = await ProviderHttp.SendSubmitAsync(http, message, config.RequestTimeoutSeconds, Provider, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = MapHttpError((int)response.StatusCode);
+            throw (int)response.StatusCode >= 500 ? ProviderHttp.Uncertain(error) : error;
+        }
+
+        string? id;
+        try
+        {
+            using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
+            id = json.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+        }
+        catch (ProviderException)
+        {
+            throw ProviderHttp.UncertainWithoutId(Provider);
+        }
+
+        return string.IsNullOrEmpty(id) ? throw ProviderHttp.UncertainWithoutId(Provider) : id;
     }
 
     private async Task<string> WaitAsync(string id, PrunaOptions config, CancellationToken ct)
@@ -134,7 +156,7 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
                     case "failed":
                         throw MapRuntimeError(root.TryGetProperty("error", out var e) ? e.GetString() : null);
                     case "canceled":
-                        throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "Pruna tahmini iptal edildi.", retryable: false);
+                        throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "Pruna tahmini iptal edildi.", retryable: false) { RequestEnded = true };
                 }
             }
 
@@ -153,7 +175,7 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         using var response = await ProviderHttp.SendAsync(http, message, config.RequestTimeoutSeconds, Provider, ct);
         if (response.StatusCode == HttpStatusCode.Gone)
         {
-            throw new ProviderException(GenerationErrorCode.InvalidOutput, "Pruna çıktısının süresi dolmuş.", retryable: false);
+            throw new ProviderException(GenerationErrorCode.InvalidOutput, "Pruna çıktısının süresi dolmuş.", retryable: false) { RequestEnded = true };
         }
 
         if (!response.IsSuccessStatusCode)
@@ -176,7 +198,7 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         {
             if (resuming && response.StatusCode == HttpStatusCode.NotFound)
             {
-                throw new ProviderException(GenerationErrorCode.InvalidOutput, "Pruna tahmini bulunamadı veya süresi doldu.", retryable: false);
+                throw new ProviderException(GenerationErrorCode.InvalidOutput, "Pruna tahmini bulunamadı veya süresi doldu.", retryable: false) { RequestEnded = true };
             }
 
             throw MapHttpError((int)response.StatusCode);
@@ -193,22 +215,25 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         _ => new(GenerationErrorCode.Unknown, "Pruna beklenmeyen bir hata döndürdü.", retryable: false),
     };
 
-    /// <summary>Başarısız tahmin: yalnızca serbest metin hata verilir (şema). Güvenlik/NSFW anahtar kelimeleri içerik reddi sayılır.</summary>
+    /// <summary>
+    /// Başarısız tahmin: yalnızca serbest metin hata verilir (şema). Tahmin sağlayıcıda kesin bitti (<see cref="ProviderException.RequestEnded"/>).
+    /// Güvenlik/NSFW anahtar kelimeleri içerik reddi sayılır. Başarısız tahminin ücretlendirilip ücretlendirilmediği belgede yok (doğrulanmadı).
+    /// </summary>
     internal static ProviderException MapRuntimeError(string? error)
     {
         var text = error ?? string.Empty;
         if (text.Contains("nsfw", StringComparison.OrdinalIgnoreCase) || text.Contains("safety", StringComparison.OrdinalIgnoreCase) || text.Contains("moderation", StringComparison.OrdinalIgnoreCase) || text.Contains("content policy", StringComparison.OrdinalIgnoreCase))
         {
-            return new(GenerationErrorCode.ContentRejected, "Pruna içeriği güvenlik nedeniyle reddetti.", retryable: false);
+            return new(GenerationErrorCode.ContentRejected, "Pruna içeriği güvenlik nedeniyle reddetti.", retryable: false) { RequestEnded = true };
         }
 
         if (text.Contains("timeout", StringComparison.OrdinalIgnoreCase))
         {
-            return new(GenerationErrorCode.Timeout, "Pruna işlemi zaman aşımına uğradı.", retryable: true);
+            return new(GenerationErrorCode.Timeout, "Pruna işlemi zaman aşımına uğradı.", retryable: true) { RequestEnded = true };
         }
 
         return text.Contains("invalid", StringComparison.OrdinalIgnoreCase) || text.Contains("must", StringComparison.OrdinalIgnoreCase)
-            ? new(GenerationErrorCode.InvalidInput, "Pruna girdiyi işleyemedi.", retryable: false)
-            : new(GenerationErrorCode.ProviderUnavailable, "Pruna üretimi başarısız oldu.", retryable: true);
+            ? new(GenerationErrorCode.InvalidInput, "Pruna girdiyi işleyemedi.", retryable: false) { RequestEnded = true }
+            : new(GenerationErrorCode.ProviderUnavailable, "Pruna üretimi başarısız oldu.", retryable: true) { RequestEnded = true };
     }
 }
