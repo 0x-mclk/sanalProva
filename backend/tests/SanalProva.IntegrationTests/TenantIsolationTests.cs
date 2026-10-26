@@ -1,12 +1,14 @@
 using System.Net;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using SanalProva.Api.Features.Catalog;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Api.Features.TryOn;
 using SanalProva.Domain.Generation;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
+using SanalProva.Infrastructure.Persistence;
 
 namespace SanalProva.IntegrationTests;
 
@@ -248,7 +250,7 @@ public sealed class TenantIsolationTests(ApiFactory factory) : ApiTestBase(facto
     }
 
     [Fact]
-    public async Task Arka_plan_isleyici_baska_firmanin_secimini_kullanan_isi_basarisiz_eder_yabanci_giysi_islenmez()
+    public async Task Veritabani_baska_firmanin_secimini_oturumunu_veya_fotografini_kullanan_isi_reddeder_isleyiciye_hic_ulasmaz()
     {
         var w = await BuildWorldAsync();
         var ct = TestContext.Current.CancellationToken;
@@ -259,44 +261,72 @@ public sealed class TenantIsolationTests(ApiFactory factory) : ApiTestBase(facto
             foreignSelection = (await db.GenerationJobs.AsNoTracking().SingleAsync(j => j.Id == w.JobA, ct)).SelectionId!.Value;
         }
 
-        // Veritabanı çapraz firma seçimine izin verdiği için (bkz. DatabaseIntegrityTests bulgusu) böyle bir iş doğrudan yazılabilir; işleyici kiracı filtresiyle reddetmelidir
-        Guid jobId;
+        // Önceki sürümde bu satır yazılabiliyor ve yalnızca işleyicinin kiracı filtresi güvenli biçimde başarısız ediyordu. Artık bileşik yabancı anahtarlar yazmayı baştan reddeder.
         (scope, db) = OpenDb(w.B.OrganizationId);
         using (scope)
         {
             var user = await db.Users.SingleAsync(u => u.Email == w.B.Email, ct);
-            var job = new GenerationJob
+            GenerationJob Job(Guid session, Guid? selection, Guid? photo) => new()
             {
-                OrganizationId = w.B.OrganizationId, StoreId = w.B.StoreId, SessionId = w.SessionB, JobType = GenerationJobType.OutfitSet, SelectionId = foreignSelection,
-                SourcePhotoId = w.PhotoB, IdempotencyKey = Guid.NewGuid().ToString("N"), RequestedByUserId = user.Id, Status = GenerationJobStatus.Queued, NextAttemptAt = DateTimeOffset.UtcNow,
+                OrganizationId = w.B.OrganizationId, StoreId = w.B.StoreId, SessionId = session, JobType = GenerationJobType.OutfitSet, SelectionId = selection,
+                SourcePhotoId = photo, IdempotencyKey = Guid.NewGuid().ToString("N"), RequestedByUserId = user.Id, Status = GenerationJobStatus.Failed, NextAttemptAt = DateTimeOffset.UtcNow,
             };
-            db.GenerationJobs.Add(job);
-            await db.SaveChangesAsync(ct);
-            jobId = job.Id;
+
+            foreach (var (name, job) in new[]
+                     {
+                         ("başka firmanın seçimi", Job(w.SessionB, foreignSelection, w.PhotoB)),
+                         ("başka firmanın oturumu", Job(w.SessionA, null, null)),
+                         ("başka firmanın fotoğrafı", Job(w.SessionB, null, w.PhotoA)),
+                     })
+            {
+                db.GenerationJobs.Add(job);
+                var rejected = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync(ct));
+                Assert.True(DbErrors.IsForeignKeyViolation(rejected), $"{name}: beklenen FK ihlali değil: {rejected.InnerException?.Message}");
+                db.ChangeTracker.Clear();
+            }
         }
 
-        GenerationJob finished;
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (true)
+        // Hiçbir çapraz referans oluşmadı
+        Assert.Empty(await TenantScan.ScanAsync(Factory.MigratorConnectionString!, ct, [w.A.OrganizationId, w.B.OrganizationId]));
+    }
+
+    [Fact]
+    public async Task Sube_kapsami_oturum_uzerinden_yapisal_uygulanir_fotograf_onay_secim_kalem_ve_gorsel_baska_subede_gorunmez_firma_kapsamli_isleyici_hepsini_gorur()
+    {
+        var w = await BuildWorldAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        Guid selectionA;
+        var (selectionScope, selectionDb) = OpenDb(w.A.OrganizationId);
+        using (selectionScope)
         {
-            (scope, db) = OpenDb(w.B.OrganizationId);
+            selectionA = await selectionDb.OutfitSelections.Where(x => x.SessionId == w.SessionA).Select(x => x.Id).SingleAsync(ct);
+        }
+
+        async Task<(int Photos, int Consents, int Selections, int Items, int Images)> CountsAsync(Guid organization, Guid? store)
+        {
+            var (scope, db) = OpenDb(organization);
             using (scope)
             {
-                finished = await db.GenerationJobs.AsNoTracking().SingleAsync(j => j.Id == jobId, ct);
-                if (finished.Status is GenerationJobStatus.Failed or GenerationJobStatus.Succeeded || DateTime.UtcNow > deadline)
-                {
-                    Assert.Equal(0, await db.GeneratedImages.CountAsync(i => i.JobId == jobId, ct)); // sonuç görseli üretilmedi
-                    break;
-                }
+                scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Tenancy.TenantContext>().StoreId = store;
+                return (
+                    await db.SessionPhotos.CountAsync(p => p.SessionId == w.SessionA, ct), await db.ConsentRecords.CountAsync(c => c.SessionId == w.SessionA, ct),
+                    await db.OutfitSelections.CountAsync(s => s.SessionId == w.SessionA, ct), await db.OutfitSelectionItems.CountAsync(i => i.SelectionId == selectionA, ct), await db.GeneratedImages.CountAsync(i => i.SessionId == w.SessionA, ct));
             }
-
-            await Task.Delay(100, ct);
         }
 
-        Assert.Equal(GenerationJobStatus.Failed, finished.Status);
+        // Sahibi şubesi: hepsi görünür
+        var own = await CountsAsync(w.A.OrganizationId, w.A.StoreId);
+        Assert.True(own.Photos > 0 && own.Consents > 0 && own.Selections > 0 && own.Items > 0 && own.Images > 0, $"Sahibi şubesi hiçbir şey görmedi: {own}");
 
-        // Pozitif kontrol: tarayıcı bu çapraz-firma bağlantısını (iş → başka firmanın seçimi) bulur; böylece "ihlal yok" sonuçları anlamlıdır
-        var findings = await TenantScan.ScanAsync(Factory.MigratorConnectionString!, ct, [w.B.OrganizationId]);
-        Assert.Contains(findings, f => f.Kind == "FARKLI_FIRMA" && f.Relation.StartsWith("generation_jobs.selection_id", StringComparison.Ordinal));
+        // Aynı firmanın başka şubesi: HİÇBİRİ görünmez (bu tabloların kendi şube sütunu yok; kapsam oturum üzerinden)
+        Assert.Equal((0, 0, 0, 0, 0), await CountsAsync(w.A.OrganizationId, w.StoreA2));
+
+        // Başka firma: hiçbiri
+        Assert.Equal((0, 0, 0, 0, 0), await CountsAsync(w.B.OrganizationId, w.B.StoreId));
+        Assert.Equal((0, 0, 0, 0, 0), await CountsAsync(w.B.OrganizationId, null));
+
+        // Yalnızca firma bağlamı (arka plan işleyicisi, şube seçili değil): firmanın tüm kayıtlarını görür
+        Assert.Equal(own, await CountsAsync(w.A.OrganizationId, null));
     }
 }

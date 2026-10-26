@@ -85,60 +85,62 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
     /// <summary>Tasarım niyeti: silme davranışlarının tamamı. Yeni FK eklenince bu liste bilinçli olarak güncellenmeden test kırılır.</summary>
     private static readonly Dictionary<string, string> ExpectedForeignKeys = new(StringComparer.Ordinal)
     {
-        // Maliyet/muhasebe kayıtları oturum silinse de kalır; iş bağlantısı kopar (SET NULL). Kararlar maliyet satırını silmeyi engeller.
-        ["fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id"] = "NO_ACTION",
-        ["fk_ai_usage_logs_ai_usage_logs_adjusts_log_id"] = "NO_ACTION",
+        // Tasarım niyeti (firma tutarlılığı bileşik FK'larla veritabanında zorunlu; silme davranışları bileşik FK'lardan ÖNCEKİYLE aynıdır):
+        //  - KVKK silmesinin kökü oturum: onay, fotoğraf, seçim, kalem, iş ve sonuç görseli zincirleme gider (CASCADE); bunların arasındaki ikinci yollar NO ACTION
+        //    (SQL Server tek zincirleme yol kabul eder; aynı DELETE deyiminde zaten giderler).
+        //  - Maliyet kayıtları oturum silinse de kalır: iş bağlantısı SET NULL (tek sütunlu FK) + "aynı firmada" kuralı için bileşik NO ACTION eşi (NO_ACTION_COMPANION: bağlantı boşalınca devre dışı).
+        //  - Aynı kural TV için: oturum silinince TV bağlantısı boşalır; TV ve oturum aynı şubede/firmada olmalıdır.
+        //  - Firma/şube/kullanıcı/katalog: referans edilen ana kayıt silinemez (NO ACTION); ürün silinince varyant, görsel, bileşenler gider; kullanıcı/şube silinince rol satırları gider.
+        ["fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id_organization_id"] = "NO_ACTION",
+        ["fk_ai_usage_logs_ai_usage_logs_adjusts_log_id_organization_id"] = "NO_ACTION",
         ["fk_ai_usage_logs_generation_jobs_job_id"] = "SET_NULL",
-        ["fk_ai_usage_logs_stores_store_id"] = "NO_ACTION",
-        // Katalog/firma/şube/kullanıcı: referans edilen ana kayıt silinemez
+        ["fk_ai_usage_logs_generation_jobs_job_id_organization_id"] = "NO_ACTION_COMPANION",
+        ["fk_ai_usage_logs_stores_store_id_organization_id"] = "NO_ACTION",
+        ["fk_audit_logs_organizations_organization_id"] = "NO_ACTION",
+        ["fk_audit_logs_stores_store_id_organization_id"] = "NO_ACTION",
         ["fk_categories_organizations_organization_id"] = "NO_ACTION",
-        ["fk_products_categories_category_id"] = "NO_ACTION",
+        ["fk_consent_records_asp_net_users_recorded_by_user_id_organization_id"] = "NO_ACTION",
+        ["fk_consent_records_tryon_sessions_session_id_organization_id"] = "CASCADE",
+        ["fk_display_devices_stores_store_id_organization_id"] = "NO_ACTION",
+        ["fk_display_devices_try_on_sessions_current_session_id"] = "SET_NULL",
+        ["fk_display_devices_try_on_sessions_current_session_id_store_id_organization_id"] = "NO_ACTION_COMPANION",
+        ["fk_display_pairings_display_devices_claimed_device_id"] = "SET_NULL",
+        ["fk_generated_images_generated_images_parent_image_id_organization_id"] = "NO_ACTION",
+        ["fk_generated_images_generation_jobs_job_id_organization_id"] = "NO_ACTION",
+        ["fk_generated_images_stored_files_file_id_organization_id"] = "NO_ACTION",
+        ["fk_generated_images_try_on_sessions_session_id_organization_id"] = "CASCADE",
+        ["fk_generation_jobs_generated_images_base_image_id_organization_id"] = "NO_ACTION",
+        ["fk_generation_jobs_outfit_selections_selection_id_organization_id"] = "NO_ACTION",
+        ["fk_generation_jobs_session_photos_source_photo_id_organization_id"] = "NO_ACTION",
+        ["fk_generation_jobs_stores_store_id_organization_id"] = "NO_ACTION",
+        ["fk_generation_jobs_try_on_sessions_session_id_store_id_organization_id"] = "CASCADE",
+        ["fk_outfit_selection_items_categories_category_id_organization_id"] = "NO_ACTION",
+        ["fk_outfit_selection_items_outfit_selections_selection_id_organization_id"] = "CASCADE",
+        ["fk_outfit_selection_items_product_variants_variant_id_organization_id"] = "NO_ACTION",
+        ["fk_outfit_selection_items_products_product_id_organization_id"] = "NO_ACTION",
+        ["fk_outfit_selections_try_on_sessions_session_id_organization_id"] = "CASCADE",
+        ["fk_outfit_set_components_product_variants_component_variant_id_organization_id"] = "NO_ACTION",
+        ["fk_outfit_set_components_products_component_product_id_organization_id"] = "NO_ACTION",
+        ["fk_outfit_set_components_products_set_product_id_organization_id"] = "CASCADE",
+        ["fk_product_images_product_variants_variant_id_organization_id"] = "NO_ACTION",
+        ["fk_product_images_products_product_id_organization_id"] = "CASCADE",
+        ["fk_product_images_stored_files_file_id_organization_id"] = "NO_ACTION",
+        ["fk_product_variants_products_product_id_organization_id"] = "CASCADE",
+        ["fk_products_categories_category_id_organization_id"] = "NO_ACTION",
         ["fk_products_organizations_organization_id"] = "NO_ACTION",
+        ["fk_session_photos_stored_files_file_id_organization_id"] = "NO_ACTION",
+        ["fk_session_photos_tryon_sessions_session_id_organization_id"] = "CASCADE",
         ["fk_stored_files_organizations_organization_id"] = "NO_ACTION",
         ["fk_stores_organizations_organization_id"] = "NO_ACTION",
-        ["fk_users_organizations_organization_id"] = "NO_ACTION",
-        ["fk_user_store_roles_organizations_organization_id"] = "NO_ACTION",
-        // KVKK silmesinin kökü: oturum silinince müşteri verisi zincirleme gider
-        ["fk_consent_records_tryon_sessions_session_id"] = "CASCADE",
-        ["fk_session_photos_tryon_sessions_session_id"] = "CASCADE",
-        ["fk_outfit_selections_try_on_sessions_session_id"] = "CASCADE",
-        ["fk_outfit_selection_items_outfit_selections_selection_id"] = "CASCADE",
-        ["fk_generation_jobs_try_on_sessions_session_id"] = "CASCADE",
-        ["fk_generated_images_try_on_sessions_session_id"] = "CASCADE",
-        // SQL Server tek zincirleme yol kabul eder: aynı oturum silmesindeki ikinci yollar NO ACTION (aynı DELETE deyiminde zaten gider)
-        ["fk_generated_images_generation_jobs_job_id"] = "NO_ACTION",
-        ["fk_generated_images_generated_images_parent_image_id"] = "NO_ACTION",
-        ["fk_generated_images_stored_files_file_id"] = "NO_ACTION",
-        ["fk_generation_jobs_generated_images_base_image_id"] = "NO_ACTION",
-        ["fk_generation_jobs_outfit_selections_selection_id"] = "NO_ACTION",
-        ["fk_generation_jobs_session_photos_source_photo_id"] = "NO_ACTION",
-        ["fk_generation_jobs_stores_store_id"] = "NO_ACTION",
-        ["fk_session_photos_stored_files_file_id"] = "NO_ACTION",
-        // Kullanılan katalog öğesi seçimlerden silinemez
-        ["fk_outfit_selection_items_categories_category_id"] = "NO_ACTION",
-        ["fk_outfit_selection_items_product_variants_variant_id"] = "NO_ACTION",
-        ["fk_outfit_selection_items_products_product_id"] = "NO_ACTION",
-        // Katalog: ürün silinince varyant, görsel ve takım bileşenleri gider; başka takımın bileşeni olan ürün silinemez
-        ["fk_product_variants_products_product_id"] = "CASCADE",
-        ["fk_product_images_products_product_id"] = "CASCADE",
-        ["fk_outfit_set_components_products_set_product_id"] = "CASCADE",
-        ["fk_outfit_set_components_products_component_product_id"] = "NO_ACTION",
-        ["fk_outfit_set_components_product_variants_component_variant_id"] = "NO_ACTION",
-        ["fk_product_images_product_variants_variant_id"] = "NO_ACTION",
-        ["fk_product_images_stored_files_file_id"] = "NO_ACTION",
-        // Şube/kullanıcı: oturumu olan şube ve kullanıcı silinemez; yetki satırları ana kayıtla gider
-        ["fk_tryon_sessions_stores_store_id"] = "NO_ACTION",
-        ["fk_tryon_sessions_asp_net_users_created_by_user_id"] = "NO_ACTION",
-        ["fk_consent_records_asp_net_users_recorded_by_user_id"] = "NO_ACTION",
-        ["fk_user_store_roles_stores_store_id"] = "CASCADE",
-        ["fk_user_store_roles_asp_net_users_user_id"] = "CASCADE",
+        ["fk_tryon_sessions_asp_net_users_created_by_user_id_organization_id"] = "NO_ACTION",
+        ["fk_tryon_sessions_stores_store_id_organization_id"] = "NO_ACTION",
         ["fk_user_claims_users_user_id"] = "CASCADE",
         ["fk_user_logins_users_user_id"] = "CASCADE",
+        ["fk_user_store_roles_asp_net_users_user_id_organization_id"] = "CASCADE",
+        ["fk_user_store_roles_organizations_organization_id"] = "NO_ACTION",
+        ["fk_user_store_roles_stores_store_id_organization_id"] = "CASCADE",
         ["fk_user_tokens_users_user_id"] = "CASCADE",
-        // TV: oturum silinince cihaz bağlantısı boşalır, cihaz silinince eşleştirme kaydı kalır
-        ["fk_display_devices_stores_store_id"] = "NO_ACTION",
-        ["fk_display_devices_try_on_sessions_current_session_id"] = "SET_NULL",
-        ["fk_display_pairings_display_devices_claimed_device_id"] = "SET_NULL",
+        ["fk_users_organizations_organization_id"] = "NO_ACTION",
     };
 
     [Fact]
@@ -152,18 +154,22 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         var problems = new List<string>();
         foreach (var fk in Rows.ForeignKeys)
         {
-            if (actual[fk.Name] != ExpectedForeignKeys[fk.Name])
+            var expected = ExpectedForeignKeys[fk.Name];
+            var companion = expected == "NO_ACTION_COMPANION"; // SET NULL tek sütunlu FK'nın bileşik eşi: veritabanında NO ACTION, davranışı "bağlantıyı boşaltmak"
+            if (actual[fk.Name] != (companion ? "NO_ACTION" : expected))
             {
-                problems.Add($"{fk.Name}: veritabanında {actual[fk.Name]}, beklenen {ExpectedForeignKeys[fk.Name]}");
+                problems.Add($"{fk.Name}: veritabanında {actual[fk.Name]}, beklenen {expected}");
                 continue;
             }
 
-            // (1) Yetim satır: var olmayan ebeveyne bağlanan satır eklenemez
-            var orphanOverrides = fk.ChildColumns.ToDictionary(c => c, _ => (object?)Guid.NewGuid(), StringComparer.Ordinal);
-            var orphan = await Assert.ThrowsAsync<SqlException>(() => Rows.CreateAsync(fk.Child, orphanOverrides, Ct));
-            if (orphan.Number != 547 || !orphan.Message.Contains(fk.Name, StringComparison.Ordinal))
+            // (1) Yetim satır: geçerli bir çocuğun yabancı anahtar sütunu var olmayan bir ebeveyne çevrilemez. (Bileşik FK'larda firma sütunu başka FK'larla ortaktır; bu yüzden
+            //     yalnızca kimlik sütunu değiştirilir ve hata, aynı çocuk tablosundaki aynı kimlik sütununu kullanan FK'lardan biri olmalıdır.)
+            var valid = await Rows.CreateAsync(fk.Child, null, Ct);
+            var siblingNames = Rows.ForeignKeys.Where(f => f.Child == fk.Child && f.ChildColumns[0] == fk.ChildColumns[0]).Select(f => f.Name).ToList();
+            var orphan = await Assert.ThrowsAsync<SqlException>(() => Lab.ExecuteAsync($"UPDATE [{fk.Child}] SET [{fk.ChildColumns[0]}] = '{Guid.NewGuid()}' WHERE {Where(fk.Child, valid)}", ct: Ct));
+            if (orphan.Number != 547 || !siblingNames.Any(n => orphan.Message.Contains(n, StringComparison.Ordinal)))
             {
-                problems.Add($"{fk.Name}: yetim satır beklenen FK hatasıyla reddedilmedi ({orphan.Number}: {orphan.Message})");
+                problems.Add($"{fk.Name}: yetim bağlantı beklenen FK hatasıyla reddedilmedi ({orphan.Number}: {orphan.Message})");
             }
 
             // (2) Ebeveyn silme: gerçek DELETE ile NO ACTION / CASCADE / SET NULL davranışı
@@ -173,7 +179,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             var childKey = Where(fk.Child, child);
             var delete = $"DELETE FROM [{fk.Parent}] WHERE {parentFilter}";
 
-            if (fk.Action == "NO_ACTION")
+            if (fk.Action == "NO_ACTION" && !companion)
             {
                 var blocked = await Assert.ThrowsAsync<SqlException>(() => Lab.ExecuteAsync(delete, ct: Ct));
                 if (blocked.Number != 547)
@@ -190,15 +196,15 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             {
                 await Lab.ExecuteAsync(delete, ct: Ct);
                 var childCount = await Lab.ScalarAsync<int>($"SELECT COUNT(*) FROM [{fk.Child}] WHERE {childKey}", ct: Ct);
-                var expectedChildren = fk.Action == "CASCADE" ? 0 : 1;
+                var expectedChildren = fk.Action == "CASCADE" ? 0 : 1; // SET NULL ve eşleri: çocuk kalır
                 if (childCount != expectedChildren)
                 {
                     problems.Add($"{fk.Name}: {fk.Action} sonrası çocuk sayısı {childCount}, beklenen {expectedChildren}");
                 }
 
-                if (fk.Action == "SET_NULL" && await Lab.ScalarAsync<int>($"SELECT COUNT(*) FROM [{fk.Child}] WHERE {childKey} AND {string.Join(" AND ", fk.ChildColumns.Select(c => $"[{c}] IS NULL"))}", ct: Ct) != 1)
+                if ((fk.Action == "SET_NULL" || companion) && await Lab.ScalarAsync<int>($"SELECT COUNT(*) FROM [{fk.Child}] WHERE {childKey} AND [{fk.ChildColumns[0]}] IS NULL", ct: Ct) != 1)
                 {
-                    problems.Add($"{fk.Name}: SET NULL bağlantıyı boşaltmadı");
+                    problems.Add($"{fk.Name}: SET NULL bağlantıyı boşaltmadı"); // yalnızca kimlik sütunu boşalır; firma/şube sütunları dokunulmaz
                 }
             }
         }
@@ -522,9 +528,10 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         await RejectedAsync($"UPDATE product_images SET is_ai_reference = 1 WHERE id = {Literal(plain["id"])}", 2601); // sonradan referans yapmak da çakışır
 
         // 2) ux_display_devices_current_session (current_session_id?) filtreli: boş cihazlar çoğalır, aynı oturuma ikinci cihaz bağlanamaz
-        var session = (await Rows.CreateAsync("tryon_sessions", null, Ct))["id"];
-        var store = (await Rows.CreateAsync("stores", null, Ct))["id"];
-        Task<Dictionary<string, object?>> Device(object? current) => Rows.CreateAsync("display_devices", new Dictionary<string, object?> { ["store_id"] = store, ["current_session_id"] = current }, Ct);
+        var sessionRow = await Rows.CreateAsync("tryon_sessions", null, Ct);
+        var session = sessionRow["id"];
+        Task<Dictionary<string, object?>> Device(object? current) => Rows.CreateAsync("display_devices",
+            new Dictionary<string, object?> { ["store_id"] = sessionRow["store_id"], ["organization_id"] = sessionRow["organization_id"], ["current_session_id"] = current }, Ct); // TV, oturumuyla aynı şube/firmada
         await Device(null);
         await Device(null);
         await Device(session);
@@ -763,59 +770,103 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
     // ------------------------------------------------------------------ bulgular (veritabanının garanti etmediği şeyler)
 
     [Fact]
-    public async Task Bulgu_firma_tutarliligi_veritabaninda_zorunlu_degildir_uygulama_ve_yetki_ile_korunur()
+    public async Task Firma_sutunu_olan_her_tablo_firma_FK_sina_veya_bilesik_FK_ya_baglidir_firma_kimligi_dogrulanmis_olur()
     {
         _ = Lab;
 
-        // (1) organization_id'li tablolarda firma yabancı anahtarı yok: çocuk satır, ebeveyniyle FARKLI firmaya (hatta var olmayan firmaya) yazılabilir.
-        // Firma yalıtımı EF global filtresine ve uygulamaya dayanır (M3.4'te kanıtlanacak/güçlendirilecek).
-        var withoutFk = await Lab.ScalarAsync<string>("""
+        // organization_id taşıyan her tablo ya doğrudan organizations'a bağlıdır ya da organization_id'yi içeren bir bileşik FK ile firması doğrulanmış bir ebeveyne bağlıdır
+        var uncovered = await Lab.ScalarAsync<string>("""
             SELECT STRING_AGG(t.name, N',') WITHIN GROUP (ORDER BY t.name)
               FROM sys.tables t JOIN sys.columns c ON c.object_id = t.object_id AND c.name = N'organization_id'
-             WHERE t.is_ms_shipped = 0 AND NOT EXISTS (SELECT 1 FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
-                    WHERE fk.parent_object_id = t.object_id AND fkc.parent_column_id = c.column_id AND fk.referenced_object_id = OBJECT_ID(N'dbo.organizations'))
+             WHERE t.is_ms_shipped = 0 AND NOT EXISTS (
+                    SELECT 1 FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                     WHERE fk.parent_object_id = t.object_id AND fkc.parent_column_id = c.column_id)
             """, ct: Ct);
-        const string expected = "ai_cost_reconciliations,ai_usage_logs,audit_logs,consent_records,display_devices,generated_images,generation_jobs,outfit_selection_items,outfit_selections,outfit_set_components,product_images,product_variants,session_photos,tryon_sessions";
-        Assert.True(expected == withoutFk, $"Firma FK'sı olmayan tablolar değişti: {withoutFk}");
+        Assert.True(string.IsNullOrEmpty(uncovered), $"Firma sütunu hiçbir FK ile doğrulanmayan tablolar: {uncovered}");
 
-        var session = await Rows.CreateAsync("tryon_sessions", null, Ct);
-        var foreign = Guid.NewGuid(); // hiçbir firmaya ait değil
-        await Rows.CreateAsync("generation_jobs", new Dictionary<string, object?> { ["session_id"] = session["id"], ["organization_id"] = foreign }, Ct); // kabul edilir
+        // Zincirin kökleri: firma sütunu olan ve organizations'a doğrudan bağlı tablolar
+        var roots = await Lab.ScalarAsync<string>("""
+            SELECT STRING_AGG(t.name, N',') WITHIN GROUP (ORDER BY t.name)
+              FROM sys.tables t WHERE EXISTS (SELECT 1 FROM sys.foreign_keys fk WHERE fk.parent_object_id = t.object_id AND fk.referenced_object_id = OBJECT_ID(N'dbo.organizations'))
+            """, ct: Ct);
+        Assert.Equal("audit_logs,categories,products,stored_files,stores,user_store_roles,users", roots);
     }
 
     /// <summary>
-    /// Bulgu (M3.4): iki tablo arasındaki ilişkide çocuk satırın firması, ebeveyninin firmasından FARKLI olabilir; veritabanı reddetmez. Firma tutarlılığı yalnızca uygulama kodu ve EF filtresiyle
-    /// sağlanır. Bu test mevcut (izin veren) durumu belgeler; bileşik yabancı anahtarlar eklendiğinde beklenti tersine döner (hepsi 547 ile reddedilir).
+    /// Çapraz firma/şube ilişkisi veritabanında <b>reddedilir</b>: çocuk satırın firması ebeveyninin firmasından farklıysa (veya iş/TV oturumdan farklı şubedeyse) bileşik yabancı anahtar
+    /// 547 ile reddeder. Her bileşik FK için ayrı kanıt; yeni bileşik FK eklenince otomatik kapsanır.
     /// </summary>
     [Fact]
-    public async Task Bulgu_capraz_firma_iliskisi_kuran_satirlari_veritabani_reddetmiyor()
+    public async Task Capraz_firma_ve_capraz_sube_iliskisi_kuran_satirlar_veritabaninda_reddedilir()
     {
         _ = Lab;
         var otherOrg = (await Rows.CreateAsync("organizations", null, Ct))["id"];
-        var accepted = new List<string>();
-        var rejected = new List<string>();
-        var candidates = Rows.ForeignKeys.Where(f => f.Child != f.Parent
-            && Rows.Columns[f.Child].Any(c => c.Name == "organization_id") && Rows.Columns[f.Parent].Any(c => c.Name == "organization_id")).ToList();
+        var problems = new List<string>();
+        // Bileşik tenant FK'ları katalogdan değil BEKLENEN ADLARDAN türetilir: bir FK sessizce tek sütuna düşerse (veya silinirse) liste küçülmez, test kırılır.
+        // Adı "_organization_id" ile biten ve organizations'a işaret etmeyen her FK bileşik olmalıdır (kimlik + firma [+ şube]).
+        var expectedTenantNames = ExpectedForeignKeys.Keys.Where(n => n.EndsWith("_organization_id", StringComparison.Ordinal) && !n.Contains("_organizations_", StringComparison.Ordinal)).ToList();
+        Assert.Equal(37, expectedTenantNames.Count); // 37 bileşik tenant FK'sı (34 değiştirilen + 3 yeni eş/denetim FK'sı)
+        var notComposite = expectedTenantNames.Where(n => Rows.ForeignKeys.SingleOrDefault(f => f.Name == n) is not { } f || f.ChildColumns.Count < 2 || !f.ChildColumns.Contains("organization_id")).ToList();
+        Assert.True(notComposite.Count == 0, $"Bileşik olması gereken FK'lar değil/yok: {string.Join(", ", notComposite)}");
+        var tenantFks = Rows.ForeignKeys.Where(f => expectedTenantNames.Contains(f.Name) && f.Child != f.Parent).ToList();
+        Assert.True(tenantFks.Count >= 33, $"Beklenenden az bileşik ilişki: {tenantFks.Count}");
 
-        foreach (var fk in candidates)
+        foreach (var fk in tenantFks)
         {
+            // Hata, bu ebeveyne bağlanan herhangi bir bileşik tenant FK'sından gelebilir (çocuğun ebeveyn zincirindeki satırlar da aynı firmada yaratılmaya çalışılır)
+            var childFkNames = Rows.ForeignKeys.Where(f => f.ChildColumns.Contains("organization_id") && (f.Parent == fk.Parent || f.Child == fk.Child)).Select(f => f.Name).ToList();
             var parent = await Rows.CreateAsync(fk.Parent, null, Ct);
+
+            // (a) çocuk başka bir firmada
             var overrides = fk.ChildColumns.Select((c, i) => (c, parent[fk.ParentColumns[i]])).ToDictionary(p => p.c, p => p.Item2, StringComparer.Ordinal);
-            overrides["organization_id"] = otherOrg; // çocuk, ebeveyninden farklı firmada
+            overrides["organization_id"] = otherOrg;
+            SqlException? ex = null;
             try
             {
                 await Rows.CreateAsync(fk.Child, overrides, Ct);
-                accepted.Add($"{fk.Child}.{string.Join(',', fk.ChildColumns)} → {fk.Parent}");
             }
-            catch (SqlException ex) when (ex.Number == 547)
+            catch (SqlException caught)
             {
-                rejected.Add($"{fk.Child}.{string.Join(',', fk.ChildColumns)} → {fk.Parent}");
+                ex = caught;
+            }
+
+            if (ex is null)
+            {
+                problems.Add($"{fk.Name}: çapraz firma satırı KABUL EDİLDİ");
+            }
+            else if (ex.Number != 547 || !childFkNames.Any(n => ex.Message.Contains(n, StringComparison.Ordinal)))
+            {
+                problems.Add($"{fk.Name}: çapraz firma satırı beklenen bileşik FK ile reddedilmedi ({ex.Number}: {ex.Message})");
+            }
+
+            // (b) aynı firmada ama başka şubede (yalnızca şube sütunu da olan ilişkilerde: iş → oturum, TV → oturum)
+            if (fk.ChildColumns.Contains("store_id") && Rows.Columns[fk.Parent].Any(c => c.Name == "store_id"))
+            {
+                var store = (await Rows.CreateAsync("stores", new Dictionary<string, object?> { ["organization_id"] = parent["organization_id"] }, Ct))["id"];
+                var sameFirm = fk.ChildColumns.Select((c, i) => (c, parent[fk.ParentColumns[i]])).ToDictionary(p => p.c, p => p.Item2, StringComparer.Ordinal);
+                sameFirm["store_id"] = store;
+                SqlException? other = null;
+                try
+                {
+                    await Rows.CreateAsync(fk.Child, sameFirm, Ct);
+                }
+                catch (SqlException caught)
+                {
+                    other = caught;
+                }
+
+                if (other is null)
+                {
+                    problems.Add($"{fk.Name}: çapraz şube satırı KABUL EDİLDİ");
+                }
+                else if (other.Number != 547 || !Rows.ForeignKeys.Where(f => f.Child == fk.Child).Any(f => other.Message.Contains(f.Name, StringComparison.Ordinal)))
+                {
+                    problems.Add($"{fk.Name}: çapraz şube satırı beklenen FK ile reddedilmedi ({other.Number}: {other.Message})");
+                }
             }
         }
 
-        // Güncel durum: ilişkilerin tamamı çapraz firma satırını kabul ediyor
-        Assert.True(candidates.Count >= 30, $"Beklenenden az ilişki: {candidates.Count}");
-        Assert.True(rejected.Count == 0 && accepted.Count == candidates.Count, $"Reddedilen: {string.Join("; ", rejected)}");
+        Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
     private sealed class FixedOptions<T>(T value) : IOptionsMonitor<T>

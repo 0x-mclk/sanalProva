@@ -129,7 +129,7 @@ public sealed class GenerationJob : Entity, IStoreOwned
 }
 
 /// <summary>Bir üretim sonucu. Revizyonlar <see cref="ParentImageId"/> ile sürüm ağacı oluşturur; hiçbir sonuç üzerine yazılmaz.</summary>
-public sealed class GeneratedImage : Entity, ITenantOwned
+public sealed class GeneratedImage : Entity, ISessionOwned
 {
     public Guid OrganizationId { get; init; }
     public Guid SessionId { get; init; }

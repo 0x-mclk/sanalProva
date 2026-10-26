@@ -144,15 +144,54 @@ internal sealed partial class RowFactory
 
         var columns = _columns[table];
 
-        // 1) NULL olamayan yabancı anahtarların ebeveynleri
-        foreach (var fk in ForeignKeys.Where(f => f.Child == table))
+        // 0a) Çocuğa bir ebeveyn kimliği verildiyse eksik firma/şube sütunları o ebeveyn satırından devralınır (uygulama da çocuğu ebeveyninin firmasında yaratır)
+        foreach (var fk in ForeignKeys.Where(f => f.Child == table && f.ChildColumns.Count > 1).OrderByDescending(f => f.ChildColumns.Count))
+        {
+            if (!values.TryGetValue(fk.ChildColumns[0], out var parentId) || parentId is null || fk.ChildColumns.Skip(1).All(values.ContainsKey))
+            {
+                continue;
+            }
+
+            await using var lookup = new SqlConnection(_connectionString);
+            await lookup.OpenAsync(ct);
+            await using var lookupCommand = new SqlCommand($"SELECT {string.Join(", ", fk.ParentColumns.Skip(1).Select(c => $"[{c}]"))} FROM [{fk.Parent}] WHERE [{fk.ParentColumns[0]}] = @id", lookup);
+            lookupCommand.Parameters.AddWithValue("@id", parentId);
+            await using var reader = await lookupCommand.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                for (var i = 1; i < fk.ChildColumns.Count; i++)
+                {
+                    values.TryAdd(fk.ChildColumns[i], reader.GetValue(i - 1));
+                }
+            }
+        }
+
+        // 0) Tek firma kimliği tüm satır grafiği için: firma sütunu olan tabloda verilmemişse gerçek bir firma satırı oluşturulur ve ebeveynlere aktarılır
+        //    (bileşik FK'lar çocuk ve ebeveynin aynı firmada olmasını ister)
+        if (columns.Any(c => c.Name == "organization_id") && !values.ContainsKey("organization_id"))
+        {
+            values["organization_id"] = (await CreateAsync("organizations", null, ct))["id"];
+        }
+
+        // 1) NULL olamayan yabancı anahtarların ebeveynleri. Çok sütunlu FK'lar önce işlenir (ör. iş → oturum: kimlik + şube + firma); çocukta zaten bilinen sütunlar
+        //    (firma, şube) ebeveyne aktarılır, böylece tüm bileşik FK'lar aynı grafikte tutarlı kalır.
+        foreach (var fk in ForeignKeys.Where(f => f.Child == table).OrderByDescending(f => f.ChildColumns.Count).ThenBy(f => f.Name, StringComparer.Ordinal))
         {
             if (fk.ChildColumns.All(values.ContainsKey) || fk.ChildColumns.Any(c => columns.Single(x => x.Name == c).Nullable))
             {
                 continue;
             }
 
-            var parent = await CreateAsync(fk.Parent, null, ct);
+            var parentOverrides = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var i = 0; i < fk.ChildColumns.Count; i++)
+            {
+                if (values.TryGetValue(fk.ChildColumns[i], out var known))
+                {
+                    parentOverrides[fk.ParentColumns[i]] = known;
+                }
+            }
+
+            var parent = await CreateAsync(fk.Parent, parentOverrides, ct);
             for (var i = 0; i < fk.ChildColumns.Count; i++)
             {
                 values[fk.ChildColumns[i]] = parent[fk.ParentColumns[i]];

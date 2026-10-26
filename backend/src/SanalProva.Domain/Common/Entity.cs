@@ -20,6 +20,21 @@ public interface IStoreOwned : ITenantOwned
     Guid StoreId { get; }
 }
 
+/// <summary>
+/// Bir prova oturumuna bağlı kayıt (fotoğraf, onay, seçim, sonuç görseli). Bu tablolarda şube sütunu yoktur: şube kapsamı <b>yapısal olarak oturum üzerinden</b> uygulanır
+/// (EF filtresi, oturumun kendi firma+şube filtresinden geçer). Böylece her uç noktanın şubeyi elle birleştirmesine gerek kalmaz.
+/// </summary>
+public interface ISessionOwned : ITenantOwned
+{
+    Guid SessionId { get; }
+}
+
+/// <summary>Bir kıyafet seçimine bağlı kayıt (seçim kalemi): şube kapsamı seçim → oturum zinciriyle uygulanır.</summary>
+public interface ISelectionOwned : ITenantOwned
+{
+    Guid SelectionId { get; }
+}
+
 /// <summary>Ürün ve müşteri fotoğraflarının çekim açısı. 360° desteğine hazırlık.</summary>
 public enum ImageAngle
 {

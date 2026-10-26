@@ -63,11 +63,13 @@ internal sealed class GenerationJobConfiguration : IEntityTypeConfiguration<Gene
         // seçim, fotoğraf ve temel görsel bağlantıları veritabanında NO ACTION'dır:
         // - oturum silinirken hepsi aynı DELETE deyiminde gider,
         // - tek başına fotoğraf silinirken bağlantı uygulamada NULL'a çekilir (SessionEndpoints).
-        builder.HasOne<Store>().WithMany().HasForeignKey(x => x.StoreId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne<OutfitSelection>().WithMany().HasForeignKey(x => x.SelectionId).OnDelete(DeleteBehavior.ClientSetNull);
-        builder.HasOne<SessionPhoto>().WithMany().HasForeignKey(x => x.SourcePhotoId).OnDelete(DeleteBehavior.ClientSetNull);
-        builder.HasOne<GeneratedImage>().WithMany().HasForeignKey(x => x.BaseImageId).OnDelete(DeleteBehavior.ClientSetNull);
+        // Firma tutarlılığı veritabanında zorunlu: iş, oturum, seçim, fotoğraf ve temel görsel AYNI firmada olmalı; iş ve oturum ayrıca aynı şubede
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_generation_jobs_id_organization_id");
+        builder.HasOne<Store>().WithMany().HasForeignKey(x => new { x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => new { x.SessionId, x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.StoreId, s.OrganizationId }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<OutfitSelection>().WithMany().HasForeignKey(x => new { x.SelectionId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<SessionPhoto>().WithMany().HasForeignKey(x => new { x.SourcePhotoId, x.OrganizationId }).HasPrincipalKey(p => new { p.Id, p.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<GeneratedImage>().WithMany().HasForeignKey(x => new { x.BaseImageId, x.OrganizationId }).HasPrincipalKey(i => new { i.Id, i.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t => t.HasCheckConstraint("ck_generation_jobs_attempts", "attempt >= 0 AND attempt <= max_attempts"));
     }
 }
@@ -81,10 +83,11 @@ internal sealed class GeneratedImageConfiguration : IEntityTypeConfiguration<Gen
         builder.HasIndex(x => x.ViewGroupId);
 
         // Sonuç görseli oturumdan zincirle silinir; iş yolu ikinci zincir, üst görsel bağlantısı öz-referans olduğu için NO ACTION
-        builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne<GenerationJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<GeneratedImage>().WithMany().HasForeignKey(x => x.ParentImageId).OnDelete(DeleteBehavior.ClientSetNull);
-        builder.HasOne<StoredFile>().WithMany().HasForeignKey(x => x.FileId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_generated_images_id_organization_id");
+        builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => new { x.SessionId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<GenerationJob>().WithMany().HasForeignKey(x => new { x.JobId, x.OrganizationId }).HasPrincipalKey(j => new { j.Id, j.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<GeneratedImage>().WithMany().HasForeignKey(x => new { x.ParentImageId, x.OrganizationId }).HasPrincipalKey(i => new { i.Id, i.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<StoredFile>().WithMany().HasForeignKey(x => new { x.FileId, x.OrganizationId }).HasPrincipalKey(f => new { f.Id, f.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -115,9 +118,12 @@ internal sealed class AiUsageLogConfiguration : IEntityTypeConfiguration<AiUsage
         builder.ToTable(t => t.HasCheckConstraint("ck_ai_usage_logs_adjustment", "[is_adjustment] = 0 OR ([adjusts_log_id] IS NOT NULL AND [event_key] IS NOT NULL)"));
 
         // Oturum silindiğinde maliyet kaydı kalır, iş bağlantısı koparılır
+        // İş bağlantısı SET NULL (tek sütunlu FK) + aynı firmada olma kuralı (bileşik NO ACTION FK; bağlantı boşken devre dışı)
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_ai_usage_logs_id_organization_id");
         builder.HasOne<GenerationJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.SetNull);
-        builder.HasOne<Store>().WithMany().HasForeignKey(x => x.StoreId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => x.AdjustsLogId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<GenerationJob>().WithMany().HasForeignKey(x => new { x.JobId, x.OrganizationId }).HasPrincipalKey(j => new { j.Id, j.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Store>().WithMany().HasForeignKey(x => new { x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => new { x.AdjustsLogId, x.OrganizationId }).HasPrincipalKey(l => new { l.Id, l.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -142,6 +148,6 @@ internal sealed class AiCostReconciliationConfiguration : IEntityTypeConfigurati
         });
 
         // Muhasebe kaydı oturum silinince de kalır: işe anahtar yok; belirsiz maliyet satırına bağlıdır (o da silinmez)
-        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => x.UsageLogId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<AiUsageLog>().WithMany().HasForeignKey(x => new { x.UsageLogId, x.OrganizationId }).HasPrincipalKey(l => new { l.Id, l.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
     }
 }

@@ -163,6 +163,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "CreatedAt")
                         .HasDatabaseName("ix_audit_logs_organization_id_created_at");
 
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_audit_logs_store_id_organization_id");
+
                     b.ToTable("audit_logs", (string)null);
                 });
 
@@ -232,6 +235,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_categories");
 
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_categories_id_organization_id");
+
                     b.HasIndex("OrganizationId", "Slug")
                         .IsUnique()
                         .HasDatabaseName("ix_categories_organization_id_slug");
@@ -265,11 +271,14 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("SetProductId", "ComponentProductId")
                         .HasName("pk_outfit_set_components");
 
-                    b.HasIndex("ComponentProductId")
-                        .HasDatabaseName("ix_outfit_set_components_component_product_id");
+                    b.HasIndex("ComponentProductId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_set_components_component_product_id_organization_id");
 
-                    b.HasIndex("ComponentVariantId")
-                        .HasDatabaseName("ix_outfit_set_components_component_variant_id");
+                    b.HasIndex("ComponentVariantId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_set_components_component_variant_id_organization_id");
+
+                    b.HasIndex("SetProductId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_set_components_set_product_id_organization_id");
 
                     b.ToTable("outfit_set_components", null, t =>
                         {
@@ -354,8 +363,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_products");
 
-                    b.HasIndex("CategoryId")
-                        .HasDatabaseName("ix_products_category_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_products_id_organization_id");
+
+                    b.HasIndex("CategoryId", "OrganizationId")
+                        .HasDatabaseName("ix_products_category_id_organization_id");
 
                     b.HasIndex("OrganizationId", "Code")
                         .IsUnique()
@@ -426,11 +438,14 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_product_images");
 
-                    b.HasIndex("FileId")
-                        .HasDatabaseName("ix_product_images_file_id");
+                    b.HasIndex("FileId", "OrganizationId")
+                        .HasDatabaseName("ix_product_images_file_id_organization_id");
 
-                    b.HasIndex("VariantId")
-                        .HasDatabaseName("ix_product_images_variant_id");
+                    b.HasIndex("ProductId", "OrganizationId")
+                        .HasDatabaseName("ix_product_images_product_id_organization_id");
+
+                    b.HasIndex("VariantId", "OrganizationId")
+                        .HasDatabaseName("ix_product_images_variant_id_organization_id");
 
                     b.HasIndex("ProductId", "VariantId", "Angle")
                         .IsUnique()
@@ -497,6 +512,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_product_variants");
 
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_product_variants_id_organization_id");
+
                     b.HasIndex("ProductId")
                         .IsUnique()
                         .HasDatabaseName("ux_product_variants_default")
@@ -505,6 +523,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "Code")
                         .IsUnique()
                         .HasDatabaseName("ix_product_variants_product_id_code");
+
+                    b.HasIndex("ProductId", "OrganizationId")
+                        .HasDatabaseName("ix_product_variants_product_id_organization_id");
 
                     b.ToTable("product_variants", null, t =>
                         {
@@ -582,6 +603,12 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique()
                         .HasDatabaseName("ix_display_devices_token_hash");
+
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_display_devices_store_id_organization_id");
+
+                    b.HasIndex("CurrentSessionId", "StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_display_devices_current_session_id_store_id_organization_id");
 
                     b.ToTable("display_devices", (string)null);
                 });
@@ -715,6 +742,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_stored_files");
 
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_stored_files_id_organization_id");
+
                     b.HasIndex("OrganizationId")
                         .HasDatabaseName("ix_stored_files_organization_id");
 
@@ -809,6 +839,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasIndex("UsageLogId", "IdempotencyKey")
                         .IsUnique()
                         .HasDatabaseName("ux_ai_cost_reconciliations_case_key");
+
+                    b.HasIndex("UsageLogId", "OrganizationId")
+                        .HasDatabaseName("ix_ai_cost_reconciliations_usage_log_id_organization_id");
 
                     b.HasIndex("UsageLogId", "Sequence")
                         .IsUnique()
@@ -944,26 +977,32 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_ai_usage_logs");
 
-                    b.HasIndex("AdjustsLogId")
-                        .HasDatabaseName("ix_ai_usage_logs_adjusts_log_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_ai_usage_logs_id_organization_id");
 
                     b.HasIndex("EventKey")
                         .IsUnique()
                         .HasDatabaseName("ux_ai_usage_logs_event_key")
                         .HasFilter("[event_key] IS NOT NULL");
 
-                    b.HasIndex("JobId")
-                        .HasDatabaseName("ix_ai_usage_logs_job_id");
-
                     b.HasIndex("ReconciliationState")
                         .HasDatabaseName("ix_ai_usage_logs_reconciliation")
                         .HasFilter("[reconciliation_state] IS NOT NULL");
+
+                    b.HasIndex("AdjustsLogId", "OrganizationId")
+                        .HasDatabaseName("ix_ai_usage_logs_adjusts_log_id_organization_id");
+
+                    b.HasIndex("JobId", "OrganizationId")
+                        .HasDatabaseName("ix_ai_usage_logs_job_id_organization_id");
 
                     b.HasIndex("OrganizationId", "CreatedAt")
                         .HasDatabaseName("ix_ai_usage_logs_organization_id_created_at");
 
                     b.HasIndex("StoreId", "CreatedAt")
                         .HasDatabaseName("ix_ai_usage_logs_store_id_created_at");
+
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_ai_usage_logs_store_id_organization_id");
 
                     b.ToTable("ai_usage_logs", null, t =>
                         {
@@ -1045,17 +1084,23 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_generated_images");
 
-                    b.HasIndex("FileId")
-                        .HasDatabaseName("ix_generated_images_file_id");
-
-                    b.HasIndex("JobId")
-                        .HasDatabaseName("ix_generated_images_job_id");
-
-                    b.HasIndex("ParentImageId")
-                        .HasDatabaseName("ix_generated_images_parent_image_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_generated_images_id_organization_id");
 
                     b.HasIndex("ViewGroupId")
                         .HasDatabaseName("ix_generated_images_view_group_id");
+
+                    b.HasIndex("FileId", "OrganizationId")
+                        .HasDatabaseName("ix_generated_images_file_id_organization_id");
+
+                    b.HasIndex("JobId", "OrganizationId")
+                        .HasDatabaseName("ix_generated_images_job_id_organization_id");
+
+                    b.HasIndex("ParentImageId", "OrganizationId")
+                        .HasDatabaseName("ix_generated_images_parent_image_id_organization_id");
+
+                    b.HasIndex("SessionId", "OrganizationId")
+                        .HasDatabaseName("ix_generated_images_session_id_organization_id");
 
                     b.HasIndex("SessionId", "VersionNo")
                         .IsUnique()
@@ -1224,8 +1269,8 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_generation_jobs");
 
-                    b.HasIndex("BaseImageId")
-                        .HasDatabaseName("ix_generation_jobs_base_image_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_generation_jobs_id_organization_id");
 
                     b.HasIndex("LeaseUntil")
                         .HasDatabaseName("ix_generation_jobs_running_lease")
@@ -1235,14 +1280,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_generation_jobs_queue")
                         .HasFilter("[status] = N'Queued'");
 
-                    b.HasIndex("SelectionId")
-                        .HasDatabaseName("ix_generation_jobs_selection_id");
+                    b.HasIndex("BaseImageId", "OrganizationId")
+                        .HasDatabaseName("ix_generation_jobs_base_image_id_organization_id");
 
-                    b.HasIndex("SourcePhotoId")
-                        .HasDatabaseName("ix_generation_jobs_source_photo_id");
-
-                    b.HasIndex("StoreId")
-                        .HasDatabaseName("ix_generation_jobs_store_id");
+                    b.HasIndex("SelectionId", "OrganizationId")
+                        .HasDatabaseName("ix_generation_jobs_selection_id_organization_id");
 
                     b.HasIndex("SessionId", "DedupeKey")
                         .IsUnique()
@@ -1255,6 +1297,15 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("SessionId", "RequestFingerprint")
                         .HasDatabaseName("ix_generation_jobs_session_id_request_fingerprint");
+
+                    b.HasIndex("SourcePhotoId", "OrganizationId")
+                        .HasDatabaseName("ix_generation_jobs_source_photo_id_organization_id");
+
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_generation_jobs_store_id_organization_id");
+
+                    b.HasIndex("SessionId", "StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_generation_jobs_session_id_store_id_organization_id");
 
                     b.ToTable("generation_jobs", null, t =>
                         {
@@ -1359,6 +1410,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_stores");
 
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_stores_id_organization_id");
+
                     b.HasIndex("OrganizationId", "Code")
                         .IsUnique()
                         .HasDatabaseName("ix_stores_organization_id_code");
@@ -1394,6 +1448,12 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("StoreId")
                         .HasDatabaseName("ix_user_store_roles_store_id");
+
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_user_store_roles_store_id_organization_id");
+
+                    b.HasIndex("UserId", "OrganizationId")
+                        .HasDatabaseName("ix_user_store_roles_user_id_organization_id");
 
                     b.ToTable("user_store_roles", null, t =>
                         {
@@ -1467,12 +1527,12 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_consent_records");
 
-                    b.HasIndex("RecordedByUserId")
-                        .HasDatabaseName("ix_consent_records_recorded_by_user_id");
+                    b.HasIndex("RecordedByUserId", "OrganizationId")
+                        .HasDatabaseName("ix_consent_records_recorded_by_user_id_organization_id");
 
-                    b.HasIndex("SessionId")
+                    b.HasIndex("SessionId", "OrganizationId")
                         .IsUnique()
-                        .HasDatabaseName("ix_consent_records_session_id");
+                        .HasDatabaseName("ix_consent_records_session_id_organization_id");
 
                     b.ToTable("consent_records", null, t =>
                         {
@@ -1516,8 +1576,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_outfit_selections");
 
-                    b.HasIndex("SessionId")
-                        .HasDatabaseName("ix_outfit_selections_session_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_outfit_selections_id_organization_id");
+
+                    b.HasIndex("SessionId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_selections_session_id_organization_id");
 
                     b.ToTable("outfit_selections", null, t =>
                         {
@@ -1567,17 +1630,17 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_outfit_selection_items");
 
-                    b.HasIndex("CategoryId")
-                        .HasDatabaseName("ix_outfit_selection_items_category_id");
+                    b.HasIndex("CategoryId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_selection_items_category_id_organization_id");
 
-                    b.HasIndex("ProductId")
-                        .HasDatabaseName("ix_outfit_selection_items_product_id");
+                    b.HasIndex("ProductId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_selection_items_product_id_organization_id");
 
-                    b.HasIndex("SelectionId")
-                        .HasDatabaseName("ix_outfit_selection_items_selection_id");
+                    b.HasIndex("SelectionId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_selection_items_selection_id_organization_id");
 
-                    b.HasIndex("VariantId")
-                        .HasDatabaseName("ix_outfit_selection_items_variant_id");
+                    b.HasIndex("VariantId", "OrganizationId")
+                        .HasDatabaseName("ix_outfit_selection_items_variant_id_organization_id");
 
                     b.ToTable("outfit_selection_items", (string)null);
                 });
@@ -1630,11 +1693,14 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_session_photos");
 
-                    b.HasIndex("FileId")
-                        .HasDatabaseName("ix_session_photos_file_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_session_photos_id_organization_id");
 
-                    b.HasIndex("SessionId")
-                        .HasDatabaseName("ix_session_photos_session_id");
+                    b.HasIndex("FileId", "OrganizationId")
+                        .HasDatabaseName("ix_session_photos_file_id_organization_id");
+
+                    b.HasIndex("SessionId", "OrganizationId")
+                        .HasDatabaseName("ix_session_photos_session_id_organization_id");
 
                     b.ToTable("session_photos", null, t =>
                         {
@@ -1695,11 +1761,20 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_tryon_sessions");
 
-                    b.HasIndex("CreatedByUserId")
-                        .HasDatabaseName("ix_tryon_sessions_created_by_user_id");
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_tryon_sessions_id_organization_id");
+
+                    b.HasAlternateKey("Id", "StoreId", "OrganizationId")
+                        .HasName("ak_tryon_sessions_id_store_id_organization_id");
 
                     b.HasIndex("RetentionUntil")
                         .HasDatabaseName("ix_tryon_sessions_retention_until");
+
+                    b.HasIndex("CreatedByUserId", "OrganizationId")
+                        .HasDatabaseName("ix_tryon_sessions_created_by_user_id_organization_id");
+
+                    b.HasIndex("StoreId", "OrganizationId")
+                        .HasDatabaseName("ix_tryon_sessions_store_id_organization_id");
 
                     b.HasIndex("StoreId", "Status")
                         .HasDatabaseName("ix_tryon_sessions_store_id_status");
@@ -1811,6 +1886,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_users");
 
+                    b.HasAlternateKey("Id", "OrganizationId")
+                        .HasName("ak_users_id_organization_id");
+
                     b.HasIndex("NormalizedEmail")
                         .HasDatabaseName("EmailIndex");
 
@@ -1855,6 +1933,23 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_user_tokens_users_user_id");
                 });
 
+            modelBuilder.Entity("SanalProva.Domain.Audit.AuditLog", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_audit_logs_organizations_organization_id");
+
+                    b.HasOne("SanalProva.Domain.Tenancy.Store", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_audit_logs_stores_store_id_organization_id");
+                });
+
             modelBuilder.Entity("SanalProva.Domain.Catalog.Category", b =>
                 {
                     b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
@@ -1869,39 +1964,44 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("SanalProva.Domain.Catalog.Product", null)
                         .WithMany()
-                        .HasForeignKey("ComponentProductId")
+                        .HasForeignKey("ComponentProductId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_set_components_products_component_product_id");
+                        .HasConstraintName("fk_outfit_set_components_products_component_product_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.ProductVariant", null)
                         .WithMany()
-                        .HasForeignKey("ComponentVariantId")
-                        .HasConstraintName("fk_outfit_set_components_product_variants_component_variant_id");
+                        .HasForeignKey("ComponentVariantId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_outfit_set_components_product_variants_component_variant_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.Product", null)
                         .WithMany("Components")
-                        .HasForeignKey("SetProductId")
+                        .HasForeignKey("SetProductId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_set_components_products_set_product_id");
+                        .HasConstraintName("fk_outfit_set_components_products_set_product_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Catalog.Product", b =>
                 {
-                    b.HasOne("SanalProva.Domain.Catalog.Category", "Category")
-                        .WithMany()
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_products_categories_category_id");
-
                     b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_products_organizations_organization_id");
+
+                    b.HasOne("SanalProva.Domain.Catalog.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_products_categories_category_id_organization_id");
 
                     b.Navigation("Category");
                 });
@@ -1910,33 +2010,37 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("SanalProva.Domain.Files.StoredFile", null)
                         .WithMany()
-                        .HasForeignKey("FileId")
+                        .HasForeignKey("FileId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_product_images_stored_files_file_id");
+                        .HasConstraintName("fk_product_images_stored_files_file_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.Product", null)
                         .WithMany("Images")
-                        .HasForeignKey("ProductId")
+                        .HasForeignKey("ProductId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_product_images_products_product_id");
+                        .HasConstraintName("fk_product_images_products_product_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.ProductVariant", null)
                         .WithMany()
-                        .HasForeignKey("VariantId")
+                        .HasForeignKey("VariantId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_product_images_product_variants_variant_id");
+                        .HasConstraintName("fk_product_images_product_variants_variant_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Catalog.ProductVariant", b =>
                 {
                     b.HasOne("SanalProva.Domain.Catalog.Product", null)
                         .WithMany("Variants")
-                        .HasForeignKey("ProductId")
+                        .HasForeignKey("ProductId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_product_variants_products_product_id");
+                        .HasConstraintName("fk_product_variants_products_product_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Display.DisplayDevice", b =>
@@ -1949,10 +2053,18 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.HasOne("SanalProva.Domain.Tenancy.Store", null)
                         .WithMany()
-                        .HasForeignKey("StoreId")
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_display_devices_stores_store_id");
+                        .HasConstraintName("fk_display_devices_stores_store_id_organization_id");
+
+                    b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
+                        .WithMany()
+                        .HasForeignKey("CurrentSessionId", "StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "StoreId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_display_devices_try_on_sessions_current_session_id_store_id_organization_id");
 
                     b.OwnsOne("SanalProva.Domain.Display.DisplayState", "State", b1 =>
                         {
@@ -2005,93 +2117,116 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("SanalProva.Domain.Generation.AiUsageLog", null)
                         .WithMany()
-                        .HasForeignKey("UsageLogId")
+                        .HasForeignKey("UsageLogId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id");
+                        .HasConstraintName("fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Generation.AiUsageLog", b =>
                 {
-                    b.HasOne("SanalProva.Domain.Generation.AiUsageLog", null)
-                        .WithMany()
-                        .HasForeignKey("AdjustsLogId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_ai_usage_logs_ai_usage_logs_adjusts_log_id");
-
                     b.HasOne("SanalProva.Domain.Generation.GenerationJob", null)
                         .WithMany()
                         .HasForeignKey("JobId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_ai_usage_logs_generation_jobs_job_id");
 
+                    b.HasOne("SanalProva.Domain.Generation.AiUsageLog", null)
+                        .WithMany()
+                        .HasForeignKey("AdjustsLogId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_ai_usage_logs_ai_usage_logs_adjusts_log_id_organization_id");
+
+                    b.HasOne("SanalProva.Domain.Generation.GenerationJob", null)
+                        .WithMany()
+                        .HasForeignKey("JobId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_ai_usage_logs_generation_jobs_job_id_organization_id");
+
                     b.HasOne("SanalProva.Domain.Tenancy.Store", null)
                         .WithMany()
-                        .HasForeignKey("StoreId")
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_ai_usage_logs_stores_store_id");
+                        .HasConstraintName("fk_ai_usage_logs_stores_store_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Generation.GeneratedImage", b =>
                 {
                     b.HasOne("SanalProva.Domain.Files.StoredFile", null)
                         .WithMany()
-                        .HasForeignKey("FileId")
+                        .HasForeignKey("FileId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_generated_images_stored_files_file_id");
+                        .HasConstraintName("fk_generated_images_stored_files_file_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Generation.GenerationJob", null)
                         .WithMany()
-                        .HasForeignKey("JobId")
+                        .HasForeignKey("JobId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_generated_images_generation_jobs_job_id");
+                        .HasConstraintName("fk_generated_images_generation_jobs_job_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Generation.GeneratedImage", null)
                         .WithMany()
-                        .HasForeignKey("ParentImageId")
-                        .HasConstraintName("fk_generated_images_generated_images_parent_image_id");
+                        .HasForeignKey("ParentImageId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_generated_images_generated_images_parent_image_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
                         .WithMany()
-                        .HasForeignKey("SessionId")
+                        .HasForeignKey("SessionId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_generated_images_try_on_sessions_session_id");
+                        .HasConstraintName("fk_generated_images_try_on_sessions_session_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Generation.GenerationJob", b =>
                 {
                     b.HasOne("SanalProva.Domain.Generation.GeneratedImage", null)
                         .WithMany()
-                        .HasForeignKey("BaseImageId")
-                        .HasConstraintName("fk_generation_jobs_generated_images_base_image_id");
+                        .HasForeignKey("BaseImageId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_generation_jobs_generated_images_base_image_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.OutfitSelection", null)
                         .WithMany()
-                        .HasForeignKey("SelectionId")
-                        .HasConstraintName("fk_generation_jobs_outfit_selections_selection_id");
-
-                    b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
-                        .WithMany()
-                        .HasForeignKey("SessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_generation_jobs_try_on_sessions_session_id");
+                        .HasForeignKey("SelectionId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_generation_jobs_outfit_selections_selection_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.SessionPhoto", null)
                         .WithMany()
-                        .HasForeignKey("SourcePhotoId")
-                        .HasConstraintName("fk_generation_jobs_session_photos_source_photo_id");
+                        .HasForeignKey("SourcePhotoId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_generation_jobs_session_photos_source_photo_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Tenancy.Store", null)
                         .WithMany()
-                        .HasForeignKey("StoreId")
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_generation_jobs_stores_store_id");
+                        .HasConstraintName("fk_generation_jobs_stores_store_id_organization_id");
+
+                    b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
+                        .WithMany()
+                        .HasForeignKey("SessionId", "StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "StoreId", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_generation_jobs_try_on_sessions_session_id_store_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Tenancy.Organization", b =>
@@ -2160,91 +2295,102 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.HasOne("SanalProva.Domain.Tenancy.Store", null)
                         .WithMany()
-                        .HasForeignKey("StoreId")
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_user_store_roles_stores_store_id");
+                        .HasConstraintName("fk_user_store_roles_stores_store_id_organization_id");
 
                     b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
                         .WithMany()
-                        .HasForeignKey("UserId")
+                        .HasForeignKey("UserId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_user_store_roles_asp_net_users_user_id");
+                        .HasConstraintName("fk_user_store_roles_asp_net_users_user_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.TryOn.ConsentRecord", b =>
                 {
                     b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
                         .WithMany()
-                        .HasForeignKey("RecordedByUserId")
+                        .HasForeignKey("RecordedByUserId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_consent_records_asp_net_users_recorded_by_user_id");
+                        .HasConstraintName("fk_consent_records_asp_net_users_recorded_by_user_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
                         .WithOne("Consent")
-                        .HasForeignKey("SanalProva.Domain.TryOn.ConsentRecord", "SessionId")
+                        .HasForeignKey("SanalProva.Domain.TryOn.ConsentRecord", "SessionId", "OrganizationId")
+                        .HasPrincipalKey("SanalProva.Domain.TryOn.TryOnSession", "Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_consent_records_tryon_sessions_session_id");
+                        .HasConstraintName("fk_consent_records_tryon_sessions_session_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.TryOn.OutfitSelection", b =>
                 {
                     b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
                         .WithMany()
-                        .HasForeignKey("SessionId")
+                        .HasForeignKey("SessionId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_selections_try_on_sessions_session_id");
+                        .HasConstraintName("fk_outfit_selections_try_on_sessions_session_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.TryOn.OutfitSelectionItem", b =>
                 {
                     b.HasOne("SanalProva.Domain.Catalog.Category", null)
                         .WithMany()
-                        .HasForeignKey("CategoryId")
+                        .HasForeignKey("CategoryId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_selection_items_categories_category_id");
+                        .HasConstraintName("fk_outfit_selection_items_categories_category_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.Product", null)
                         .WithMany()
-                        .HasForeignKey("ProductId")
+                        .HasForeignKey("ProductId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_selection_items_products_product_id");
+                        .HasConstraintName("fk_outfit_selection_items_products_product_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.OutfitSelection", null)
                         .WithMany("Items")
-                        .HasForeignKey("SelectionId")
+                        .HasForeignKey("SelectionId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_outfit_selection_items_outfit_selections_selection_id");
+                        .HasConstraintName("fk_outfit_selection_items_outfit_selections_selection_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Catalog.ProductVariant", null)
                         .WithMany()
-                        .HasForeignKey("VariantId")
+                        .HasForeignKey("VariantId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_outfit_selection_items_product_variants_variant_id");
+                        .HasConstraintName("fk_outfit_selection_items_product_variants_variant_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.TryOn.SessionPhoto", b =>
                 {
                     b.HasOne("SanalProva.Domain.Files.StoredFile", null)
                         .WithMany()
-                        .HasForeignKey("FileId")
+                        .HasForeignKey("FileId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_session_photos_stored_files_file_id");
+                        .HasConstraintName("fk_session_photos_stored_files_file_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
                         .WithMany("Photos")
-                        .HasForeignKey("SessionId")
+                        .HasForeignKey("SessionId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_session_photos_tryon_sessions_session_id");
+                        .HasConstraintName("fk_session_photos_tryon_sessions_session_id_organization_id");
 
                     b.OwnsOne("SanalProva.Domain.TryOn.PhotoQualityFlags", "QualityFlags", b1 =>
                         {
@@ -2277,17 +2423,19 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
                         .WithMany()
-                        .HasForeignKey("CreatedByUserId")
+                        .HasForeignKey("CreatedByUserId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_tryon_sessions_asp_net_users_created_by_user_id");
+                        .HasConstraintName("fk_tryon_sessions_asp_net_users_created_by_user_id_organization_id");
 
                     b.HasOne("SanalProva.Domain.Tenancy.Store", null)
                         .WithMany()
-                        .HasForeignKey("StoreId")
+                        .HasForeignKey("StoreId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
-                        .HasConstraintName("fk_tryon_sessions_stores_store_id");
+                        .HasConstraintName("fk_tryon_sessions_stores_store_id_organization_id");
 
                     b.OwnsOne("SanalProva.Domain.TryOn.SessionDraft", "Draft", b1 =>
                         {

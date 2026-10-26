@@ -16,6 +16,10 @@ public static class DbErrors
     public static bool IsUniqueViolation(DbUpdateException exception) =>
         exception?.InnerException is SqlException { Number: 2601 or 2627 };
 
+    /// <summary>Yabancı anahtar / CHECK ihlali (547): çapraz firma bağlantısı, var olmayan ebeveyn veya silinemeyen bağlı kayıt.</summary>
+    public static bool IsForeignKeyViolation(DbUpdateException exception) =>
+        exception?.InnerException is SqlException { Number: 547 };
+
     /// <summary>Kilitlenme kurbanı mı (doğrudan veya EF'in DbUpdateException'ı içinde).</summary>
     public static bool IsDeadlock(Exception exception) => Find(exception) is { Number: DeadlockVictim };
 

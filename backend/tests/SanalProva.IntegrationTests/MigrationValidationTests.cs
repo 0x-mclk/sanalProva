@@ -45,7 +45,7 @@ public sealed class MigrationValidationTests
         Assert.Equal(migrations.Order(StringComparer.Ordinal).ToArray(), migrations);
         Assert.Equal(migrations.Length, migrations.Distinct().Count());
         Assert.All(migrations, m => Assert.Matches(@"^\d{14}_[A-Za-z0-9]+$", m));
-        Assert.EndsWith("_CostReconciliation", migrations[^1], StringComparison.Ordinal);
+        Assert.EndsWith("_TenantConsistency", migrations[^1], StringComparison.Ordinal);
 
         await lab.MigrateAsync(Ct);
         await using (var db = lab.OpenMigrator())
@@ -209,6 +209,180 @@ public sealed class MigrationValidationTests
         Assert.Equal(1, await upgraded.ScalarAsync<int>("SELECT COUNT(*) FROM ai_cost_reconciliations", ct: Ct));
         Assert.Equal(1, await upgraded.ScalarAsync<int>("SELECT COUNT(*) FROM ai_usage_logs WHERE is_adjustment = 1", ct: Ct));
         Assert.Equal(-0.03m, await upgraded.ScalarAsync<decimal>("SELECT SUM(estimated_cost_usd) FROM ai_usage_logs WHERE is_adjustment = 1", ct: Ct));
+    }
+
+    [Fact]
+    public async Task Tenant_tutarlilik_migrationi_mevcut_veride_capraz_firma_veya_sube_iliskisi_bulursa_acik_hatayla_durur_hicbir_sey_degismez_duzeltince_uygulanir()
+    {
+        await using var lab = await MigrationLab.CreateAsync(Ct);
+        await lab.MigrateAsync(Ct, MigrationId("CostReconciliation")); // bileşik FK'lardan önceki şema
+        var rows = await RowFactory.LoadAsync(lab.MigratorCs, Ct);
+
+        async Task<Guid> Insert(string table, params (string Column, object? Value)[] values) =>
+            (Guid)(await rows.CreateAsync(table, values.ToDictionary(v => v.Column, v => v.Value, StringComparer.Ordinal), Ct))["id"]!;
+
+        // Tutarlı veri: firma A (iki şube, oturum, seçim, iş) ve firma B
+        var orgA = await Insert("organizations");
+        var storeA1 = await Insert("stores", ("organization_id", orgA));
+        var storeA2 = await Insert("stores", ("organization_id", orgA));
+        var userA = await Insert("users", ("organization_id", orgA));
+        var session = await Insert("tryon_sessions", ("organization_id", orgA), ("store_id", storeA1), ("created_by_user_id", userA));
+        var selection = await Insert("outfit_selections", ("organization_id", orgA), ("session_id", session));
+        await Insert("generation_jobs", ("organization_id", orgA), ("store_id", storeA1), ("session_id", session), ("selection_id", selection));
+        var orgB = await Insert("organizations");
+        var storeB = await Insert("stores", ("organization_id", orgB));
+        var userB = await Insert("users", ("organization_id", orgB));
+        var sessionB = await Insert("tryon_sessions", ("organization_id", orgB), ("store_id", storeB), ("created_by_user_id", userB));
+
+        async Task<(int Jobs, int History, int AlternateKeys, int CompositeFks)> StateAsync() => (
+            await lab.ScalarAsync<int>("SELECT COUNT(*) FROM generation_jobs", ct: Ct), await lab.ScalarAsync<int>("SELECT COUNT(*) FROM __ef_migrations_history", ct: Ct),
+            await lab.ScalarAsync<int>("SELECT COUNT(*) FROM sys.key_constraints WHERE name LIKE N'ak[_]%'", ct: Ct),
+            await lab.ScalarAsync<int>("SELECT COUNT(*) FROM sys.foreign_keys WHERE name LIKE N'%organization[_]id'", ct: Ct));
+
+        // Tarayıcı temiz veride ihlal bulmaz
+        Assert.Empty(await TenantScan.ScanAsync(lab.MigratorCs, Ct));
+
+        // İhlal 1: başka firmanın seçimini kullanan iş (eski şema bunu kabul eder; "TenantScan" pozitif kontrol)
+        var foreignSelection = await Insert("generation_jobs", ("organization_id", orgB), ("store_id", storeB), ("session_id", sessionB), ("selection_id", selection));
+        Assert.Contains(await TenantScan.ScanAsync(lab.MigratorCs, Ct), f => f.Kind == "FARKLI_FIRMA" && f.Relation.StartsWith("generation_jobs.selection_id", StringComparison.Ordinal));
+        var before = await StateAsync();
+
+        var ex = await Assert.ThrowsAsync<SqlException>(() => lab.MigrateAsync(Ct));
+        Assert.Equal(51200, ex.Number);
+        Assert.Contains("generation_jobs(selection_id, organization_id) -> outfit_selections", ex.Message, StringComparison.Ordinal); // ilişki adıyla açık hata
+        Assert.Equal(before, await StateAsync()); // migration geri alındı: veri, geçmiş, anahtarlar ve FK'lar aynen
+        Assert.Equal(0, before.AlternateKeys);
+
+        // İhlal 2 (şube): aynı firmada ama oturumundan farklı şubede iş
+        await lab.ExecuteAsync($"DELETE FROM generation_jobs WHERE id = '{foreignSelection}'", ct: Ct);
+        var wrongStore = await Insert("generation_jobs", ("organization_id", orgA), ("store_id", storeA2), ("session_id", session));
+        var storeEx = await Assert.ThrowsAsync<SqlException>(() => lab.MigrateAsync(Ct));
+        Assert.Equal(51200, storeEx.Number);
+        Assert.Contains("generation_jobs(session_id, store_id, organization_id) -> tryon_sessions", storeEx.Message, StringComparison.Ordinal);
+        Assert.Contains(await TenantScan.ScanAsync(lab.MigratorCs, Ct), f => f.Kind == "FARKLI_SUBE");
+
+        // Düzeltince migration uygulanır; veri korunur; tarayıcı temiz; anahtar ve FK'lar yerinde
+        await lab.ExecuteAsync($"DELETE FROM generation_jobs WHERE id = '{wrongStore}'", ct: Ct);
+        var jobsBefore = await lab.ScalarAsync<int>("SELECT COUNT(*) FROM generation_jobs", ct: Ct);
+        await lab.MigrateAsync(Ct);
+        var after = await StateAsync();
+        Assert.Equal(jobsBefore, after.Jobs);
+        Assert.Equal(13, after.AlternateKeys);
+        Assert.True(after.CompositeFks >= 30, $"Bileşik FK sayısı: {after.CompositeFks}");
+        Assert.Empty(await TenantScan.ScanAsync(lab.MigratorCs, Ct));
+
+        // Artık aynı ihlaller veritabanında yazılamaz
+        await Assert.ThrowsAsync<SqlException>(() => Insert("generation_jobs", ("organization_id", orgB), ("store_id", storeB), ("session_id", sessionB), ("selection_id", selection)));
+        await Assert.ThrowsAsync<SqlException>(() => Insert("generation_jobs", ("organization_id", orgA), ("store_id", storeA2), ("session_id", session)));
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions PerfJson = new() { WriteIndented = true };
+
+    private sealed record PerfRun(double BulkInsertMs, double SingleInsertMsPerRow, double CascadeDeleteMs, double SizeMb, int Sessions, int Jobs, int UsageLogs);
+
+    /// <summary>Aynı sentetik veri (oturum, iş, maliyet satırı) üzerinde ekleme, tek satır ekleme ve zincirleme silme süreleri ile veritabanı boyutu.</summary>
+    private static async Task<PerfRun> MeasureAsync(MigrationLab lab, CancellationToken ct)
+    {
+        var rows = await RowFactory.LoadAsync(lab.MigratorCs, ct);
+        var org = (Guid)(await rows.CreateAsync("organizations", null, ct))["id"]!;
+        var store = (Guid)(await rows.CreateAsync("stores", new Dictionary<string, object?> { ["organization_id"] = org }, ct))["id"]!;
+        var user = (Guid)(await rows.CreateAsync("users", new Dictionary<string, object?> { ["organization_id"] = org }, ct))["id"]!;
+        const int sessions = 1000;
+
+        async Task Exec(string sql, params (string, object)[] parameters)
+        {
+            await using var connection = new SqlConnection(lab.MigratorCs);
+            await connection.OpenAsync(ct);
+            await using var command = new SqlCommand(sql, connection) { CommandTimeout = 300 };
+            foreach (var (name, value) in parameters)
+            {
+                command.Parameters.AddWithValue(name, value);
+            }
+
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        var parametersCommon = new (string, object)[] { ("@org", org), ("@store", store), ("@user", user) };
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await Exec($"""
+            DECLARE @now datetimeoffset = SYSDATETIMEOFFSET();
+            ;WITH n AS (SELECT TOP ({sessions}) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i FROM sys.all_objects a CROSS JOIN sys.all_objects b)
+            INSERT INTO tryon_sessions (id, created_at, updated_at, organization_id, store_id, created_by_user_id, status, retention_until, last_activity_at)
+            SELECT NEWID(), @now, @now, @org, @store, @user, N'Open', DATEADD(day, 1, @now), @now FROM n;
+            INSERT INTO generation_jobs (id, created_at, updated_at, organization_id, store_id, session_id, job_type, status, idempotency_key, attempt, max_attempts, next_attempt_at, requested_by_user_id)
+            SELECT NEWID(), @now, @now, @org, @store, s.id, N'OutfitSet', N'Failed', CONVERT(nvarchar(64), NEWID()), 0, 3, @now, @user
+              FROM tryon_sessions s CROSS JOIN (SELECT TOP (10) 1 AS x FROM sys.all_objects) k WHERE s.organization_id = @org;
+            INSERT INTO ai_usage_logs (id, created_at, updated_at, organization_id, store_id, job_id, provider, model, operation, attempt, success, duration_ms, estimated_cost_usd)
+            SELECT NEWID(), @now, @now, @org, @store, j.id, N'Fashn', N'tryon-max', N'OutfitSet', 1, 1, 100, 0.15 FROM generation_jobs j WHERE j.organization_id = @org;
+            """, parametersCommon);
+        var bulk = watch.Elapsed.TotalMilliseconds;
+
+        // Uygulama gibi tek satır ekleme (parametreli, tek bağlantı)
+        var firstSession = await lab.ScalarAsync<Guid>($"SELECT TOP (1) id FROM tryon_sessions WHERE organization_id = '{org}' ORDER BY id", ct: ct);
+        watch.Restart();
+        await using (var connection = new SqlConnection(lab.MigratorCs))
+        {
+            await connection.OpenAsync(ct);
+            for (var i = 0; i < 2000; i++)
+            {
+                await using var command = new SqlCommand("""
+                    INSERT INTO generation_jobs (id, created_at, updated_at, organization_id, store_id, session_id, job_type, status, idempotency_key, attempt, max_attempts, next_attempt_at, requested_by_user_id)
+                    VALUES (NEWID(), SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), @org, @store, @session, N'OutfitSet', N'Failed', @key, 0, 3, SYSDATETIMEOFFSET(), @user)
+                    """, connection);
+                command.Parameters.AddWithValue("@org", org);
+                command.Parameters.AddWithValue("@store", store);
+                command.Parameters.AddWithValue("@session", firstSession);
+                command.Parameters.AddWithValue("@key", Guid.NewGuid().ToString("N"));
+                command.Parameters.AddWithValue("@user", user);
+                await command.ExecuteNonQueryAsync(ct);
+            }
+        }
+
+        var single = watch.Elapsed.TotalMilliseconds / 2000;
+        var size = await lab.ScalarAsync<double>("SELECT SUM(used_page_count) * 8.0 / 1024 FROM sys.dm_db_partition_stats", lab.AdminCs, ct); // boyut görünümü yönetici yetkisi ister
+        var jobs = await lab.ScalarAsync<int>("SELECT COUNT(*) FROM generation_jobs", ct: ct);
+        var logs = await lab.ScalarAsync<int>("SELECT COUNT(*) FROM ai_usage_logs", ct: ct);
+
+        // Zincirleme silme: 500 oturum (iş ve ilgili kayıtlarla; maliyet satırlarında iş bağlantısı SET NULL)
+        watch.Restart();
+        await Exec("DELETE FROM tryon_sessions WHERE id IN (SELECT TOP (500) id FROM tryon_sessions WHERE organization_id = @org ORDER BY id DESC)", ("@org", org));
+        return new PerfRun(bulk, single, watch.Elapsed.TotalMilliseconds, size, sessions, jobs, logs);
+    }
+
+    [Fact]
+    public async Task Olcum_bilesik_FK_ve_ek_anahtarlarin_maliyeti_dolu_veritabaninda_migration_suresi_ekleme_ve_zincirleme_silme_makul_sinirdadir()
+    {
+        await using var before = await MigrationLab.CreateAsync(Ct);
+        await using var after = await MigrationLab.CreateAsync(Ct);
+        await before.MigrateAsync(Ct, MigrationId("CostReconciliation")); // bileşik FK'lardan önceki şema
+        await after.MigrateAsync(Ct);
+
+        // Her iki şemada aynı yük (ısınma turu dışarıda bırakılmadı: iki taraf da soğuk başlar, oranlar karşılaştırılır)
+        var old = await MeasureAsync(before, Ct);
+        var current = await MeasureAsync(after, Ct);
+
+        // Dolu (eski şemalı) veritabanında ileri migration süresi: ön kontrol + 13 benzersiz anahtar + 38 FK + indeks yeniden kurma
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await before.MigrateAsync(Ct);
+        var migrationMs = watch.Elapsed.TotalMilliseconds;
+        var sizeAfterMigration = await before.ScalarAsync<double>("SELECT SUM(used_page_count) * 8.0 / 1024 FROM sys.dm_db_partition_stats", before.AdminCs, Ct);
+        Assert.Empty(await SchemaInspector.DifferencesAsync(before.OpenMigrator(), before.MigratorCs, Ct)); // yükseltilmiş dolu veritabanı modelle birebir
+        Assert.Empty(await TenantScan.ScanAsync(before.MigratorCs, Ct));
+
+        var report = new
+        {
+            Veri = new { old.Sessions, Jobs = current.Jobs, UsageLogs = current.UsageLogs },
+            EskiSema = old, YeniSema = current, DoluVeritabaniMigrationMs = migrationMs, MigrationSonrasiBoyutMb = sizeAfterMigration,
+            OranTopluEkleme = current.BulkInsertMs / old.BulkInsertMs, OranTekSatirEkleme = current.SingleInsertMsPerRow / old.SingleInsertMsPerRow,
+            OranZincirleSilme = current.CascadeDeleteMs / old.CascadeDeleteMs, OranBoyut = current.SizeMb / old.SizeMb,
+        };
+        await File.WriteAllTextAsync(Path.Combine(Path.GetTempPath(), "sanalprova_m34_perf.json"), System.Text.Json.JsonSerializer.Serialize(report, PerfJson), Ct);
+
+        // Geniş ama anlamlı sınırlar: ek kontrol maliyeti makul kalmalı (kesin süreler ortama bağlı, oranlar ve mutlak üst sınırlar sınanır)
+        Assert.True(migrationMs < 60_000, $"Dolu veritabanında migration çok uzun sürdü: {migrationMs:0} ms");
+        Assert.True(current.SingleInsertMsPerRow / old.SingleInsertMsPerRow < 4, $"Tek satır ekleme {current.SingleInsertMsPerRow / old.SingleInsertMsPerRow:0.0}× yavaşladı");
+        Assert.True(current.CascadeDeleteMs / old.CascadeDeleteMs < 4, $"Zincirleme silme {current.CascadeDeleteMs / old.CascadeDeleteMs:0.0}× yavaşladı");
+        Assert.True(current.SizeMb / old.SizeMb < 1.6, $"Boyut {current.SizeMb / old.SizeMb:0.00}× büyüdü");
     }
 
     [Fact]

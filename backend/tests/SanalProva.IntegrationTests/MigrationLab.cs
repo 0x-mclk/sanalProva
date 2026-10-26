@@ -343,6 +343,8 @@ internal static partial class SchemaInspector
             }
 
             var tableId = StoreObjectIdentifier.Table(table.Name, table.Schema);
+            // Alternatif anahtarlar (benzersiz kısıt): bileşik yabancı anahtarların hedefi
+            indexes.AddRange(table.UniqueConstraints.Where(u => u != table.PrimaryKey).Select(u => $"idx|{table.Name}|{u.Name}|unique|{string.Join(',', u.Columns.Select(c => c.Name))}|"));
             indexes.AddRange(table.Indexes.Select(i => $"idx|{table.Name}|{i.Name}|{(i.IsUnique ? "unique" : "plain")}|{string.Join(',', i.Columns.Select(c => c.Name))}|{Tokens(i.MappedIndexes.First().GetFilter(tableId))}"));
             checks.AddRange(table.CheckConstraints.Select(c => $"ck|{table.Name}|{c.Name}|{Tokens(c.Sql)}"));
             foreignKeys.AddRange(table.ForeignKeyConstraints.Select(f => $"fk|{table.Name}|{f.Name}|{f.PrincipalTable.Name}|{DeleteAction(f.OnDeleteAction)}"));

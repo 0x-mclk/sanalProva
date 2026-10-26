@@ -118,11 +118,34 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
                 body = Expression.AndAlso(body, storeMatches);
             }
 
+            // Oturuma (veya seçime) bağlı kayıtlar: şube kapsamı oturum üzerinden. Oturum DbSet'inin kendi filtresi (firma + şube) otomatik uygulanır; şube seçili değilse
+            // (arka plan işleyicisi, yalnızca firma bağlamı) koşul atlanır.
+            if (typeof(ISessionOwned).IsAssignableFrom(entityType.ClrType))
+            {
+                body = Expression.AndAlso(body, StoreScopeThrough(nameof(TryOnSessions), typeof(TryOnSession), parameter, nameof(ISessionOwned.SessionId), currentStore, nullGuid));
+            }
+            else if (typeof(ISelectionOwned).IsAssignableFrom(entityType.ClrType))
+            {
+                body = Expression.AndAlso(body, StoreScopeThrough(nameof(OutfitSelections), typeof(OutfitSelection), parameter, nameof(ISelectionOwned.SelectionId), currentStore, nullGuid));
+            }
+
             builder.Entity(entityType.ClrType).HasQueryFilter(Expression.Lambda(body, parameter));
         }
 
         // AppUser bilinçli olarak filtrelenmez: giriş sırasında (kiracı henüz yokken) Identity
         // kullanıcıyı e-postayla bulabilmelidir. Kullanıcı yönetimi sorguları OrganizationId ile açıkça filtrelenir.
+    }
+
+    /// <summary>
+    /// <c>tenant.StoreId == null || parentSet.Any(p =&gt; p.Id == e.ParentId)</c>: ebeveyn kümesi (oturum/seçim) kendi filtresiyle (firma + şube) daraltılmış olarak sorgulanır.
+    /// </summary>
+    private BinaryExpression StoreScopeThrough(string parentSetProperty, Type parentType, ParameterExpression child, string childKeyProperty, Expression currentStore, Expression nullGuid)
+    {
+        var parentSet = Expression.Property(Expression.Constant(this), parentSetProperty);
+        var parent = Expression.Parameter(parentType, "p");
+        var sameKey = Expression.Equal(Expression.Property(parent, "Id"), Expression.Property(child, childKeyProperty));
+        var any = Expression.Call(typeof(Queryable), nameof(Queryable.Any), [parentType], parentSet, Expression.Quote(Expression.Lambda(sameKey, parent)));
+        return Expression.OrElse(Expression.Equal(currentStore, nullGuid), any);
     }
 
     /// <summary>Metin olarak saklanan her enum sütununa yalnızca geçerli değerleri kabul eden check constraint ekler.</summary>

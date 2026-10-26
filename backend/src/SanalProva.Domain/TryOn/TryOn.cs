@@ -58,7 +58,7 @@ public sealed class DraftItem
     public Guid? VariantId { get; set; }
 }
 
-public sealed class ConsentRecord : Entity, ITenantOwned
+public sealed class ConsentRecord : Entity, ISessionOwned
 {
     public Guid OrganizationId { get; init; }
     public Guid SessionId { get; init; }
@@ -79,7 +79,7 @@ public sealed class ConsentRecord : Entity, ITenantOwned
     public bool AllowsProcessing => ProcessingConsent && ForeignTransferConsent && WithdrawnAt is null;
 }
 
-public sealed class SessionPhoto : Entity, ITenantOwned
+public sealed class SessionPhoto : Entity, ISessionOwned
 {
     public Guid OrganizationId { get; init; }
     public Guid SessionId { get; init; }
@@ -107,7 +107,7 @@ public sealed class PhotoQualityFlags
 }
 
 /// <summary>"Üret"e basıldığı andaki seçimin değişmez kaydı.</summary>
-public sealed class OutfitSelection : Entity, ITenantOwned
+public sealed class OutfitSelection : Entity, ISessionOwned
 {
     public Guid OrganizationId { get; init; }
     public Guid SessionId { get; init; }
@@ -116,7 +116,7 @@ public sealed class OutfitSelection : Entity, ITenantOwned
     public List<OutfitSelectionItem> Items { get; } = [];
 }
 
-public sealed class OutfitSelectionItem : Entity, ITenantOwned
+public sealed class OutfitSelectionItem : Entity, ISelectionOwned
 {
     public Guid OrganizationId { get; init; }
     public Guid SelectionId { get; init; }

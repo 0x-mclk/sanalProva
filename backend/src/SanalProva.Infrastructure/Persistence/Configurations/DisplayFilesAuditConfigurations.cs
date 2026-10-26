@@ -26,8 +26,12 @@ internal sealed class DisplayDeviceConfiguration : IEntityTypeConfiguration<Disp
         builder.Property(x => x.StateVersion).IsConcurrencyToken();
         builder.OwnsOne(x => x.State, s => s.ToJson("display_state"));
 
-        builder.HasOne<Store>().WithMany().HasForeignKey(x => x.StoreId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Store>().WithMany().HasForeignKey(x => new { x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+
+        // Oturum silinince TV bağlantısı boşalır (SET NULL: tek sütunlu FK). SQL Server bileşik FK'da SET NULL'a izin vermez (firma sütunu NOT NULL),
+        // bu yüzden tutarlılık ayrı bir NO ACTION bileşik FK ile sağlanır: TV ve oturum aynı şubede ve aynı firmada olmalıdır. Bağlantı boşken kısıt devre dışıdır.
         builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => x.CurrentSessionId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<TryOnSession>().WithMany().HasForeignKey(x => new { x.CurrentSessionId, x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.StoreId, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -52,6 +56,7 @@ internal sealed class StoredFileConfiguration : IEntityTypeConfiguration<StoredF
         builder.Property(x => x.ContentType).HasMaxLength(60);
         builder.Property(x => x.Sha256).HasMaxLength(64).IsFixedLength();
         builder.HasIndex(x => x.StorageKey).IsUnique();
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_stored_files_id_organization_id");
         builder.HasIndex(x => x.RetentionUntil).HasFilter("deleted_at IS NULL AND retention_until IS NOT NULL");
         builder.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
     }
@@ -66,5 +71,9 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(x => x.EntityType).HasMaxLength(60);
         builder.Property(x => x.IpHash).HasMaxLength(64);
         builder.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
+
+        // Denetim kaydı firmaya ve (varsa) o firmanın şubesine bağlıdır. Kullanıcıya bağlanmaz: platform yöneticisi başka firma adına kayıt bırakır.
+        builder.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Store>().WithMany().HasForeignKey(x => new { x.StoreId, x.OrganizationId }).HasPrincipalKey(s => new { s.Id, s.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
     }
 }

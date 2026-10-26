@@ -64,6 +64,21 @@ public sealed class TenantArchitectureTests
             }
         }
 
+        // Oturuma/seçime bağlı kayıtlarda şube kapsamı YAPISAL: filtre ebeveyn kümesini (oturum/seçim) içerir; elle birleştirmeye bağımlı değildir
+        foreach (var entity in db.Model.GetEntityTypes().Where(e => !e.IsOwned()))
+        {
+            var text = entity.GetDeclaredQueryFilters().FirstOrDefault()?.Expression?.ToString() ?? string.Empty;
+            if (typeof(ISessionOwned).IsAssignableFrom(entity.ClrType) && !text.Contains(".Any(p => (p.Id == e.SessionId))", StringComparison.Ordinal))
+            {
+                problems.Add($"{entity.ClrType.Name}: ISessionOwned ama filtre oturum alt sorgusunu (Any(p => p.Id == e.SessionId)) içermiyor: {text}");
+            }
+
+            if (typeof(ISelectionOwned).IsAssignableFrom(entity.ClrType) && !text.Contains(".Any(p => (p.Id == e.SelectionId))", StringComparison.Ordinal))
+            {
+                problems.Add($"{entity.ClrType.Name}: ISelectionOwned ama filtre seçim alt sorgusunu (Any(p => p.Id == e.SelectionId)) içermiyor: {text}");
+            }
+        }
+
         // İzinli listedeki varlıklar hâlâ gerçekten filtresiz mi (liste bayatlamasın)?
         foreach (var name in UnfilteredWithOrganization.Keys)
         {

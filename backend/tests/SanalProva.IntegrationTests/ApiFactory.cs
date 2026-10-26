@@ -173,29 +173,43 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             }
 
             await connection.CloseAsync();
-            await db.Database.MigrateAsync();
 
-            // SQL Server yabancı anahtarlı tabloda TRUNCATE'e izin vermez: constraint'ler geçici kapatılır, tablolar boşaltılır,
-            // constraint'ler WITH CHECK ile (verinin doğrulanmasıyla, "trusted" olarak) yeniden açılır. Migrator hesabı yeter (DDL + DELETE).
-            var tables = await db.Database
-                .SqlQueryRaw<string>("SELECT t.name AS [Value] FROM sys.tables t WHERE t.is_ms_shipped = 0 AND SCHEMA_NAME(t.schema_id) = N'dbo' AND t.name <> N'__ef_migrations_history'")
-                .ToListAsync();
-            if (tables.Count > 0)
+            // Test veritabanı atılabilir: önceki çalıştırmadan kalan veri (ör. bilinçli çapraz-firma satırları) yeni bir migration'ın ön kontrolünü durdurmasın diye,
+            // bekleyen migration varsa veri ÖNCE sıfırlanır (üretimde ön kontrol durur ve veri incelenir; burada amaç temiz bir test ortamıdır)
+            if (await db.Database.GetPendingMigrationsAsync() is { } pending && pending.Any() && (await db.Database.GetAppliedMigrationsAsync()).Any())
             {
-                var quoted = tables.Select(t => $"[dbo].[{t.Replace("]", "]]", StringComparison.Ordinal)}]").ToList();
-                var reset = string.Concat(quoted.Select(t => $"ALTER TABLE {t} NOCHECK CONSTRAINT ALL;\n"))
-                    + string.Concat(quoted.Select(t => $"DELETE FROM {t};\n"))
-                    + string.Concat(quoted.Select(t => $"ALTER TABLE {t} WITH CHECK CHECK CONSTRAINT ALL;\n"));
-#pragma warning disable EF1002 // Tablo adları sistem kataloğundan gelir, kullanıcı girdisi değil
-                await db.Database.ExecuteSqlRawAsync(reset);
-#pragma warning restore EF1002
+                await ResetDataAsync(db);
             }
+
+            await db.Database.MigrateAsync();
+            await ResetDataAsync(db);
         }
 
         // Host'u paralel testler başlamadan, tek seferde oluştur: WebApplicationFactory ilk erişimde iş parçacığı güvenli değildir;
         // eşzamanlı ilk erişimler birden fazla host (ve birden fazla üretim worker'ı) yaratıp bildirimleri kaybettirir
         _ = Services;
         HasDatabase = true;
+    }
+
+    /// <summary>
+    /// SQL Server yabancı anahtarlı tabloda TRUNCATE'e izin vermez: constraint'ler geçici kapatılır, tablolar boşaltılır, constraint'ler WITH CHECK ile
+    /// (verinin doğrulanmasıyla, "trusted" olarak) yeniden açılır. Migrator hesabı yeter (DDL + DELETE).
+    /// </summary>
+    private static async Task ResetDataAsync(AppDbContext db)
+    {
+        var tables = await db.Database
+            .SqlQueryRaw<string>("SELECT t.name AS [Value] FROM sys.tables t WHERE t.is_ms_shipped = 0 AND SCHEMA_NAME(t.schema_id) = N'dbo' AND t.name <> N'__ef_migrations_history'")
+            .ToListAsync();
+        if (tables.Count > 0)
+        {
+            var quoted = tables.Select(t => $"[dbo].[{t.Replace("]", "]]", StringComparison.Ordinal)}]").ToList();
+            var reset = string.Concat(quoted.Select(t => $"ALTER TABLE {t} NOCHECK CONSTRAINT ALL;\n"))
+                + string.Concat(quoted.Select(t => $"DELETE FROM {t};\n"))
+                + string.Concat(quoted.Select(t => $"ALTER TABLE {t} WITH CHECK CHECK CONSTRAINT ALL;\n"));
+#pragma warning disable EF1002 // Tablo adları sistem kataloğundan gelir, kullanıcı girdisi değil
+            await db.Database.ExecuteSqlRawAsync(reset);
+#pragma warning restore EF1002
+        }
     }
 
     private static void EnsureTestTarget(string connectionString)

@@ -15,6 +15,7 @@ internal sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(x => x.AiHint).HasMaxLength(500);
         // ConflictsWith: ilkel koleksiyon, JSON dizisi olarak nvarchar(max) (yalnızca bellekte okunur, sorgulanmaz)
         builder.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_categories_id_organization_id");
         builder.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t => t.HasCheckConstraint("ck_categories_max_selection", "max_selection >= 1"));
     }
@@ -33,10 +34,11 @@ internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique();
         builder.HasIndex(x => new { x.OrganizationId, x.CategoryId, x.IsActive });
 
-        builder.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasMany(x => x.Variants).WithOne().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(x => x.Images).WithOne().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(x => x.Components).WithOne().HasForeignKey(x => x.SetProductId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_products_id_organization_id");
+        builder.HasOne(x => x.Category).WithMany().HasForeignKey(x => new { x.CategoryId, x.OrganizationId }).HasPrincipalKey(c => new { c.Id, c.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasMany(x => x.Variants).WithOne().HasForeignKey(x => new { x.ProductId, x.OrganizationId }).HasPrincipalKey(p => new { p.Id, p.OrganizationId }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(x => x.Images).WithOne().HasForeignKey(x => new { x.ProductId, x.OrganizationId }).HasPrincipalKey(p => new { p.Id, p.OrganizationId }).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(x => x.Components).WithOne().HasForeignKey(x => new { x.SetProductId, x.OrganizationId }).HasPrincipalKey(p => new { p.Id, p.OrganizationId }).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
     }
 }
@@ -49,6 +51,7 @@ internal sealed class ProductVariantConfiguration : IEntityTypeConfiguration<Pro
         builder.Property(x => x.ColorName).HasMaxLength(60);
         builder.Property(x => x.ColorHex).HasMaxLength(7).IsFixedLength();
         builder.HasIndex(x => new { x.ProductId, x.Code }).IsUnique();
+        builder.HasAlternateKey(x => new { x.Id, x.OrganizationId }).HasName("ak_product_variants_id_organization_id");
 
         // Ürün başına tek varsayılan varyant
         builder.HasIndex(x => x.ProductId).IsUnique().HasFilter("[is_default] = 1").HasDatabaseName("ux_product_variants_default");
@@ -64,8 +67,8 @@ internal sealed class ProductImageConfiguration : IEntityTypeConfiguration<Produ
     {
         // SQL Server tek zincirleme silme yoluna izin verir: görsel üründen siliniyor (ürün → görsel), varyant yolu NO ACTION.
         // Varyant silen bir akış eklenirse önce o varyantın görselleri silinmelidir (bugün varyant silinmiyor).
-        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<StoredFile>().WithMany().HasForeignKey(x => x.FileId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => new { x.VariantId, x.OrganizationId }).HasPrincipalKey(v => new { v.Id, v.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<StoredFile>().WithMany().HasForeignKey(x => new { x.FileId, x.OrganizationId }).HasPrincipalKey(f => new { f.Id, f.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
 
         // Ürün + varyant (null = tüm varyantlar) + açı başına en fazla bir AI referans görseli.
         // FASHN tek ürün görseli aldığı için hazır takımda bu görsel takımın tamamını gösterir.
@@ -82,10 +85,10 @@ internal sealed class OutfitSetComponentConfiguration : IEntityTypeConfiguration
     public void Configure(EntityTypeBuilder<OutfitSetComponent> builder)
     {
         builder.HasKey(x => new { x.SetProductId, x.ComponentProductId });
-        builder.HasOne<Product>().WithMany().HasForeignKey(x => x.ComponentProductId).OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<Product>().WithMany().HasForeignKey(x => new { x.ComponentProductId, x.OrganizationId }).HasPrincipalKey(p => new { p.Id, p.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
         // Bileşen takım ürününden siliniyor (ürün → bileşen); varyant yolu ikinci zincir olacağı için veritabanında NO ACTION,
         // EF yalnızca izlenen kayıtlarda NULL'a çeker (bugün varyant silinmiyor)
-        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.ComponentVariantId).OnDelete(DeleteBehavior.ClientSetNull);
+        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => new { x.ComponentVariantId, x.OrganizationId }).HasPrincipalKey(v => new { v.Id, v.OrganizationId }).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t => t.HasCheckConstraint("ck_outfit_set_components_not_self", "set_product_id <> component_product_id"));
     }
 }
