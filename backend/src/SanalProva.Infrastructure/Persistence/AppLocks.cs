@@ -17,6 +17,9 @@ public static class AppLocks
     /// <summary>Oturum içindeki sonuç sürüm numarasının (1, 2, 3…) kilidi.</summary>
     public static string SessionVersion(Guid sessionId) => $"sanalprova:session-version:{sessionId:N}";
 
+    /// <summary>Şubenin yeni iş kabul kilidi: günlük kota, oturum sınırı ve tekil ücretli iş kontrolü + ekleme bu kilit altında yapılır.</summary>
+    public static string StoreAdmission(Guid storeId) => $"sanalprova:store-admission:{storeId:N}";
+
     /// <summary>Açık transaction içinde özel (exclusive) kilit alır; alınamazsa <see cref="NotGrantedError"/> numaralı SqlException fırlatır.</summary>
     public static async Task AcquireExclusiveAsync(AppDbContext db, string resource, TimeSpan timeout, CancellationToken ct)
     {

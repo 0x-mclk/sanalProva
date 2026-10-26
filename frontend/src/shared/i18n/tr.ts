@@ -55,6 +55,7 @@ export const tr = {
     UNKNOWN_VARIANT: 'Seçilen renk bu ürüne ait değil.',
     QUOTA_EXCEEDED: 'Bu şubenin günlük üretim kotası doldu.',
     SESSION_QUOTA_EXCEEDED: 'Bu prova için üretim sınırına ulaşıldı.',
+    ADMISSION_BUSY: 'Şu an çok fazla istek var. Birkaç saniye sonra tekrar deneyin.',
     JOB_NOT_CANCELLABLE: 'İş zaten işleniyor veya tamamlandı; iptal edilemez.',
     JOB_NOT_FAILED: 'Yalnızca başarısız işler yeniden denenebilir.',
     NOT_IMPLEMENTED: 'Revizyon motoru henüz etkin değil. Yeni bir kombin oluşturabilirsiniz.',

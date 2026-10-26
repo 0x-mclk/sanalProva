@@ -29,6 +29,14 @@ internal sealed class GenerationJobConfiguration : IEntityTypeConfiguration<Gene
         builder.Property(x => x.ProviderRequestId).HasMaxLength(120);
         builder.Property(x => x.IdempotencyKey).HasMaxLength(64);
         builder.Property(x => x.RequestFingerprint).HasMaxLength(64);
+        builder.Property(x => x.DedupeKey).HasMaxLength(64);
+
+        // Aynı ücretli istek için oturumda tek etkin iş (kabul kilidinin arkasındaki ikinci savunma hattı). Başarısız/iptal iş filtreden
+        // çıkar: yeniden deneme yeni iş açabilir. Durum değişince SQL Server filtreli indeksi kendisi günceller.
+        builder.HasIndex(x => new { x.SessionId, x.DedupeKey })
+            .IsUnique()
+            .HasFilter("[dedupe_key] IS NOT NULL AND [status] IN (N'Queued', N'Running', N'Succeeded')")
+            .HasDatabaseName("ux_generation_jobs_active_dedupe");
         builder.Property(x => x.ModelKey).HasMaxLength(60);
         builder.Property(x => x.Quality).HasMaxLength(20);
         builder.HasIndex(x => new { x.SessionId, x.RequestFingerprint });

@@ -106,10 +106,29 @@ public sealed class GenerationProcessor(
         {
             await RunAsync(services, db, job, ct);
         }
-        catch (DbUpdateConcurrencyException)
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException or JobOwnershipLostException)
         {
-            logger.LogWarning("Üretim işinin sahipliği kaybedildi (kilit süresi doldu, iş başka worker'da): {JobId}, bu worker'ın denemesi {Attempt}", job.Id, job.Attempt);
+            logger.LogWarning("Üretim işinin sahipliği kaybedildi (kilit doldu veya iş kurtarıldı/iptal edildi): {JobId}, bu worker'ın denemesi {Attempt}", job.Id, job.Attempt);
         }
+    }
+
+    /// <summary>Kilit yenileme aralığı: kilit süresinin üçte biri (en az 1 sn). Canlı worker uzun sağlayıcı beklemesinde işini kaybetmez.</summary>
+    private TimeSpan LeaseRenewInterval => TimeSpan.FromSeconds(Math.Max(1, settings.CurrentValue.LeaseSeconds / 3.0));
+
+    /// <summary>
+    /// Sahiplik koşullu kilit uzatma: iş hâlâ bu denemede ve "Running" ise <c>lease_until</c> uzatılır. Etkilenen satır yoksa sahiplik kaybedilmiştir
+    /// (iş kurtarılıp yeniden kuyruğa alındı, başka worker'a geçti veya iptal edildi). Süresi dolan işleri kurtaran güncelleme de aynı satırda
+    /// koşullu bir UPDATE'tir: ikisi yarışırsa satır kilidi sayesinde yalnızca biri etkili olur.
+    /// </summary>
+    private async Task<bool> TryRenewLeaseAsync(Guid jobId, int attempt, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var lease = clock.GetUtcNow().AddSeconds(settings.CurrentValue.LeaseSeconds);
+        var renewed = await db.GenerationJobs.IgnoreQueryFilters()
+            .Where(j => j.Id == jobId && j.Attempt == attempt && j.Status == GenerationJobStatus.Running)
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.LeaseUntil, lease), ct);
+        return renewed == 1;
     }
 
     private async Task RecoverExpiredLeasesAsync(AppDbContext db, CancellationToken ct)
@@ -208,9 +227,10 @@ public sealed class GenerationProcessor(
         var worstCase = 0m;
         var callStarted = false;
 
-        // Personel çalışan bir işi iptal ederse sağlayıcı bekleyişi hemen bırakılır
+        // Personel çalışan bir işi iptal ederse veya bu worker işin sahipliğini kaybederse sağlayıcı bekleyişi hemen bırakılır
         using var jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var watcher = WatchForCancellationAsync(job.Id, jobCts);
+        var ownership = new OwnershipState();
+        var watcher = WatchJobAsync(job.Id, job.Attempt, jobCts, ownership);
         try
         {
             await NotifyAsync(job, null, ct);
@@ -310,6 +330,13 @@ public sealed class GenerationProcessor(
                 },
             };
 
+            // Gönderim kapısı: ücretli çağrıdan hemen önce sahiplik doğrulanır ve kilit uzatılır. Kilit dolup iş kurtarıldıysa, başka worker'a
+            // geçtiyse veya iptal edildiyse sağlayıcı hiç çağrılmaz (aynı iş için ikinci ücretli istek açılmaz)
+            if (!await TryRenewLeaseAsync(job.Id, job.Attempt, ct))
+            {
+                throw new JobOwnershipLostException("İş, sağlayıcı çağrısından önce bu worker'ın elinden çıktı.");
+            }
+
             callStarted = true;
             var result = await CallProviderAsync(job, resolved, options, inputs, jobCts.Token);
             paid = result;
@@ -336,7 +363,7 @@ public sealed class GenerationProcessor(
                 await FollowOnDisplayAsync(services, job.SessionId, created, ct);
             }
         }
-        catch (DbUpdateConcurrencyException)
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException or JobOwnershipLostException)
         {
             throw; // sahiplik kaybı: hiçbir şey yazılmaz (RunOwnedAsync)
         }
@@ -346,6 +373,12 @@ public sealed class GenerationProcessor(
             // SqlClient iptali OperationCanceledException değil SqlException ("işlem kullanıcı tarafından iptal edildi") olarak bildirir:
             // kapanırken gelen her hata kesinti sayılır, iş "başarısız" yazılmaz.
             throw;
+        }
+        catch (OperationCanceledException ex) when (jobCts.IsCancellationRequested && ownership.Lost)
+        {
+            // Kilit yenilenemedi (iş kurtarıldı / başka worker'a geçti): bekleyiş bırakıldı. Tahmin kimliği kayıtlıysa yeni sahip aynı tahmini
+            // sorgular; bu worker maliyet veya sonuç yazmaz (yazarsa iki kez sayılırdı)
+            throw new JobOwnershipLostException("Sağlayıcı beklenirken işin sahipliği kaybedildi.", ex);
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
         {
@@ -480,11 +513,20 @@ public sealed class GenerationProcessor(
         await FailAsync(db, job, GenerationErrorCode.InvalidOutput, "Üretilen görsel doğrulanamadı.", exception, ct);
     }
 
-    /// <summary>Aynı iş çalışırken personel iptal ederse bağlı jetonu iptal eder. Sağlayıcı bekleyişi (yoklama/HTTP) bundan haberdar olur.</summary>
-    private async Task WatchForCancellationAsync(Guid jobId, CancellationTokenSource target)
+    private sealed class OwnershipState
+    {
+        public bool Lost { get; set; }
+    }
+
+    /// <summary>
+    /// İş çalışırken (1) personel iptal ederse ve (2) kilit yenilenemezse (sahiplik kaybı) bağlı jetonu iptal eder; sağlayıcı bekleyişi (yoklama/HTTP)
+    /// bundan haberdar olur. Kilit, süresinin üçte birinde bir sahiplik koşuluyla yenilenir (heartbeat): canlı worker'ın işi başkasına geçmez.
+    /// </summary>
+    private async Task WatchJobAsync(Guid jobId, int attempt, CancellationTokenSource target, OwnershipState ownership)
     {
         try
         {
+            var lastRenewal = clock.GetUtcNow();
             while (!target.IsCancellationRequested)
             {
                 await Task.Delay(settings.CurrentValue.CancelPollMs, target.Token);
@@ -494,7 +536,25 @@ public sealed class GenerationProcessor(
                 if (status is GenerationJobStatus.Cancelled or null)
                 {
                     await target.CancelAsync();
+                    return;
                 }
+
+                if (clock.GetUtcNow() - lastRenewal < LeaseRenewInterval)
+                {
+                    continue;
+                }
+
+                if (await TryRenewLeaseAsync(jobId, attempt, target.Token))
+                {
+                    lastRenewal = clock.GetUtcNow();
+                    continue;
+                }
+
+                // Yenileme olmadı: iptal mi (personel), yoksa sahiplik kaybı mı? İptalse en kötü durum maliyeti yine bu worker yazar
+                var now = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == jobId).Select(j => (GenerationJobStatus?)j.Status).SingleOrDefaultAsync(target.Token);
+                ownership.Lost = now is not (GenerationJobStatus.Cancelled or null);
+                await target.CancelAsync();
+                return;
             }
         }
         catch (OperationCanceledException)
@@ -659,6 +719,26 @@ public sealed class GenerationProcessor(
         {
             logger.LogWarning(ex, "İş bildirimi gönderilemedi: {JobId}", job.Id);
         }
+    }
+}
+
+/// <summary>
+/// Worker işin sahipliğini kaybetti (kilit doldu ve iş kurtarıldı/başka worker'a geçti ya da iptal edildi). Bu worker'ın hiçbir şey yazmaması gerekir.
+/// </summary>
+public sealed class JobOwnershipLostException : Exception
+{
+    public JobOwnershipLostException()
+    {
+    }
+
+    public JobOwnershipLostException(string message)
+        : base(message)
+    {
+    }
+
+    public JobOwnershipLostException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
 

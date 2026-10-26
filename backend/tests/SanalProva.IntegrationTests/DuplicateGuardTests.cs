@@ -1,18 +1,21 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using SanalProva.Api.Features.TryOn;
 using SanalProva.Domain.TryOn;
+using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
 namespace SanalProva.IntegrationTests;
 
 /// <summary>
-/// "Gerçek sağlayıcı" modunda (UseMockProviders=false) çalışan ikinci API ana makinesi. Worker yoklaması çok uzun aralığa alındığı için bu
-/// ana makine hiçbir işi kendisi işlemez (ücretli çağrı yapılamaz: ücretli çağrı bayrağı da kapalı, anahtar da yok); yalnızca istek doğrulaması sınanır.
+/// "Gerçek sağlayıcı" modunda (UseMockProviders=false) çalışan ikinci API ana makinesi. Üretim worker'ı kaydedilmez: bu ana makine hiçbir işi
+/// kendisi işlemez (ücretli çağrı da yapılamaz: ücretli çağrı bayrağı kapalı, anahtar yok); yalnızca istek doğrulaması sınanır.
 /// Aynı veritabanını paylaşan ana test makinesinin worker'ı (mock) kuyruktaki işleri alabilir; testler iş durumundan bağımsızdır.
 /// </summary>
 public sealed class RealModeApiFactory : WebApplicationFactory<Program>
@@ -51,6 +54,15 @@ public sealed class RealModeApiFactory : WebApplicationFactory<Program>
         {
             builder.UseSetting("Generation:Budget:MaxJobCostUsd", max.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
+
+        // Bu host yalnızca istek doğrulaması içindir: üretim worker'ı hiç çalışmaz. Uzun yoklama aralığı yetmez, çünkü ilk yoklama host
+        // başlar başlamaz yapılır; paylaşılan veritabanında başka testlerin kuyruktaki işlerini gerçek modda alıp başarısız ediyordu
+        // (bildirimler de bu host'un hub'ına gidiyordu).
+        builder.ConfigureTestServices(services =>
+        {
+            var worker = services.Single(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(GenerationWorker));
+            services.Remove(worker);
+        });
     }
 
 }

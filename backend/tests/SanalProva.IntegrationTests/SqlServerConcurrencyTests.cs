@@ -35,23 +35,18 @@ public sealed class SqlServerConcurrencyTests(ApiFactory factory) : ApiTestBase(
         var a = await ReadyAsync();
         var b = await ReadyAsync();
 
-        // Ana host'un 4 worker döngüsüne ek 6 eşzamanlı işleyici: 10 worker aynı kuyruktan iş çeker
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // Ana host'un 4 worker döngüsüne ek 6 eşzamanlı işleyici: 10 worker aynı kuyruktan iş çeker.
+        // Ek işleyiciler paralel çalışan BAŞKA testlerin işlerini de alabilir: iptal edilmezler, durdurulunca ellerindeki işi bitirip çıkarlar
+        // (iptal edilseydi yarıda kalan iş kapanış kuralı gereği "Running" kalır, kilit dolana kadar o testi bekletirdi).
+        var stopRequested = 0;
         var processor = Services.GetRequiredService<GenerationProcessor>();
         var workers = Enumerable.Range(0, ExtraWorkers).Select(_ => Task.Run(async () =>
         {
-            while (!stop.IsCancellationRequested)
+            while (Volatile.Read(ref stopRequested) == 0)
             {
-                try
+                if (!await processor.ProcessNextAsync(ct))
                 {
-                    if (!await processor.ProcessNextAsync(stop.Token))
-                    {
-                        await Task.Delay(10, stop.Token);
-                    }
-                }
-                catch (Exception) when (stop.IsCancellationRequested)
-                {
-                    return; // durdurma: SqlClient iptali SqlException olarak da gelir (GenerationWorker ile aynı kural)
+                    await Task.Delay(10, ct);
                 }
             }
         }, ct)).ToList();
@@ -67,7 +62,7 @@ public sealed class SqlServerConcurrencyTests(ApiFactory factory) : ApiTestBase(
         }
         finally
         {
-            await stop.CancelAsync();
+            Interlocked.Exchange(ref stopRequested, 1);
             await Task.WhenAll(workers);
         }
 

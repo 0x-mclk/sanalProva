@@ -957,6 +957,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("DedupeKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("dedupe_key");
+
                     b.Property<string>("ErrorCode")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)")
@@ -1099,6 +1104,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("StoreId")
                         .HasDatabaseName("ix_generation_jobs_store_id");
+
+                    b.HasIndex("SessionId", "DedupeKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_generation_jobs_active_dedupe")
+                        .HasFilter("[dedupe_key] IS NOT NULL AND [status] IN (N'Queued', N'Running', N'Succeeded')");
 
                     b.HasIndex("SessionId", "IdempotencyKey")
                         .IsUnique()

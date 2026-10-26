@@ -51,7 +51,7 @@ public enum GenerationErrorCode
     Unknown,
 }
 
-/// <summary>Bir AI işi. Aynı tablo iş kuyruğu olarak da kullanılır (FOR UPDATE SKIP LOCKED).</summary>
+/// <summary>Bir AI işi. Aynı tablo iş kuyruğu olarak da kullanılır (UPDLOCK + READPAST).</summary>
 public sealed class GenerationJob : Entity, IStoreOwned
 {
     public Guid OrganizationId { get; init; }
@@ -79,6 +79,12 @@ public sealed class GenerationJob : Entity, IStoreOwned
 
     /// <summary>Aynı fotoğraf + aynı seçim + aynı iş tipi için özet. Gerçek sağlayıcıda aynı isteğin ikinci kez ücretlendirilmesini önler.</summary>
     public string? RequestFingerprint { get; init; }
+
+    /// <summary>
+    /// Yalnızca ücretli (gerçek sağlayıcı) ve "yeni varyasyon" istenmemiş işlerde <see cref="RequestFingerprint"/>'e eşittir, aksi halde boştur.
+    /// Oturumda aynı anahtarla yalnızca bir etkin (Queued/Running/Succeeded) iş olabilir: veritabanı benzersiz indeksiyle zorunludur.
+    /// </summary>
+    public string? DedupeKey { get; init; }
 
     /// <summary>Tek ürün giydirmede seçilen model anahtarı (ör. <c>seedream-5-flash</c>). İstek anında sabitlenir; yeniden denemeler aynı modeli kullanır.</summary>
     public string? ModelKey { get; init; }

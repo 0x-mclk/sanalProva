@@ -102,11 +102,6 @@ public static class GenerationEndpoints
             }
         }
 
-        if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
-        {
-            return quotaProblem;
-        }
-
         var jobType = draft.Mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination;
         var live = strategy.Resolve(jobType).Provider != GenerationStrategy.MockProvider;
         if (jobType == GenerationJobType.FreeCombination && live && !generationSettings.CurrentValue.LiveFreeCombinationEnabled)
@@ -141,21 +136,10 @@ public static class GenerationEndpoints
 
         var fingerprint = Fingerprint(photo.Id, jobType, draft.Items, modelKey, quality);
 
-        // Gerçek (ücretli) sağlayıcıda aynı fotoğraf + aynı seçim için süren/başarılı iş varsa yenisi açılmaz: aynı sonuç için ikinci ücret yok
-        if (!request.AllowVariation && live)
-        {
-            var duplicate = await db.GenerationJobs.AsNoTracking()
-                .Where(j => j.SessionId == id && j.RequestFingerprint == fingerprint
-                    && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running || j.Status == GenerationJobStatus.Succeeded))
-                .OrderByDescending(j => j.CreatedAt).FirstOrDefaultAsync(ct);
-            if (duplicate is not null)
-            {
-                var existingImage = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == duplicate.Id, ct);
-                return TypedResults.Accepted($"/api/v1/jobs/{duplicate.Id}", await reader.ToJobDtoAsync(duplicate, existingImage, ct));
-            }
-        }
+        // Gerçek (ücretli) sağlayıcıda aynı fotoğraf + aynı seçim için süren/başarılı iş varsa yenisi açılmaz: aynı sonuç için ikinci ücret yok.
+        // Bilerek yeni varyasyon istenirse veya sağlayıcı mock ise tekrar serbesttir.
+        var dedupeKey = live && !request.AllowVariation ? fingerprint : null;
 
-        var now = clock.GetUtcNow();
         var selection = new OutfitSelection { OrganizationId = user.OrganizationId, SessionId = id, Mode = draft.Mode, CreatedByUserId = user.UserId };
         foreach (var item in draft.Items)
         {
@@ -167,26 +151,103 @@ public static class GenerationEndpoints
             });
         }
 
-        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, now, fingerprint, modelKey, quality);
-        db.OutfitSelections.Add(selection);
-        db.GenerationJobs.Add(job);
-        reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
-        audit.Record("Generation.Requested", nameof(GenerationJob), job.Id);
+        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey);
+        var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, ct);
+        return await RespondAsync(admission, db, reader, notifier, ct);
+    }
 
+    private sealed record Admission(GenerationJob? Job, bool Created, IResult? Problem);
+
+    /// <summary>Kabul kilidini bekleme süresi. Kilit yalnızca birkaç sorgu + ekleme boyunca tutulur.</summary>
+    private static readonly TimeSpan AdmissionLockTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Yeni işi kabul eder. Kota ve "aynı ücretli istek için tek iş" kuralları sayım/sorgu + ekleme biçimindedir; kilitsiz yapılırsa eşzamanlı
+    /// istekler aynı boşluğu görür (ölçüldü: kota 3 iken 12 isteğin 11'i, aynı istek için 10 ücretli iş). Bu yüzden kontrol ve ekleme şube başına
+    /// uygulama kilidi (sp_getapplock, transaction sahipli) altında tek transaction'da yapılır: aynı şubenin istekleri sırayla kabul edilir,
+    /// farklı şubeler birbirini beklemez. Gelecekteki kredi düşümü/rezervasyonu da bu kilit içinde yapılacaktır.
+    /// Veritabanı ikinci savunma hattıdır: idempotency anahtarı ve etkin tekil iş (<c>ux_generation_jobs_active_dedupe</c>) benzersiz indekslidir.
+    /// </summary>
+    private static async Task<Admission> AdmitAsync(
+        AppDbContext db, SessionReader reader, CurrentUser user, TryOnSession session, GenerationJob job, OutfitSelection? selection,
+        string auditAction, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+    {
         try
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await AppLocks.AcquireExclusiveAsync(db, AppLocks.StoreAdmission(session.StoreId), AdmissionLockTimeout, ct);
+
+            // Kilit altında yeniden: aynı anahtarlı veya aynı ücretli istek için etkin iş varsa o döner (hiçbir şey yazılmaz)
+            if (await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, ct) is { } existing)
+            {
+                return new Admission(existing, Created: false, Problem: null);
+            }
+
+            if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
+            {
+                return new Admission(null, Created: false, quotaProblem);
+            }
+
+            if (selection is not null)
+            {
+                db.OutfitSelections.Add(selection);
+            }
+
+            db.GenerationJobs.Add(job);
+            reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
+            audit.Record(auditAction, nameof(GenerationJob), job.Id);
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new Admission(job, Created: true, Problem: null);
         }
         catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
         {
-            // Aynı anahtarla eşzamanlı ikinci istek: mevcut işi döndür
+            // Kilidi kullanmayan bir yazma yarışı kazandıysa veritabanı ikinci işi reddetti: kazananı döndür
             db.ChangeTracker.Clear();
-            var winner = await db.GenerationJobs.SingleAsync(j => j.SessionId == id && j.IdempotencyKey == idempotencyKey, ct);
-            return TypedResults.Accepted($"/api/v1/jobs/{winner.Id}", await reader.ToJobDtoAsync(winner, null, ct));
+            var winner = await FindExistingAsync(db, session.Id, job.IdempotencyKey, job.DedupeKey, ct)
+                ?? throw new InvalidOperationException("Benzersizlik ihlali oluştu ama mevcut iş bulunamadı.", ex);
+            return new Admission(winner, Created: false, Problem: null);
+        }
+        catch (Exception ex) when (DbErrors.IsTransientLockFailure(ex))
+        {
+            // Kilit zaman aşımı / kilitlenme: hiçbir şey yazılmadı, istemci güvenle tekrar deneyebilir (aynı Idempotency-Key ile)
+            db.ChangeTracker.Clear();
+            return new Admission(null, Created: false,
+                ApiProblems.Create(StatusCodes.Status503ServiceUnavailable, "ADMISSION_BUSY", "Şu an çok fazla istek var. Lütfen tekrar deneyin."));
+        }
+    }
+
+    private static async Task<GenerationJob?> FindExistingAsync(AppDbContext db, Guid sessionId, string idempotencyKey, string? dedupeKey, CancellationToken ct)
+    {
+        var sameKey = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.SessionId == sessionId && j.IdempotencyKey == idempotencyKey, ct);
+        if (sameKey is not null || dedupeKey is null)
+        {
+            return sameKey;
         }
 
-        await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, job.Stage, null, null), ct);
-        return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, null, ct));
+        return await db.GenerationJobs.AsNoTracking()
+            .Where(j => j.SessionId == sessionId && j.DedupeKey == dedupeKey
+                && (j.Status == GenerationJobStatus.Queued || j.Status == GenerationJobStatus.Running || j.Status == GenerationJobStatus.Succeeded))
+            .OrderByDescending(j => j.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private static async Task<IResult> RespondAsync(Admission admission, AppDbContext db, SessionReader reader, IJobNotifier notifier, CancellationToken ct)
+    {
+        if (admission.Problem is { } problem)
+        {
+            return problem;
+        }
+
+        var job = admission.Job!;
+        if (admission.Created)
+        {
+            await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, job.Stage, null, null), ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, null, ct));
+        }
+
+        var image = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == job.Id, ct);
+        return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, image, ct));
     }
 
     /// <summary>Fotoğraf + iş tipi + sıralı (ürün, varyant) çiftlerinin özeti. Kişisel veri içermez.</summary>
@@ -200,16 +261,17 @@ public static class GenerationEndpoints
 
     private static GenerationJob NewJob(
         TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now,
-        string? fingerprint = null, string? modelKey = null, string? quality = null) => new()
+        string? fingerprint = null, string? modelKey = null, string? quality = null, string? dedupeKey = null) => new()
     {
         RequestFingerprint = fingerprint,
+        DedupeKey = dedupeKey,
         ModelKey = modelKey,
         Quality = quality,
         OrganizationId = session.OrganizationId, StoreId = session.StoreId, SessionId = session.Id, JobType = type, SelectionId = selectionId,
         SourcePhotoId = photoId, IdempotencyKey = key, NextAttemptAt = now, RequestedByUserId = user.UserId,
     };
 
-    /// <summary>Mağaza günlük kotası (mağaza saat dilimine göre gün) ve oturum başına üst sınır.</summary>
+    /// <summary>Mağaza günlük kotası (mağaza saat dilimine göre gün) ve oturum başına üst sınır. Yalnızca kabul kilidi altında çağrılır (<see cref="AdmitAsync"/>).</summary>
     private static async Task<IResult?> CheckQuotaAsync(AppDbContext db, SessionReader reader, CurrentUser user, TryOnSession session, TimeProvider clock, CancellationToken ct)
     {
         var settings = await reader.GetSettingsAsync(user.OrganizationId, ct);
@@ -298,8 +360,12 @@ public static class GenerationEndpoints
         return TypedResults.Ok(await reader.ToJobDtoAsync(job, null, ct));
     }
 
-    /// <summary>Başarısız işi aynı seçim ve fotoğrafla yeni iş olarak yeniden kuyruğa alır.</summary>
-    private static async Task<IResult> RetryAsync(Guid id, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+    /// <summary>
+    /// Başarısız işi aynı seçim ve fotoğrafla yeni iş olarak yeniden kuyruğa alır. Kota ve tekil ücretli iş kuralı yeni istekle aynıdır (kabul kilidi):
+    /// aynı başarısız işe eşzamanlı "yeniden dene" tıklamaları gerçek modda tek ücretli iş açar.
+    /// </summary>
+    private static async Task<IResult> RetryAsync(
+        Guid id, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit, GenerationStrategy strategy, TimeProvider clock, CancellationToken ct)
     {
         var failed = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
         if (failed is null)
@@ -323,18 +389,11 @@ public static class GenerationEndpoints
             return ApiProblems.Conflict("NO_PHOTO", "Fotoğraf silinmiş. Yeni fotoğraf yükleyip tekrar üretin.");
         }
 
-        if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
-        {
-            return quotaProblem;
-        }
-
-        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(), failed.RequestFingerprint, failed.ModelKey, failed.Quality);
-        db.GenerationJobs.Add(job);
-        reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
-        audit.Record("Generation.Retried", nameof(GenerationJob), job.Id);
-        await db.SaveChangesAsync(ct);
-        await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, null, null, null), ct);
-        return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, null, ct));
+        var live = strategy.Resolve(failed.JobType).Provider != GenerationStrategy.MockProvider;
+        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
+            failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null);
+        var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, ct);
+        return await RespondAsync(admission, db, reader, notifier, ct);
     }
 
     private static async Task<IResult> FavoriteAsync(Guid id, FavoriteRequest request, AppDbContext db, ImageLinks links, CancellationToken ct)

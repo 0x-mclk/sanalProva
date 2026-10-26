@@ -85,7 +85,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
     private Harness BuildHarness(
         ScriptedTryOn? fashn = null, ScriptedCompose? gemini = null, bool allowPaid = true, decimal daily = 10m, decimal monthly = 150m, decimal maxJob = 0.5m,
-        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max", bool liveCombination = false)
+        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max", bool liveCombination = false, int? leaseSeconds = null)
     {
         var values = new Dictionary<string, string?>
         {
@@ -109,6 +109,11 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
             ["Generation:Strategies:FreeCombination:Model"] = freeModel,
             ["Generation:Strategies:FreeCombination:Options:image_size"] = freeModel.Contains("lite", StringComparison.Ordinal) ? "1K" : "2K",
         };
+        if (leaseSeconds is { } lease)
+        {
+            values["Generation:LeaseSeconds"] = lease.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
         var services = new ServiceCollection();
         services.AddLogging();
@@ -201,6 +206,19 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
             await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, GenerationJobStatus.Running).SetProperty(j => j.Attempt, j => j.Attempt + 1)
                 .SetProperty(j => j.LeaseUntil, DateTimeOffset.UtcNow.AddMinutes(10)), TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <remarks>Kuyruğa dönen iş için sıradaki deneme zamanı ileri alınır: paralel çalışan ana (mock) worker işi kapmasın, test o anı sınasın.</remarks>
+    private async Task SetJobAsync(Guid jobId, GenerationJobStatus status, DateTimeOffset? leaseUntil = null)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var nextAttempt = DateTimeOffset.UtcNow.AddHours(1);
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, status).SetProperty(j => j.LeaseUntil, leaseUntil).SetProperty(j => j.NextAttemptAt, nextAttempt),
+                TestContext.Current.CancellationToken);
         }
     }
 
@@ -371,6 +389,125 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         var log = Assert.Single(logs);
         Assert.Equal((0.15m, 2), (log.EstimatedCostUsd, log.Attempt));
         Assert.Equal(2, fashn.Calls);
+    }
+
+    [Theory]
+    [InlineData(GenerationJobStatus.Queued)] // kilit doldu, iş kurtarılıp yeniden kuyruğa alındı
+    [InlineData(GenerationJobStatus.Cancelled)] // personel iptal etti
+    public async Task Is_saglayici_cagrisindan_once_elden_cikarsa_ucretli_istek_hic_gonderilmez(GenerationJobStatus state)
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await SetJobAsync(jobId, state); // worker işi aldı ama sağlayıcıya gitmeden iş elinden çıktı
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(0, harness.Fashn.Calls); // gönderim kapısı: sahiplik koşullu kilit uzatma başarısız → çağrı yok
+        Assert.Equal(state, job.Status); // eski worker durumu değiştirmedi
+        Assert.Empty(logs);
+        Assert.Empty(images);
+    }
+
+    [Fact]
+    public async Task Kilit_suresinden_uzun_saglayici_beklemesinde_kilit_yenilenir_is_baska_workera_gecmez()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = new ScriptedTryOn(async (_, options, ct) =>
+        {
+            await options.OnSubmitted!("pred-long");
+            await Task.Delay(TimeSpan.FromSeconds(7), ct); // kilit süresinin (3 sn) iki katından uzun
+            return Result("Fashn", "tryon-max", "pred-long", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn, leaseSeconds: 3);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        // Kısa kilit: ana test host'unun worker döngüsü süresi dolan işleri sürekli kurtarıp kendisi işler (gerçek rakip worker)
+        await SetJobAsync(jobId, GenerationJobStatus.Running, DateTimeOffset.UtcNow.AddSeconds(3));
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Equal(1, job.Attempt); // iş hiç başka worker'a geçmedi
+        Assert.Equal(1, fashn.Calls);
+        Assert.False(Assert.Single(images).IsDemo); // sonucu rakip (mock) worker değil bu worker yazdı
+        Assert.Equal(0.15m, Assert.Single(logs).EstimatedCostUsd);
+    }
+
+    [Fact]
+    public async Task Bekleme_sirasinda_is_baska_workera_gecerse_eski_worker_bekleyisi_birakir_yeni_sahip_ayni_tahmini_bitirir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var jobId = Guid.Empty;
+        var fashn = new ScriptedTryOn(async (n, options, ct) =>
+        {
+            if (n == 1)
+            {
+                await options.OnSubmitted!("pred-moved");
+                await ReclaimAsync(jobId); // iş başka worker'a geçti (deneme 1 → 2)
+                await Task.Delay(TimeSpan.FromSeconds(30), ct); // kilit yenilemesi başarısız olunca iptal edilmeli
+                return Result("Fashn", "tryon-max", "pred-moved", 0.15m, 2, 0.15m);
+            }
+
+            Assert.Equal("pred-moved", options.ResumeRequestId);
+            return Result("Fashn", "tryon-max", "pred-moved", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn, leaseSeconds: 3);
+        (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        var stale = System.Diagnostics.Stopwatch.StartNew();
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        stale.Stop();
+
+        Assert.True(stale.Elapsed < TimeSpan.FromSeconds(15), $"Eski worker bekleyişi bırakmadı: {stale.Elapsed}");
+        var (moved, movedLogs, movedImages) = await LoadAsync(jobId);
+        Assert.Equal((GenerationJobStatus.Running, 2), (moved.Status, moved.Attempt));
+        Assert.Empty(movedLogs);
+        Assert.Empty(movedImages);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Single(images);
+        Assert.Equal((0.15m, 2), (Assert.Single(logs).EstimatedCostUsd, logs[0].Attempt));
+    }
+
+    [Fact]
+    public async Task Worker_gonderimden_sonra_coker_kurtarilan_is_ayni_tahmini_sorgular_maliyet_bir_kez_yazilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        using var crash = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var fashn = new ScriptedTryOn(async (n, options, _) =>
+        {
+            if (n == 1)
+            {
+                await options.OnSubmitted!("pred-crash"); // sağlayıcı kabul etti, kimlik kalıcı
+                await crash.CancelAsync(); // süreç kapanıyor/çöküyor
+                throw new OperationCanceledException(crash.Token);
+            }
+
+            Assert.Equal("pred-crash", options.ResumeRequestId); // yeni (ücretli) istek yok
+            return Result("Fashn", "tryon-max", "pred-crash", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => harness.Processor.ProcessClaimedAsync(jobId, crash.Token));
+
+        var (crashed, crashedLogs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Running, crashed.Status); // "başarısız" yazılmadı: kilit dolunca kurtarılacak
+        Assert.Equal("pred-crash", crashed.ProviderRequestId);
+        Assert.Empty(crashedLogs);
+
+        await ReclaimAsync(jobId); // kilit doldu, iş kurtarılıp yeniden alındı
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Single(images);
+        Assert.Equal(0.15m, Assert.Single(logs).EstimatedCostUsd);
+        Assert.Equal(2, fashn.Calls); // ikinci çağrı yeni gönderim değil, aynı tahminin sorgusu
     }
 
     [Fact]
