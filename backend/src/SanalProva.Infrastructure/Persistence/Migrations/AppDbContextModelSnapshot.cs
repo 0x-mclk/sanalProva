@@ -945,6 +945,7 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnName("id");
 
                     b.Property<int>("Attempt")
+                        .IsConcurrencyToken()
                         .HasColumnType("int")
                         .HasColumnName("attempt");
 

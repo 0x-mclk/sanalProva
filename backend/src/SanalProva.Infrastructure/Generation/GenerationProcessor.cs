@@ -37,8 +37,9 @@ public sealed class NullJobNotifier : IJobNotifier
 }
 
 /// <summary>
-/// Kuyruktan bir işi alıp çalıştırır. Kuyruk PostgreSQL'dedir: <c>FOR UPDATE SKIP LOCKED</c> ile birden fazla worker aynı işi
-/// almaz; kilidi (<c>lease_until</c>) dolan işler (çöken worker) yeniden kuyruğa alınır.
+/// Kuyruktan bir işi alıp çalıştırır. Kuyruk SQL Server'dadır: <c>UPDLOCK + READPAST</c> ile birden fazla worker aynı işi almaz;
+/// kilidi (<c>lease_until</c>) dolan işler (çöken worker) yeniden kuyruğa alınır.
+/// Deneme numarası (<c>attempt</c>) çit belirtecidir (iyimser eşzamanlılık): iş başka worker'a geçtiyse eski worker'ın yazmaları reddedilir.
 /// Sağlayıcı seçimi yalnızca <see cref="GenerationStrategy"/>'dedir.
 /// </summary>
 public sealed class GenerationProcessor(
@@ -53,6 +54,12 @@ public sealed class GenerationProcessor(
     ILogger<GenerationProcessor> logger)
 {
     private const string DemoPromptVersion = "demo.v1";
+
+    /// <summary>Sonucu yazma adımının geçici kilit hatalarında (kilitlenme, kilit zaman aşımı) en fazla deneme sayısı. Sağlayıcı yeniden çağrılmaz.</summary>
+    private const int FinalizeAttempts = 3;
+
+    /// <summary>Oturum sürüm kilidini bekleme süresi. Kilit yalnızca sürüm hesabı + birkaç INSERT boyunca tutulur.</summary>
+    private static readonly TimeSpan SessionVersionLockTimeout = TimeSpan.FromSeconds(10);
 
     /// <returns>Bir iş işlendiyse true, kuyruk boşsa false.</returns>
     public async Task<bool> ProcessNextAsync(CancellationToken ct)
@@ -71,7 +78,7 @@ public sealed class GenerationProcessor(
         // Bu noktadan sonra sorgular (filtreli) yalnızca işin firmasını görür
         scope.ServiceProvider.GetRequiredService<TenantContext>().OrganizationId = job.OrganizationId;
 
-        await RunAsync(scope.ServiceProvider, db, job, ct);
+        await RunOwnedAsync(scope.ServiceProvider, db, job, ct);
         return true;
     }
 
@@ -85,7 +92,24 @@ public sealed class GenerationProcessor(
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var job = await db.GenerationJobs.IgnoreQueryFilters().SingleAsync(j => j.Id == jobId, ct);
         scope.ServiceProvider.GetRequiredService<TenantContext>().OrganizationId = job.OrganizationId;
-        await RunAsync(scope.ServiceProvider, db, job, ct);
+        await RunOwnedAsync(scope.ServiceProvider, db, job, ct);
+    }
+
+    /// <summary>
+    /// İşi çalıştırır; işin sahipliği kaybedildiyse (kilit süresi doldu, iş yeniden kuyruğa alınıp başka worker'a geçti → deneme numarası
+    /// değişti) bu worker'ın yazmaları <see cref="DbUpdateConcurrencyException"/> ile reddedilir. Bu worker sonuç veya maliyet yazmaz;
+    /// yeni sahip aynı sağlayıcı tahminini (<c>provider_request_id</c>) sorgular: çift sonuç, çift maliyet kaydı ve çift ücret olmaz.
+    /// </summary>
+    private async Task RunOwnedAsync(IServiceProvider services, AppDbContext db, GenerationJob job, CancellationToken ct)
+    {
+        try
+        {
+            await RunAsync(services, db, job, ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            logger.LogWarning("Üretim işinin sahipliği kaybedildi (kilit süresi doldu, iş başka worker'da): {JobId}, bu worker'ın denemesi {Attempt}", job.Id, job.Attempt);
+        }
     }
 
     private async Task RecoverExpiredLeasesAsync(AppDbContext db, CancellationToken ct)
@@ -93,21 +117,38 @@ public sealed class GenerationProcessor(
         var now = clock.GetUtcNow();
         var expired = db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Status == GenerationJobStatus.Running && j.LeaseUntil < now);
 
-        await expired.Where(j => j.Attempt < j.MaxAttempts).ExecuteUpdateAsync(s => s
-            .SetProperty(j => j.Status, GenerationJobStatus.Queued)
-            .SetProperty(j => j.Stage, (GenerationStage?)null)
-            .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
-            .SetProperty(j => j.NextAttemptAt, now), ct);
+        try
+        {
+            await expired.Where(j => j.Attempt < j.MaxAttempts).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Queued)
+                .SetProperty(j => j.Stage, (GenerationStage?)null)
+                .SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(j => j.NextAttemptAt, now), ct);
 
-        await expired.Where(j => j.Attempt >= j.MaxAttempts).ExecuteUpdateAsync(s => s
-            .SetProperty(j => j.Status, GenerationJobStatus.Failed)
-            .SetProperty(j => j.ErrorCode, GenerationErrorCode.Timeout)
-            .SetProperty(j => j.ErrorMessage, "İşlem zaman aşımına uğradı.")
-            .SetProperty(j => j.FinishedAt, now), ct);
+            await expired.Where(j => j.Attempt >= j.MaxAttempts).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Failed)
+                .SetProperty(j => j.ErrorCode, GenerationErrorCode.Timeout)
+                .SetProperty(j => j.ErrorMessage, "İşlem zaman aşımına uğradı.")
+                .SetProperty(j => j.FinishedAt, now), ct);
+        }
+        catch (Exception ex) when (DbErrors.IsDeadlock(ex))
+        {
+            // Eşzamanlı worker'lar aynı süresi dolmuş işleri güncellerken kilitlenebilir; deyim geri alındı, sonraki döngü tekrar dener
+            logger.LogDebug(ex, "Süresi dolan işleri kurtarma kilitlenmeye takıldı; sonraki döngüde tekrar denenecek.");
+        }
     }
 
-    /// <summary>SKIP LOCKED ile en eski bekleyen işi atomik olarak "Running" yapar. EF'in alt sorguya sardığı SqlQuery yerine doğrudan komut.</summary>
-    /// <remarks>MSSQL GEÇİŞİ M2: aşağıdaki SQL hâlâ PostgreSQL sözdizimidir; T-SQL karşılığı (UPDLOCK + READPAST + OUTPUT) ve eşzamanlılık testleri M2'de.</remarks>
+    /// <summary>
+    /// En eski bekleyen işi tek bir atomik deyimle "Running" yapar ve kimliğini döndürür (EF'in alt sorguya sardığı SqlQuery yerine doğrudan komut).
+    /// <list type="bullet">
+    /// <item><c>UPDLOCK</c>: okunan aday satır güncelleme kilidiyle tutulur; iki worker aynı satırı alamaz.</item>
+    /// <item><c>READPAST</c>: başka worker'ın kilitlediği satır beklenmeden atlanır (PostgreSQL'deki <c>SKIP LOCKED</c>).</item>
+    /// <item><c>ROWLOCK</c>: kilit satır düzeyinde kalır, sayfa/tablo kilidine yükselip diğer worker'ları bekletmez.</item>
+    /// <item><c>OUTPUT inserted.id</c>: güncellenen satırın kimliği aynı deyimde döner (PostgreSQL'deki <c>RETURNING</c>). Tabloda tetikleyici yoktur
+    /// (tetikleyici olsaydı OUTPUT ... INTO gerekirdi).</item>
+    /// </list>
+    /// Kilitlenme kurbanı olursa deyim geri alınmıştır: iş alınmamış sayılır, sonraki döngü tekrar dener.
+    /// </summary>
     private async Task<Guid?> ClaimAsync(AppDbContext db, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
@@ -122,18 +163,24 @@ public sealed class GenerationProcessor(
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
-                UPDATE generation_jobs
-                   SET status = 'Running', attempt = attempt + 1, stage = 'Preparing',
+                WITH next_job AS (
+                    SELECT TOP (1) id, status, attempt, stage, started_at, lease_until, updated_at
+                      FROM generation_jobs WITH (UPDLOCK, READPAST, ROWLOCK)
+                     WHERE status = N'Queued' AND next_attempt_at <= @now
+                     ORDER BY next_attempt_at, created_at)
+                UPDATE next_job
+                   SET status = N'Running', attempt = attempt + 1, stage = N'Preparing',
                        started_at = COALESCE(started_at, @now), lease_until = @lease, updated_at = @now
-                 WHERE id = (SELECT id FROM generation_jobs
-                              WHERE status = 'Queued' AND next_attempt_at <= @now
-                              ORDER BY next_attempt_at, created_at
-                              FOR UPDATE SKIP LOCKED LIMIT 1)
-                RETURNING id
+                OUTPUT inserted.id;
                 """;
             AddParameter(command, "now", now);
             AddParameter(command, "lease", now.AddSeconds(settings.CurrentValue.LeaseSeconds));
             return await command.ExecuteScalarAsync(ct) as Guid?;
+        }
+        catch (Exception ex) when (DbErrors.IsDeadlock(ex))
+        {
+            logger.LogDebug(ex, "İş alma deyimi kilitlenmeye takıldı; sonraki döngüde tekrar denenecek.");
+            return null;
         }
         finally
         {
@@ -282,39 +329,23 @@ public sealed class GenerationProcessor(
                 throw new ProviderException(invalid.Code, invalid.Message, invalid.Retryable) { ChargedUsd = result.Usage.EstimatedCostUsd, ProviderRequestId = result.ProviderRequestId };
             }
 
-            // Sürüm numarası (oturum içinde 1, 2, 3...) paralel worker'larda çakışmasın: oturum başına advisory kilit,
-            // sürüm hesabı + sonuç + iş durumu tek işlemde yazılır
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            // MSSQL GEÇİŞİ M2: PostgreSQL advisory lock; SQL Server karşılığı sp_getapplock (transaction sahipli) M2'de
-            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({job.SessionId.ToString("N")}, 0))", ct);
-
-            // İş beklerken iptal edildiyse sonuç atılır; ücret doğmuş olabileceğinden kullanım kaydı yine yazılır
-            var currentStatus = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == job.Id).Select(j => j.Status).SingleAsync(ct);
-            if (currentStatus == GenerationJobStatus.Cancelled)
+            var imageId = await FinalizeAsync(db, job, session, inputs, result, output, stopwatch, ct);
+            if (imageId is { } created)
             {
-                db.AiUsageLogs.Add(UsageLog(job, result, stopwatch.ElapsedMilliseconds, success: true, errorCode: null));
-                await db.SaveChangesAsync(ct);
-                await transaction.CommitAsync(ct);
-                return;
+                await NotifyAsync(job, created, ct);
+                await FollowOnDisplayAsync(services, job.SessionId, created, ct);
             }
-
-            var imageId = await SaveResultAsync(db, job, session, inputs, result, output, ct);
-            db.AiUsageLogs.Add(UsageLog(job, result, stopwatch.ElapsedMilliseconds, success: true, errorCode: null));
-            job.ProviderRequestId = result.ProviderRequestId ?? job.ProviderRequestId;
-            job.Status = GenerationJobStatus.Succeeded;
-            job.Stage = null;
-            job.LeaseUntil = null;
-            job.ErrorCode = null;
-            job.ErrorMessage = null;
-            job.FinishedAt = clock.GetUtcNow();
-            await db.SaveChangesAsync(ct);
-            await transaction.CommitAsync(ct);
-            await NotifyAsync(job, imageId, ct);
-            await FollowOnDisplayAsync(services, job.SessionId, imageId, ct);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (DbUpdateConcurrencyException)
         {
-            throw; // Uygulama kapanıyor: iş "Running" kalır, kilit dolunca yeniden kuyruğa alınır (tahmin kimliği saklıdır)
+            throw; // sahiplik kaybı: hiçbir şey yazılmaz (RunOwnedAsync)
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            // Uygulama kapanıyor: iş "Running" kalır, kilit dolunca yeniden kuyruğa alınır (tahmin kimliği saklıdır).
+            // SqlClient iptali OperationCanceledException değil SqlException ("işlem kullanıcı tarafından iptal edildi") olarak bildirir:
+            // kapanırken gelen her hata kesinti sayılır, iş "başarısız" yazılmaz.
+            throw;
         }
         catch (OperationCanceledException) when (jobCts.IsCancellationRequested)
         {
@@ -340,12 +371,91 @@ public sealed class GenerationProcessor(
         }
         catch (Exception ex)
         {
+            // Sağlayıcı sonucu üretti (ücret doğdu) ama kaydedilemediyse maliyet yine yazılır: bütçe kapısı gerçek harcamayı görür
+            if (paid is not null)
+            {
+                db.AiUsageLogs.Add(UsageLog(job, paid, stopwatch.ElapsedMilliseconds, success: false, GenerationErrorCode.Unknown));
+            }
+
             await FailAsync(db, job, GenerationErrorCode.Unknown, "Beklenmeyen bir hata oluştu.", ex, ct);
         }
         finally
         {
             await jobCts.CancelAsync();
             await watcher;
+        }
+    }
+
+    /// <summary>
+    /// Sağlayıcı sonucunu kaydeder: sürüm numarası (oturum içinde 1, 2, 3…) + sonuç görseli + maliyet kaydı + iş durumu tek transaction'da.
+    /// Sürüm numarası paralel worker'larda çakışmasın diye oturum başına uygulama kilidi (<see cref="AppLocks"/>) alınır.
+    /// Kilitlenme / kilit zaman aşımında transaction geri alınır ve yalnızca bu adım yeniden denenir: sağlayıcı tekrar çağrılmaz (sonuç bellekte,
+    /// ücret bir kez). Görsel dosyası depoya bir kez yazılır.
+    /// </summary>
+    /// <returns>Oluşan sonuç görselinin kimliği; iş beklerken iptal edildiyse null (sonuç atılır, maliyet yazılır).</returns>
+    private async Task<Guid?> FinalizeAsync(
+        AppDbContext db, GenerationJob job, TryOnSession session, Inputs inputs, ProviderResult result, GeneratedOutput output, Stopwatch stopwatch, CancellationToken ct)
+    {
+        SavedImage? saved = null;
+        for (var attempt = 1; ; attempt++)
+        {
+            GeneratedImage? image = null;
+            AiUsageLog? usage = null;
+            try
+            {
+                await using var transaction = await db.Database.BeginTransactionAsync(ct);
+                await AppLocks.AcquireExclusiveAsync(db, AppLocks.SessionVersion(job.SessionId), SessionVersionLockTimeout, ct);
+
+                usage = UsageLog(job, result, stopwatch.ElapsedMilliseconds, success: true, errorCode: null);
+                db.AiUsageLogs.Add(usage);
+
+                // İş beklerken iptal edildiyse sonuç atılır; ücret doğmuş olabileceğinden kullanım kaydı yine yazılır
+                var currentStatus = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == job.Id).Select(j => j.Status).SingleAsync(ct);
+                if (currentStatus == GenerationJobStatus.Cancelled)
+                {
+                    await db.SaveChangesAsync(ct);
+                    await transaction.CommitAsync(ct);
+                    return null;
+                }
+
+                saved ??= await images.SaveAsync(db, output.Content, ImageProcessingOptions.GeneratedResult, job.OrganizationId, FilePurpose.GeneratedImage, session.RetentionUntil,
+                    fileId => StorageKeys.SessionFile(job.OrganizationId, job.StoreId, job.SessionId, fileId, "jpg"), ct);
+                image = await CreateResultImageAsync(db, job, inputs, result, saved.File, ct);
+                db.GeneratedImages.Add(image);
+
+                job.ProviderRequestId = result.ProviderRequestId ?? job.ProviderRequestId;
+                job.Status = GenerationJobStatus.Succeeded;
+                job.Stage = null;
+                job.LeaseUntil = null;
+                job.ErrorCode = null;
+                job.ErrorMessage = null;
+                job.FinishedAt = clock.GetUtcNow();
+                await db.SaveChangesAsync(ct); // iş satırı deneme numarası koşuluyla güncellenir (çit belirteci)
+                await transaction.CommitAsync(ct);
+                return image.Id;
+            }
+            catch (Exception ex)
+            {
+                // Bu denemenin eklediği kayıtlar izlemeden çıkarılır: yeniden denemede veya hata kaydında iki kez yazılmasın
+                Detach(db, image);
+                Detach(db, usage);
+                if (attempt < FinalizeAttempts && DbErrors.IsTransientLockFailure(ex))
+                {
+                    logger.LogWarning(ex, "Sonuç kaydı geçici kilit hatasına takıldı, yeniden deneniyor: {JobId} ({Attempt}/{Max})", job.Id, attempt, FinalizeAttempts);
+                    await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), ct);
+                    continue;
+                }
+
+                throw;
+            }
+        }
+    }
+
+    private static void Detach(AppDbContext db, object? entity)
+    {
+        if (entity is not null)
+        {
+            db.Entry(entity).State = EntityState.Detached;
         }
     }
 
@@ -471,24 +581,20 @@ public sealed class GenerationProcessor(
         }
     }
 
-    private async Task<Guid> SaveResultAsync(AppDbContext db, GenerationJob job, TryOnSession session, Inputs inputs, ProviderResult result, GeneratedOutput output, CancellationToken ct)
+    /// <summary>Sonuç görseli kaydını oluşturur. Sürüm numarası okunurken oturum sürüm kilidi tutuluyor olmalıdır (<see cref="FinalizeAsync"/>).</summary>
+    private static async Task<GeneratedImage> CreateResultImageAsync(AppDbContext db, GenerationJob job, Inputs inputs, ProviderResult result, StoredFile file, CancellationToken ct)
     {
-        var saved = await images.SaveAsync(db, output.Content, ImageProcessingOptions.GeneratedResult, job.OrganizationId, FilePurpose.GeneratedImage, session.RetentionUntil,
-            fileId => StorageKeys.SessionFile(job.OrganizationId, job.StoreId, job.SessionId, fileId, "jpg"), ct);
-
         var nextVersion = (await db.GeneratedImages.Where(i => i.SessionId == job.SessionId).MaxAsync(i => (int?)i.VersionNo, ct) ?? 0) + 1;
         var names = inputs.Garments.Select(g => g.Product.Name).ToList();
         var label = job.JobType == GenerationJobType.OutfitSet
             ? $"{names[0]}{(inputs.Garments[0].ColorName is { } c ? $" — {c}" : string.Empty)}"
             : "Kombin: " + string.Join(" + ", inputs.Garments.Select(g => g.Category.Name));
-        var image = new GeneratedImage
+        return new GeneratedImage
         {
             OrganizationId = job.OrganizationId, SessionId = job.SessionId, JobId = job.Id, ParentImageId = job.BaseImageId,
-            VersionNo = nextVersion, FileId = saved.File.Id, Label = label.Length > 200 ? label[..200] : label,
+            VersionNo = nextVersion, FileId = file.Id, Label = label.Length > 200 ? label[..200] : label,
             IsDemo = result.Provider == GenerationStrategy.MockProvider,
         };
-        db.GeneratedImages.Add(image);
-        return image.Id;
     }
 
     private async Task HandleProviderFailureAsync(AppDbContext db, GenerationJob job, ResolvedStrategy? resolved, ProviderException ex, long elapsedMs, CancellationToken ct)
@@ -576,9 +682,9 @@ public sealed class GenerationWorker(GenerationProcessor processor, IOptionsMoni
                     await Task.Delay(settings.CurrentValue.PollIntervalMs, ct);
                 }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (Exception) when (ct.IsCancellationRequested)
             {
-                return;
+                return; // kapanış (SqlClient iptali SqlException olarak da gelebilir)
             }
             catch (Exception ex)
             {

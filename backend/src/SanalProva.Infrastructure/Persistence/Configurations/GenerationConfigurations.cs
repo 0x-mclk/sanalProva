@@ -36,6 +36,10 @@ internal sealed class GenerationJobConfiguration : IEntityTypeConfiguration<Gene
 
         builder.HasIndex(x => new { x.SessionId, x.IdempotencyKey }).IsUnique();
 
+        // Çit belirteci: deneme numarası yalnızca kuyruktan alınırken artar (ClaimAsync). EF iş satırını "WHERE attempt = <okunan>" koşuluyla
+        // günceller; kilidi dolup başka worker'a geçen işte eski worker'ın yazmaları DbUpdateConcurrencyException ile reddedilir.
+        builder.Property(x => x.Attempt).IsConcurrencyToken();
+
         // Kuyruk sorgusu: yalnızca bekleyen işler, sıradaki deneme zamanına göre
         builder.HasIndex(x => x.NextAttemptAt)
             .HasFilter("[status] = N'Queued'")

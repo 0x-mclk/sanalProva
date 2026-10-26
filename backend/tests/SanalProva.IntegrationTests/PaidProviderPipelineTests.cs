@@ -334,6 +334,46 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
     }
 
     [Fact]
+    public async Task Kilidi_dolup_baska_workera_gecen_isin_eski_worker_i_sonuc_ve_maliyet_yazmaz_yeni_sahip_ayni_tahmini_bitirir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var jobId = Guid.Empty;
+        var fashn = new ScriptedTryOn(async (n, options, _) =>
+        {
+            if (n == 1)
+            {
+                // Eski worker: sağlayıcı isteği kabul etti (kimlik kalıcı), yanıt gelmeden kilit doldu ve iş başka worker'a geçti (deneme 1 → 2)
+                await options.OnSubmitted!("pred-stale");
+                await ReclaimAsync(jobId);
+                return Result("Fashn", "tryon-max", "pred-stale", 0.15m, 2, 0.15m);
+            }
+
+            Assert.Equal("pred-stale", options.ResumeRequestId); // yeni sahip yeni (ücretli) istek açmaz, aynı tahmini sorgular
+            return Result("Fashn", "tryon-max", "pred-stale", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn);
+        (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        // Eski worker: yazmaları çit belirteciyle (deneme numarası) reddedilir; hata fırlatmaz, hiçbir şey yazmaz
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        var (stale, staleLogs, staleImages) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Running, stale.Status); // yeni sahibin elinde
+        Assert.Equal(2, stale.Attempt);
+        Assert.Equal("pred-stale", stale.ProviderRequestId);
+        Assert.Empty(staleImages);
+        Assert.Empty(staleLogs);
+
+        // Yeni sahip aynı tahminle bitirir: tek sonuç, tek maliyet kaydı, tek ücret
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Single(images);
+        var log = Assert.Single(logs);
+        Assert.Equal((0.15m, 2), (log.EstimatedCostUsd, log.Attempt));
+        Assert.Equal(2, fashn.Calls);
+    }
+
+    [Fact]
     public async Task Basarisiz_tahminden_sonra_yeni_tahmin_acilir()
     {
         var (tenant, client, catalog) = await TenantAsync();
