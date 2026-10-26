@@ -421,6 +421,118 @@ public sealed class MigrationValidationTests
         await AssertDeniedAsync(lab, lab.AppCs, fake);
     }
 
+    private const string AppendOnlyScript = "scripts/mssql/harden-append-only.sql";
+
+    [Fact]
+    public async Task Karar_kayitlari_yalnizca_eklemeli_olur_DENY_UPDATE_DELETE_karar_duzeltme_listeleme_ve_silme_akislarini_bozmaz()
+    {
+        await using var lab = await MigrationLab.CreateAsync(Ct);
+
+        // Sıra bağımsızlığı: tablo yokken betik atlar
+        await lab.RunSqlFileAsync(AppendOnlyScript, Ct);
+        await lab.MigrateAsync(Ct);
+        var rows = await RowFactory.LoadAsync(lab.MigratorCs, Ct);
+
+        var org = (Guid)(await rows.CreateAsync("organizations", null, Ct))["id"]!;
+        var store = (Guid)(await rows.CreateAsync("stores", new Dictionary<string, object?> { ["organization_id"] = org }, Ct))["id"]!;
+        async Task<Guid> Case(Guid? jobId = null, Guid? inOrg = null, Guid? inStore = null) => (Guid)(await rows.CreateAsync("ai_usage_logs", new Dictionary<string, object?>
+        {
+            ["organization_id"] = inOrg ?? org, ["store_id"] = inStore ?? store, ["job_id"] = jobId, ["estimated_cost_usd"] = 0.15m, ["error_code"] = "OutcomeUncertain", ["success"] = false,
+            ["event_key"] = $"uncertain:{Guid.NewGuid()}", ["reconciliation_state"] = "Open", ["provider"] = "Fashn", ["model"] = "tryon-max",
+        }, Ct))["id"]!;
+
+        var service = new CostReconciliationService(TimeProvider.System);
+        async Task<DecisionResult> Decide(Guid caseId, CostDecision decision, decimal? amount, int expected, string? key = null)
+        {
+            await using var db = MigrationLab.OpenDb(lab.AppCs); // çalışma zamanı hesabı
+            return await service.DecideAsync(db, caseId, Guid.NewGuid(), key ?? Guid.NewGuid().ToString("N"), new DecideCommand(decision, amount, null, expected), null, Ct);
+        }
+
+        // --- Bulgu (sertleştirmeden önce): app hesabı karar kaydını değiştirebilir ve silebilir
+        // (Ayrı firmada: bozulan defter, aşağıdaki değişmez denetimlerini kirletmesin; kirlenmenin kendisi bulgudur: karar silinince düzeltme satırı sahipsiz kalır)
+        var demoOrg = (Guid)(await rows.CreateAsync("organizations", null, Ct))["id"]!;
+        var demoStore = (Guid)(await rows.CreateAsync("stores", new Dictionary<string, object?> { ["organization_id"] = demoOrg }, Ct))["id"]!;
+        var before = await Case(inOrg: demoOrg, inStore: demoStore);
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(before, CostDecision.ConfirmedNotCharged, null, 0)).Outcome);
+        await lab.ExecuteAsync($"UPDATE ai_cost_reconciliations SET effective_cost_usd = 9 WHERE usage_log_id = '{before}'", lab.AppCs, Ct);
+        await lab.ExecuteAsync($"DELETE FROM ai_cost_reconciliations WHERE usage_log_id = '{before}'", lab.AppCs, Ct);
+        Assert.NotEqual(0, await lab.ScalarAsync<int>(DatabaseIntegrityTests.CostInvariants[1].Sql.Replace("{0}", demoOrg.ToString(), StringComparison.Ordinal), ct: Ct)); // defter bozuldu: sahipsiz düzeltme satırı
+
+        // --- Sertleştirme (gönderilen betik, iki kez)
+        await lab.RunSqlFileAsync(AppendOnlyScript, Ct);
+        await lab.RunSqlFileAsync(AppendOnlyScript, Ct);
+
+        // Tam olarak iki DENY, yalnızca sanalprova_app için, yalnızca bu tabloda
+        var denies = await lab.ScalarAsync<string>("""
+            SELECT STRING_AGG(CONVERT(nvarchar(400), pr.name + N':' + p.permission_name + N':' + p.state_desc + N':' + OBJECT_NAME(p.major_id)) COLLATE DATABASE_DEFAULT, N',') WITHIN GROUP (ORDER BY p.permission_name COLLATE DATABASE_DEFAULT)
+              FROM sys.database_permissions p JOIN sys.database_principals pr ON pr.principal_id = p.grantee_principal_id
+             WHERE p.class = 1 AND p.state_desc = N'DENY'
+            """, lab.AdminCs, Ct);
+        Assert.Equal("sanalprova_app:DELETE:DENY:ai_cost_reconciliations,sanalprova_app:UPDATE:DENY:ai_cost_reconciliations", denies);
+
+        // --- Karar oluşturma, düzeltme, tekrar, çakışma, anahtar yeniden kullanımı: hepsi çalışır (yalnızca INSERT + vaka satırı UPDATE'i + düzeltme INSERT'ü)
+        var main = await Case();
+        var key = Guid.NewGuid().ToString("N");
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(main, CostDecision.ConfirmedCharged, 0.12m, 0, key)).Outcome);
+        Assert.Equal(DecisionOutcome.Replayed, (await Decide(main, CostDecision.ConfirmedCharged, 0.12m, 0, key)).Outcome);
+        Assert.Equal(DecisionOutcome.KeyReused, (await Decide(main, CostDecision.WrittenOff, null, 0, key)).Outcome);
+        Assert.Equal(DecisionOutcome.SequenceMismatch, (await Decide(main, CostDecision.ConfirmedNotCharged, null, 0)).Outcome);
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(main, CostDecision.ConfirmedNotCharged, null, 1)).Outcome); // düzeltme: yeni karar eklenir, eskisi değişmez
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(main, CostDecision.WrittenOff, null, 2)).Outcome);
+
+        // Platform yöneticisi listeleme/ayrıntı sorguları (uç noktadakiyle aynı EF sorguları) çalışır
+        await using (var db = MigrationLab.OpenDb(lab.AppCs))
+        {
+            var decisions = await db.AiCostReconciliations.IgnoreQueryFilters().AsNoTracking().Where(d => d.UsageLogId == main).OrderBy(d => d.Sequence).ToListAsync(Ct);
+            Assert.Equal([1, 2, 3], decisions.Select(d => d.Sequence).ToArray());
+            Assert.Equal([0.12m, 0m, 0.15m], decisions.Select(d => d.EffectiveCostUsd).ToArray());
+            var counts = await db.AiCostReconciliations.IgnoreQueryFilters().AsNoTracking().GroupBy(d => d.UsageLogId).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(Ct);
+            Assert.Equal(3, counts.Single(c => c.Key == main).Count);
+            Assert.Equal(CostReconciliationState.WrittenOff, (await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().SingleAsync(l => l.Id == main, Ct)).ReconciliationState);
+        }
+
+        // Eşzamanlı kararlar (6 yönetici × 4 vaka) hâlâ tutarlı
+        var cases = new List<Guid>();
+        for (var i = 0; i < 4; i++)
+        {
+            cases.Add(await Case());
+        }
+
+        await Task.WhenAll(cases.SelectMany(c => Enumerable.Range(0, 6).Select(async _ =>
+        {
+            await using var db = MigrationLab.OpenDb(lab.AppCs);
+            var expected = await db.AiCostReconciliations.IgnoreQueryFilters().CountAsync(d => d.UsageLogId == c, Ct);
+            return await service.DecideAsync(db, c, Guid.NewGuid(), Guid.NewGuid().ToString("N"), new DecideCommand(CostDecision.ConfirmedNotCharged, null, null, expected), null, Ct);
+        })));
+        foreach (var (name, sql) in DatabaseIntegrityTests.CostInvariants)
+        {
+            Assert.True(0 == await lab.ScalarAsync<int>(sql.Replace("{0}", org.ToString(), StringComparison.Ordinal), ct: Ct), $"Değişmez ihlali: {name}");
+        }
+
+        // --- Sertleştirmeden sonra: app karar kaydını güncelleyemez/silemez; INSERT ve SELECT çalışır; migrator (test sıfırlaması) etkilenmez
+        await AssertDeniedAsync(lab, lab.AppCs, "UPDATE ai_cost_reconciliations SET effective_cost_usd = 0");
+        await AssertDeniedAsync(lab, lab.AppCs, "DELETE FROM ai_cost_reconciliations");
+        await AssertDeniedAsync(lab, lab.AppCs, "UPDATE ai_cost_reconciliations SET note = N'x' WHERE usage_log_id = '" + main + "'");
+        Assert.True(await lab.ScalarAsync<int>("SELECT COUNT(*) FROM ai_cost_reconciliations", lab.AppCs, Ct) >= 3);
+        foreach (var permission in new[] { "UPDATE", "DELETE" })
+        {
+            Assert.Equal(0, await lab.ScalarAsync<int>($"SELECT HAS_PERMS_BY_NAME(N'dbo.ai_cost_reconciliations', 'OBJECT', '{permission}')", lab.AppCs, Ct));
+            Assert.Equal(1, await lab.ScalarAsync<int>($"SELECT HAS_PERMS_BY_NAME(N'dbo.ai_cost_reconciliations', 'OBJECT', '{permission}')", lab.MigratorCs, Ct));
+        }
+
+        await lab.ExecuteAsync("DELETE FROM ai_cost_reconciliations", ct: Ct); // migrator: ApiFactory'nin test sıfırlaması bu yolla çalışır
+
+        // --- KVKK silmesi (oturum silme → iş silinir, maliyet kaydının iş bağlantısı SET NULL): karar tablosuna dokunmaz, DENY'dan etkilenmez
+        var session = await rows.CreateAsync("tryon_sessions", new Dictionary<string, object?> { ["organization_id"] = org, ["store_id"] = store }, Ct);
+        var job = (Guid)(await rows.CreateAsync("generation_jobs", new Dictionary<string, object?> { ["session_id"] = session["id"], ["organization_id"] = org, ["store_id"] = store }, Ct))["id"]!;
+        var withJob = await Case(job);
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(withJob, CostDecision.ConfirmedCharged, 0.15m, 0)).Outcome);
+        await lab.ExecuteAsync($"DELETE FROM tryon_sessions WHERE id = '{session["id"]}'", lab.AppCs, Ct);
+        Assert.Equal(1, await lab.ScalarAsync<int>($"SELECT COUNT(*) FROM ai_usage_logs WHERE id = '{withJob}' AND job_id IS NULL", lab.AppCs, Ct));
+        Assert.Equal(1, await lab.ScalarAsync<int>($"SELECT COUNT(*) FROM ai_cost_reconciliations WHERE usage_log_id = '{withJob}'", lab.AppCs, Ct));
+        Assert.Equal(DecisionOutcome.Recorded, (await Decide(withJob, CostDecision.WrittenOff, null, 1)).Outcome); // silinmiş oturumun vakası için de düzeltme verilebilir
+    }
+
     [Fact]
     public async Task Sertlestirme_sonrasi_uygulamanin_normal_veri_islemleri_bozulmaz()
     {
@@ -458,6 +570,14 @@ public sealed class MigrationValidationTests
         Assert.Contains(deny, harden, StringComparison.Ordinal);
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(provision, System.Text.RegularExpressions.Regex.Escape(deny))); // dev + test, tablo varsa
 
+        // Yalnızca ekleme sertleştirmesi: aynı deyim iki dosyada (betik + provision dev/test)
+        var appendOnly = File.ReadAllText(MigrationLab.RepoFile(AppendOnlyScript));
+        const string denyAppendOnly = "DENY UPDATE, DELETE ON OBJECT::dbo.ai_cost_reconciliations TO [sanalprova_app];";
+        Assert.Contains(denyAppendOnly, appendOnly, StringComparison.Ordinal);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(provision, System.Text.RegularExpressions.Regex.Escape(denyAppendOnly)));
+        Assert.DoesNotContain("INSERT", denyAppendOnly, StringComparison.Ordinal); // eklemek serbest
+        Assert.DoesNotContain("SELECT", denyAppendOnly, StringComparison.Ordinal);
+
         // Takipli provision betiği parola içermez: parolalar sqlcmd değişkenidir
         Assert.DoesNotMatch(@"PASSWORD\s*=\s*N?'(?!\$\()", provision); // değişken olmayan (düz metin) parola yok
         Assert.Contains("$(SP_APP_PW)", provision, StringComparison.Ordinal);
@@ -480,6 +600,7 @@ public sealed class MigrationValidationTests
         var text = File.ReadAllText(script);
         Assert.Contains("ValidateSet('sanalprova_dev', 'sanalprova_test')", text, StringComparison.Ordinal);
         Assert.Contains("[switch]$Apply", text, StringComparison.Ordinal);
+        Assert.Contains("ValidateSet('History', 'AppendOnly', 'All')", text, StringComparison.Ordinal);
         Assert.Contains("SupportsShouldProcess", text, StringComparison.Ordinal);
         Assert.Contains("if (-not $Apply)", text, StringComparison.Ordinal);
     }
@@ -518,6 +639,48 @@ public sealed class MigrationValidationTests
             await using var command = new SqlCommand(sql, connection);
             await command.ExecuteNonQueryAsync(Ct);
         }
+    }
+
+    [Fact]
+    public async Task Test_veritabaninda_migration_gecmisi_sertlestirmesi_uygulanmissa_gercek_hesaplar_beklendigi_gibi_davranir()
+    {
+        var (app, migrator) = MigrationLab.SecretConnections();
+        Assert.SkipUnless(app is not null && migrator is not null, ApiFactory.SkipReason);
+        Assert.Equal("sanalprova_test", new SqlConnectionStringBuilder(app).InitialCatalog);
+
+        async Task<int> Perm(string connection, string permission)
+        {
+            await using var c = new SqlConnection(connection);
+            await c.OpenAsync(Ct);
+            await using var command = new SqlCommand($"SELECT HAS_PERMS_BY_NAME(N'dbo.__ef_migrations_history', 'OBJECT', '{permission}')", c);
+            return Convert.ToInt32(await command.ExecuteScalarAsync(Ct), System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // Ortama bağlı durum: sertleştirme (scripts/apply-history-hardening.ps1) bu veritabanına uygulanmadıysa test atlanır, hiçbir yazma denenmez
+        Assert.SkipUnless(await Perm(app!, "INSERT") == 0, "Migration geçmişi sertleştirmesi bu test veritabanına henüz uygulanmamış.");
+
+        foreach (var permission in new[] { "INSERT", "UPDATE", "DELETE" })
+        {
+            Assert.Equal(0, await Perm(app!, permission));
+            Assert.Equal(1, await Perm(migrator!, permission));
+        }
+
+        await using var connection = new SqlConnection(app);
+        await connection.OpenAsync(Ct);
+        foreach (var sql in new[]
+                 {
+                     "INSERT INTO __ef_migrations_history (migration_id, product_version) VALUES (N'29990101000000_Sahte', N'10.0.0')",
+                     "UPDATE __ef_migrations_history SET product_version = N'0'",
+                     "DELETE FROM __ef_migrations_history",
+                 })
+        {
+            await using var command = new SqlCommand(sql, connection);
+            var ex = await Assert.ThrowsAsync<SqlException>(() => command.ExecuteNonQueryAsync(Ct));
+            Assert.Equal(229, ex.Number);
+        }
+
+        await using var read = new SqlCommand("SELECT COUNT(*) FROM __ef_migrations_history", connection);
+        Assert.True(Convert.ToInt32(await read.ExecuteScalarAsync(Ct), System.Globalization.CultureInfo.InvariantCulture) >= AllMigrations().Length);
     }
 
     // ------------------------------------------------------------------ yardımcılar

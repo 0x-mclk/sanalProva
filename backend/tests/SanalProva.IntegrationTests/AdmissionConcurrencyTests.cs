@@ -44,6 +44,33 @@ public sealed class AdmissionConcurrencyTests(ApiFactory factory) : ApiTestBase(
         }
     }
 
+    /// <summary>
+    /// Gerçek modda yeni bir iş açıp onu "Failed" yapar. Ana test host'unun (mock) worker'ı aynı veritabanını yoklar ve yeni açılan işi geçiş yapılmadan kapabilir; bu yüzden geçiş
+    /// "yalnızca iş hâlâ Queued ise" koşuluyla atomik yapılır. İş kapılmışsa (koşul 0 satır) yeni oturumla yeniden denenir: yarış kaybı testi değil, düzeneği etkiler.
+    /// </summary>
+    private async Task<(ApiClient Client, SessionDetail Session, JobDto Job)> FailedJobAsync(GenerationErrorCode code, bool withSubmitIntent = false)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var (_, client, session) = await ReadyAsync(_real, _real.Services);
+            var job = await StartGenerationAsync(client, session.Id);
+            var (scope, db) = OpenDb();
+            using (scope)
+            {
+                var intent = withSubmitIntent ? DateTimeOffset.UtcNow : (DateTimeOffset?)null;
+                var rows = await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == job.Id && j.Status == GenerationJobStatus.Queued).ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, code).SetProperty(j => j.ProviderSubmitStartedAt, intent), ct);
+                if (rows == 1)
+                {
+                    return (client, session, job);
+                }
+            }
+        }
+
+        throw new TimeoutException("Ana worker her seferinde işi kapmadan önce başarısız yapılamadı.");
+    }
+
     [Fact]
     public async Task Gunluk_sube_kotasi_eszamanli_isteklerde_asilmaz()
     {
@@ -132,21 +159,14 @@ public sealed class AdmissionConcurrencyTests(ApiFactory factory) : ApiTestBase(
     {
         for (var round = 0; round < 3; round++)
         {
-            var (_, client, session) = await ReadyAsync(_real, _real.Services);
-            var failed = await StartGenerationAsync(client, session.Id);
-            var (scope, db) = OpenDb();
-            using (scope)
-            {
-                await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == failed.Id).ExecuteUpdateAsync(s => s
-                    .SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.ProviderUnavailable), TestContext.Current.CancellationToken);
-            }
+            var (client, session, failed) = await FailedJobAsync(GenerationErrorCode.ProviderUnavailable);
 
             var retries = await Task.WhenAll(Enumerable.Range(0, ConcurrentRequests).Select(_ =>
                 client.PostAsync<JobDto>($"/api/v1/jobs/{failed.Id}/retry", new { }, HttpStatusCode.Accepted)));
 
             var retried = Assert.Single(retries.Select(j => j.Id).Distinct());
             Assert.NotEqual(failed.Id, retried);
-            (scope, db) = OpenDb();
+            var (scope, db) = OpenDb();
             using (scope)
             {
                 Assert.Equal(2, await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == session.Id, TestContext.Current.CancellationToken)); // başarısız + tek yeni
@@ -158,15 +178,7 @@ public sealed class AdmissionConcurrencyTests(ApiFactory factory) : ApiTestBase(
     public async Task Sonucu_belirsiz_is_ayni_istekte_doner_yeniden_dene_ve_varyasyon_bilincli_yeni_is_acar()
     {
         var ct = TestContext.Current.CancellationToken;
-        var (_, client, session) = await ReadyAsync(_real, _real.Services);
-        var uncertain = await StartGenerationAsync(client, session.Id);
-        var (scope, db) = OpenDb();
-        using (scope)
-        {
-            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == uncertain.Id).ExecuteUpdateAsync(s => s
-                .SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain)
-                .SetProperty(j => j.ProviderSubmitStartedAt, DateTimeOffset.UtcNow), ct);
-        }
+        var (client, session, uncertain) = await FailedJobAsync(GenerationErrorCode.OutcomeUncertain, withSubmitIntent: true);
 
         // Aynı istek (farklı Idempotency-Key, eşzamanlı): sağlayıcıda gerçekleşmiş olabilecek işlem ikinci kez ücretlendirilmez, aynı iş döner
         var repeated = await Task.WhenAll(Enumerable.Range(0, ConcurrentRequests).Select(_ => StartGenerationAsync(client, session.Id)));
@@ -187,7 +199,7 @@ public sealed class AdmissionConcurrencyTests(ApiFactory factory) : ApiTestBase(
         Assert.NotEqual(uncertain.Id, variation.Id);
         Assert.NotEqual(retried, variation.Id);
 
-        (scope, db) = OpenDb();
+        var (scope, db) = OpenDb();
         using (scope)
         {
             Assert.Equal(3, await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == session.Id, ct));

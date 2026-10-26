@@ -654,7 +654,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
     // ------------------------------------------------------------------ maliyet ve mutabakat tutarlılığı
 
     /// <summary>Değişmezler firma bazında sınanır ({0} = firma kimliği): ortak laboratuvardaki diğer testlerin yapay satırları sonucu etkilemesin.</summary>
-    private static readonly (string Name, string Sql)[] CostInvariants =
+    internal static readonly (string Name, string Sql)[] CostInvariants =
     [
         ("her karar için tam bir düzeltme satırı var", "SELECT COUNT(*) FROM ai_cost_reconciliations d WHERE d.organization_id = '{0}' AND (SELECT COUNT(*) FROM ai_usage_logs a WHERE a.is_adjustment = 1 AND a.adjusts_log_id = d.usage_log_id AND a.event_key = CONCAT(N'reconcile:', LOWER(CONVERT(nvarchar(36), d.id)))) <> 1"),
         ("sahipsiz düzeltme satırı yok", "SELECT COUNT(*) FROM ai_usage_logs a WHERE a.organization_id = '{0}' AND a.is_adjustment = 1 AND NOT EXISTS (SELECT 1 FROM ai_cost_reconciliations d WHERE d.usage_log_id = a.adjusts_log_id AND a.event_key = CONCAT(N'reconcile:', LOWER(CONVERT(nvarchar(36), d.id))))"),
@@ -763,7 +763,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
     // ------------------------------------------------------------------ bulgular (veritabanının garanti etmediği şeyler)
 
     [Fact]
-    public async Task Bulgu_firma_tutarliligi_ve_karar_degismezligi_veritabaninda_zorunlu_degildir_uygulama_ve_yetki_ile_korunur()
+    public async Task Bulgu_firma_tutarliligi_veritabaninda_zorunlu_degildir_uygulama_ve_yetki_ile_korunur()
     {
         _ = Lab;
 
@@ -781,12 +781,41 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         var session = await Rows.CreateAsync("tryon_sessions", null, Ct);
         var foreign = Guid.NewGuid(); // hiçbir firmaya ait değil
         await Rows.CreateAsync("generation_jobs", new Dictionary<string, object?> { ["session_id"] = session["id"], ["organization_id"] = foreign }, Ct); // kabul edilir
+    }
 
-        // (2) Karar kayıtları "yalnızca ekleme" kuralı uygulama kodundadır: db_datawriter ile uygulama hesabı kararı değiştirip silebilir
-        var log = await Rows.CreateAsync("ai_usage_logs", new Dictionary<string, object?> { ["reconciliation_state"] = "Open", ["error_code"] = "OutcomeUncertain", ["event_key"] = $"uncertain:{Guid.NewGuid()}" }, Ct);
-        var decision = await Rows.CreateAsync("ai_cost_reconciliations", new Dictionary<string, object?> { ["usage_log_id"] = log["id"], ["decision"] = "WrittenOff", ["effective_cost_usd"] = 0.15m }, Ct);
-        await Lab.ExecuteAsync($"UPDATE ai_cost_reconciliations SET effective_cost_usd = 0 WHERE id = {Literal(decision["id"])}", Lab.AppCs, Ct);
-        await Lab.ExecuteAsync($"DELETE FROM ai_cost_reconciliations WHERE id = {Literal(decision["id"])}", Lab.AppCs, Ct);
+    /// <summary>
+    /// Bulgu (M3.4): iki tablo arasındaki ilişkide çocuk satırın firması, ebeveyninin firmasından FARKLI olabilir; veritabanı reddetmez. Firma tutarlılığı yalnızca uygulama kodu ve EF filtresiyle
+    /// sağlanır. Bu test mevcut (izin veren) durumu belgeler; bileşik yabancı anahtarlar eklendiğinde beklenti tersine döner (hepsi 547 ile reddedilir).
+    /// </summary>
+    [Fact]
+    public async Task Bulgu_capraz_firma_iliskisi_kuran_satirlari_veritabani_reddetmiyor()
+    {
+        _ = Lab;
+        var otherOrg = (await Rows.CreateAsync("organizations", null, Ct))["id"];
+        var accepted = new List<string>();
+        var rejected = new List<string>();
+        var candidates = Rows.ForeignKeys.Where(f => f.Child != f.Parent
+            && Rows.Columns[f.Child].Any(c => c.Name == "organization_id") && Rows.Columns[f.Parent].Any(c => c.Name == "organization_id")).ToList();
+
+        foreach (var fk in candidates)
+        {
+            var parent = await Rows.CreateAsync(fk.Parent, null, Ct);
+            var overrides = fk.ChildColumns.Select((c, i) => (c, parent[fk.ParentColumns[i]])).ToDictionary(p => p.c, p => p.Item2, StringComparer.Ordinal);
+            overrides["organization_id"] = otherOrg; // çocuk, ebeveyninden farklı firmada
+            try
+            {
+                await Rows.CreateAsync(fk.Child, overrides, Ct);
+                accepted.Add($"{fk.Child}.{string.Join(',', fk.ChildColumns)} → {fk.Parent}");
+            }
+            catch (SqlException ex) when (ex.Number == 547)
+            {
+                rejected.Add($"{fk.Child}.{string.Join(',', fk.ChildColumns)} → {fk.Parent}");
+            }
+        }
+
+        // Güncel durum: ilişkilerin tamamı çapraz firma satırını kabul ediyor
+        Assert.True(candidates.Count >= 30, $"Beklenenden az ilişki: {candidates.Count}");
+        Assert.True(rejected.Count == 0 && accepted.Count == candidates.Count, $"Reddedilen: {string.Join("; ", rejected)}");
     }
 
     private sealed class FixedOptions<T>(T value) : IOptionsMonitor<T>
