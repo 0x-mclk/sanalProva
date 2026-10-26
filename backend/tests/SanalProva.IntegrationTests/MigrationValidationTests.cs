@@ -368,30 +368,120 @@ public sealed class MigrationValidationTests
         Assert.Empty(await SchemaInspector.DifferencesAsync(db, lab.MigratorCs, Ct));
     }
 
+    private const string HardenScript = "scripts/mssql/harden-migration-history.sql";
+
     [Fact]
-    public async Task Uygulama_hesabi_migration_gecmisine_yazabilir_bu_bir_bulgudur_DENY_ile_kapatilir()
+    public async Task Uygulama_hesabi_migration_gecmisine_yazabilir_bu_bir_bulgudur_gonderilen_sertlestirme_betigi_kapatir()
+    {
+        await using var lab = await MigrationLab.CreateAsync(Ct);
+        const string fake = "INSERT INTO __ef_migrations_history (migration_id, product_version) VALUES (N'29990101000000_Sahte', N'10.0.0')";
+
+        // Sıra bağımsızlığı: geçmiş tablosu henüz yokken betik hata vermeden atlar (provision → migrate → harden; harden erken çalışırsa zarar vermez)
+        await lab.RunSqlFileAsync(HardenScript, Ct);
+        await lab.MigrateAsync(Ct);
+
+        // Bulgu: sertleştirmeden önce db_datawriter her tabloya yazar; ele geçirilen uygulama hesabı migration geçmişini değiştirebilir
+        await lab.ExecuteAsync(fake, lab.AppCs, Ct);
+        await lab.ExecuteAsync("UPDATE __ef_migrations_history SET product_version = N'0' WHERE migration_id = N'29990101000000_Sahte'", lab.AppCs, Ct);
+        await lab.ExecuteAsync("DELETE FROM __ef_migrations_history WHERE migration_id = N'29990101000000_Sahte'", lab.AppCs, Ct);
+
+        // Gönderilen betik (yönetici bağlantısıyla), iki kez: idempotent
+        await lab.RunSqlFileAsync(HardenScript, Ct);
+        await lab.RunSqlFileAsync(HardenScript, Ct);
+
+        // Gerçek SQL login'leriyle: app için INSERT/UPDATE/DELETE reddedilir, SELECT çalışır
+        await AssertDeniedAsync(lab, lab.AppCs, fake);
+        await AssertDeniedAsync(lab, lab.AppCs, "UPDATE __ef_migrations_history SET product_version = N'0'");
+        await AssertDeniedAsync(lab, lab.AppCs, "DELETE FROM __ef_migrations_history");
+        Assert.Equal(AllMigrations().Length, await lab.ScalarAsync<int>("SELECT COUNT(*) FROM __ef_migrations_history", lab.AppCs, Ct));
+        foreach (var permission in new[] { "INSERT", "UPDATE", "DELETE" })
+        {
+            Assert.Equal(0, await lab.ScalarAsync<int>($"SELECT HAS_PERMS_BY_NAME(N'dbo.__ef_migrations_history', 'OBJECT', '{permission}')", lab.AppCs, Ct));
+            Assert.Equal(1, await lab.ScalarAsync<int>($"SELECT HAS_PERMS_BY_NAME(N'dbo.__ef_migrations_history', 'OBJECT', '{permission}')", lab.MigratorCs, Ct));
+        }
+
+        // Tam olarak üç DENY, yalnızca sanalprova_app için; başka kimseye ve başka tabloya dokunulmadı
+        var denies = await lab.ScalarAsync<string>("""
+            SELECT STRING_AGG(CONVERT(nvarchar(400), pr.name + N':' + p.permission_name + N':' + p.state_desc + N':' + OBJECT_NAME(p.major_id)) COLLATE DATABASE_DEFAULT, N',') WITHIN GROUP (ORDER BY p.permission_name COLLATE DATABASE_DEFAULT)
+              FROM sys.database_permissions p JOIN sys.database_principals pr ON pr.principal_id = p.grantee_principal_id
+             WHERE p.class = 1 AND p.state_desc = N'DENY'
+            """, lab.AdminCs, Ct); // izin katalogunu yalnızca yönetici görür (migrator başkasının izinlerini göremez)
+        Assert.Equal("sanalprova_app:DELETE:DENY:__ef_migrations_history,sanalprova_app:INSERT:DENY:__ef_migrations_history,sanalprova_app:UPDATE:DENY:__ef_migrations_history", denies);
+
+        // Migrator geçmişi yönetir: geri alma (DELETE) ve yeniden uygulama (INSERT) çalışır, ayrıca sahte kayıt yazıp silebilir
+        await lab.MigrateAsync(Ct, MigrationId("AdmissionDedupeKey"));
+        Assert.Equal(3, await lab.ScalarAsync<int>("SELECT COUNT(*) FROM __ef_migrations_history", ct: Ct));
+        await lab.MigrateAsync(Ct);
+        Assert.Equal(AllMigrations().Length, await lab.ScalarAsync<int>("SELECT COUNT(*) FROM __ef_migrations_history", ct: Ct));
+        await lab.ExecuteAsync(fake, ct: Ct);
+        await lab.ExecuteAsync("UPDATE __ef_migrations_history SET product_version = N'1' WHERE migration_id = N'29990101000000_Sahte'; DELETE FROM __ef_migrations_history WHERE migration_id = N'29990101000000_Sahte'", ct: Ct);
+
+        // Betik sonradan tekrar çalıştırılsa da DENY korunur
+        await lab.RunSqlFileAsync(HardenScript, Ct);
+        await AssertDeniedAsync(lab, lab.AppCs, fake);
+    }
+
+    [Fact]
+    public async Task Sertlestirme_sonrasi_uygulamanin_normal_veri_islemleri_bozulmaz()
     {
         await using var lab = await MigrationLab.CreateAsync(Ct);
         await lab.MigrateAsync(Ct);
-        const string fake = "INSERT INTO __ef_migrations_history (migration_id, product_version) VALUES (N'29990101000000_Sahte', N'10.0.0')";
+        var seed = await Seed.BaselineAsync(lab, Ct);
+        await lab.RunSqlFileAsync(HardenScript, Ct);
 
-        // Bulgu: db_datawriter her tabloya yazar; uygulama hesabı (ele geçirilirse) migration geçmişini değiştirip migrator'ı yanıltabilir
-        await lab.ExecuteAsync(fake, lab.AppCs, Ct);
-        await lab.ExecuteAsync("DELETE FROM __ef_migrations_history WHERE migration_id = N'29990101000000_Sahte'", lab.AppCs, Ct);
-
-        // Önlem (yönetici tarafından, kurulum betiğinde): yalnızca geçmiş tablosunda yazma reddi. Okuma ve migrator etkilenmez.
-        await using (var admin = new SqlConnection(lab.AdminCs))
+        // Çalışma zamanı hesabıyla: EF yazmaları (çok tablolu), ham T-SQL (süpürücü), kuyruk alma (UPDATE..OUTPUT + READPAST), applock, silme
+        var sweep = new CostReconciliationSweep(null!, new FixedOptions<GenerationSettings>(new GenerationSettings()), TimeProvider.System, NullLogger<CostReconciliationSweep>.Instance);
+        await using (var db = MigrationLab.OpenDb(lab.AppCs))
         {
-            await admin.OpenAsync(Ct);
-            await using var command = new SqlCommand("DENY INSERT, UPDATE, DELETE ON dbo.__ef_migrations_history TO sanalprova_app", admin);
-            await command.ExecuteNonQueryAsync(Ct);
+            Assert.Equal(1, (await sweep.RunOnceAsync(db, Ct)).MissingCostRows);
+            var legacy = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking().SingleAsync(l => l.JobId == seed.UncertainJobWithRow && l.ReconciliationState != null, Ct);
+            var decided = await new CostReconciliationService(TimeProvider.System).DecideAsync(
+                db, legacy.Id, Guid.NewGuid(), Guid.NewGuid().ToString("N"), new DecideCommand(CostDecision.ConfirmedNotCharged, null, null, 0), null, Ct);
+            Assert.Equal(DecisionOutcome.Recorded, decided.Outcome);
         }
 
-        await AssertDeniedAsync(lab, lab.AppCs, fake);
-        await AssertDeniedAsync(lab, lab.AppCs, "DELETE FROM __ef_migrations_history");
-        Assert.True(await lab.ScalarAsync<int>("SELECT COUNT(*) FROM __ef_migrations_history", lab.AppCs, Ct) > 0);
-        await lab.MigrateAsync(Ct); // migrator hâlâ çalışır
-        await lab.ExecuteAsync("UPDATE generation_jobs SET attempt = attempt", lab.AppCs, Ct); // uygulamanın normal yazmaları etkilenmez
+        await lab.ExecuteAsync($"UPDATE generation_jobs SET status = N'Queued', next_attempt_at = SYSDATETIMEOFFSET() WHERE id = '{seed.UncertainJobWithRow}'", lab.AppCs, Ct);
+        Assert.Equal(seed.UncertainJobWithRow, await lab.ScalarAsync<Guid>("""
+            WITH next_job AS (SELECT TOP (1) id, status FROM generation_jobs WITH (UPDLOCK, READPAST, ROWLOCK) WHERE status = N'Queued' ORDER BY next_attempt_at)
+            UPDATE next_job SET status = N'Running' OUTPUT inserted.id
+            """, lab.AppCs, Ct));
+        await lab.ExecuteAsync("BEGIN TRAN; DECLARE @r int; EXEC @r = sys.sp_getapplock @Resource = N'm33', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 1000; IF @r < 0 THROW 51001, N'applock', 1; ROLLBACK;", lab.AppCs, Ct);
+        Assert.Equal(1, await lab.ScalarAsync<int>($"DELETE FROM generation_jobs WHERE id = '{seed.UncertainJobWithoutRow}'; SELECT @@ROWCOUNT", lab.AppCs, Ct));
+    }
+
+    [Fact]
+    public void Sertlestirme_betikleri_ayni_DENY_deyimini_tasir_ve_uygulama_komutu_guvenli_varsayilanlidir()
+    {
+        var harden = File.ReadAllText(MigrationLab.RepoFile(HardenScript));
+        var provision = File.ReadAllText(MigrationLab.RepoFile("scripts/mssql/provision.sql"));
+        const string deny = "DENY INSERT, UPDATE, DELETE ON OBJECT::dbo.__ef_migrations_history TO [sanalprova_app];";
+        Assert.Contains(deny, harden, StringComparison.Ordinal);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(provision, System.Text.RegularExpressions.Regex.Escape(deny))); // dev + test, tablo varsa
+
+        // Takipli provision betiği parola içermez: parolalar sqlcmd değişkenidir
+        Assert.DoesNotMatch(@"PASSWORD\s*=\s*N?'(?!\$\()", provision); // değişken olmayan (düz metin) parola yok
+        Assert.Contains("$(SP_APP_PW)", provision, StringComparison.Ordinal);
+        Assert.Contains("$(SP_MIGRATOR_PW)", provision, StringComparison.Ordinal);
+
+        // Mevcut veritabanına uygulama komutu: dosya geçerli, hedefler kısıtlı, varsayılan kuru çalışma (-Apply ve onay olmadan değiştirmez)
+        var script = MigrationLab.RepoFile("scripts/apply-history-hardening.ps1");
+        // Söz dizimi: ek paket eklememek için Windows PowerShell'in kendi ayrıştırıcısı (yoksa bu denetim atlanır)
+        var shell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (File.Exists(shell))
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(shell,
+                $"-NoProfile -Command \"$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('{script}', [ref]$null, [ref]$e); if ($e) {{ $e | ForEach-Object {{ $_.Message }}; exit 1 }}\"")
+            { RedirectStandardOutput = true, UseShellExecute = false })!;
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, $"PowerShell söz dizimi hatası: {output}");
+        }
+
+        var text = File.ReadAllText(script);
+        Assert.Contains("ValidateSet('sanalprova_dev', 'sanalprova_test')", text, StringComparison.Ordinal);
+        Assert.Contains("[switch]$Apply", text, StringComparison.Ordinal);
+        Assert.Contains("SupportsShouldProcess", text, StringComparison.Ordinal);
+        Assert.Contains("if (-not $Apply)", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -461,24 +551,26 @@ public sealed class MigrationValidationTests
         public IDisposable? OnChange(Action<T, string?> listener) => null;
     }
 
-    /// <summary>Eski (R4) şemaya uygun, gerçeğe yakın veri. Sütunlar sistem kataloğundan okunup NOT NULL olanlar türüne göre doldurulur.</summary>
+    /// <summary>Eski (R4) şemaya uygun, gerçeğe yakın veri. Satırlar <see cref="RowFactory"/> ile (şema kataloğundan) üretilir.</summary>
     private sealed record Seed(Guid OrganizationId, Guid StoreId, Guid UncertainJobWithRow, Guid UncertainJobWithoutRow, Guid LegacyUncertainLogId)
     {
         public static async Task<Seed> BaselineAsync(MigrationLab lab, CancellationToken ct)
         {
-            await using var connection = new SqlConnection(lab.MigratorCs);
-            await connection.OpenAsync(ct);
+            var rows = await RowFactory.LoadAsync(lab.MigratorCs, ct);
 
-            var organization = await InsertAsync(connection, "organizations", ct, ("name", "Eski Firma"), ("slug", $"eski-{Guid.NewGuid():N}"[..20]), ("settings", "{}"));
-            var store = await InsertAsync(connection, "stores", ct, ("organization_id", organization), ("name", "Şube"), ("code", "ESK"), ("timezone", "Europe/Istanbul"));
-            var user = await InsertAsync(connection, "users", ct, ("organization_id", organization), ("display_name", "Eski Personel"));
-            var session = await InsertAsync(connection, "tryon_sessions", ct, ("organization_id", organization), ("store_id", store), ("created_by_user_id", user), ("status", "Open"));
+            async Task<Guid> Insert(string table, params (string Column, object? Value)[] values) =>
+                (Guid)(await rows.CreateAsync(table, values.ToDictionary(v => v.Column, v => v.Value, StringComparer.Ordinal), ct))["id"]!;
 
-            Task<Guid> Job(string status, string? error) => InsertAsync(connection, "generation_jobs", ct,
-                ("organization_id", organization), ("store_id", store), ("session_id", session), ("job_type", "OutfitSet"), ("status", status), ("error_code", error),
-                ("idempotency_key", Guid.NewGuid().ToString("N")), ("requested_by_user_id", user), ("attempt", 1), ("max_attempts", 3), ("provider", "Fashn"), ("model", "tryon-max"));
+            var organization = await Insert("organizations", ("name", "Eski Firma"));
+            var store = await Insert("stores", ("organization_id", organization));
+            var user = await Insert("users", ("organization_id", organization), ("display_name", "Eski Personel"));
+            var session = await Insert("tryon_sessions", ("organization_id", organization), ("store_id", store), ("created_by_user_id", user));
 
-            Task<Guid> Log(Guid? job, bool success, decimal cost, string? error) => InsertAsync(connection, "ai_usage_logs", ct,
+            Task<Guid> Job(string status, string? error) => Insert("generation_jobs",
+                ("organization_id", organization), ("store_id", store), ("session_id", session), ("requested_by_user_id", user), ("status", status), ("error_code", error),
+                ("attempt", 1), ("max_attempts", 3), ("provider", "Fashn"), ("model", "tryon-max"));
+
+            Task<Guid> Log(Guid? job, bool success, decimal cost, string? error) => Insert("ai_usage_logs",
                 ("organization_id", organization), ("store_id", store), ("job_id", job), ("provider", "Fashn"), ("model", "tryon-max"), ("operation", "OutfitSet"),
                 ("success", success), ("estimated_cost_usd", cost), ("error_code", error));
 
@@ -489,67 +581,6 @@ public sealed class MigrationValidationTests
             await Log(uncertainWithRow, false, 0m, "ProviderUnavailable"); // önceki deneme
             var legacy = await Log(uncertainWithRow, false, 0.15m, "OutcomeUncertain"); // R4 döneminde yazılmış belirsiz maliyet: olay anahtarı yok
             return new Seed(organization, store, uncertainWithRow, uncertainWithoutRow, legacy);
-        }
-
-        private static async Task<Guid> InsertAsync(SqlConnection connection, string table, CancellationToken ct, params (string Column, object? Value)[] values)
-        {
-            var overrides = values.ToDictionary(v => v.Column, v => v.Value, StringComparer.Ordinal);
-            var meta = new List<(string Name, string Type, bool Nullable, bool HasDefault, bool Identity, bool Computed)>();
-            await using (var command = new SqlCommand("""
-                SELECT c.name, ty.name, c.is_nullable, CASE WHEN c.default_object_id <> 0 THEN 1 ELSE 0 END, c.is_identity, c.is_computed
-                  FROM sys.columns c JOIN sys.types ty ON ty.user_type_id = c.user_type_id WHERE c.object_id = OBJECT_ID(@t) ORDER BY c.column_id
-                """, connection))
-            {
-                command.Parameters.AddWithValue("@t", table);
-                await using var reader = await command.ExecuteReaderAsync(ct);
-                while (await reader.ReadAsync(ct))
-                {
-                    meta.Add((reader.GetString(0), reader.GetString(1), reader.GetBoolean(2), reader.GetInt32(3) == 1, reader.GetBoolean(4), reader.GetBoolean(5)));
-                }
-            }
-
-            var id = Guid.CreateVersion7();
-            var names = new List<string>();
-            var parameters = new List<SqlParameter>();
-            foreach (var column in meta.Where(m => !m.Identity && !m.Computed))
-            {
-                object? value;
-                if (overrides.TryGetValue(column.Name, out var given))
-                {
-                    value = given ?? DBNull.Value;
-                }
-                else if (column is { Name: "id", Type: "uniqueidentifier" })
-                {
-                    value = id;
-                }
-                else if (column.Nullable || column.HasDefault)
-                {
-                    continue;
-                }
-                else
-                {
-                    value = column.Type switch
-                    {
-                        "uniqueidentifier" => Guid.NewGuid(),
-                        "nvarchar" or "varchar" => "x",
-                        "int" or "bigint" or "smallint" or "tinyint" => 0,
-                        "bit" => false,
-                        "decimal" or "numeric" => 0m,
-                        "datetimeoffset" => DateTimeOffset.UtcNow,
-                        "datetime2" or "datetime" => DateTime.UtcNow,
-                        "varbinary" => new byte[] { 1 },
-                        _ => throw new InvalidOperationException($"{table}.{column.Name}: tür {column.Type} için tohum değeri tanımlı değil."),
-                    };
-                }
-
-                names.Add(column.Name);
-                parameters.Add(new SqlParameter($"@p{parameters.Count}", value));
-            }
-
-            await using var insert = new SqlCommand($"INSERT INTO [{table}] ({string.Join(", ", names.Select(n => $"[{n}]"))}) VALUES ({string.Join(", ", parameters.Select(p => p.ParameterName))})", connection);
-            insert.Parameters.AddRange([.. parameters]);
-            await insert.ExecuteNonQueryAsync(ct);
-            return meta.Any(m => m.Name == "id" && m.Type == "uniqueidentifier") ? (Guid)parameters[names.IndexOf("id")].Value : Guid.Empty;
         }
     }
 }

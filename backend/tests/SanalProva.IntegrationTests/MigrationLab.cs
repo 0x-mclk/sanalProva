@@ -155,6 +155,39 @@ internal sealed class MigrationLab : IAsyncDisposable
         }
     }
 
+    /// <summary>Depodaki bir dosyanın tam yolu (testin çalıştığı klasörden yukarı doğru arar).</summary>
+    public static string RepoFile(string relative)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, relative);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"Depo dosyası bulunamadı: {relative}");
+    }
+
+    /// <summary>
+    /// Gönderilen bir sqlcmd betiğini (<c>$(Database)</c> değişkeni ve <c>GO</c> ayırıcılarıyla) laboratuvar veritabanında yönetici bağlantısıyla çalıştırır:
+    /// betiğin kendisi sınanır, test içinde kopyalanmış bir sürüm değil. Betik <c>USE</c> ile yalnızca bu laboratuvar veritabanına yönlenir.
+    /// </summary>
+    public async Task RunSqlFileAsync(string relativePath, CancellationToken ct)
+    {
+        var text = (await File.ReadAllTextAsync(RepoFile(relativePath), ct)).Replace("$(Database)", Name, StringComparison.Ordinal);
+        await using var connection = new SqlConnection(AdminCs);
+        await connection.OpenAsync(ct);
+        foreach (var batch in Regex.Split(text, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.CultureInvariant))
+        {
+            if (!string.IsNullOrWhiteSpace(batch))
+            {
+                await ExecAsync(connection, batch, ct);
+            }
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         SqlConnection.ClearAllPools();
