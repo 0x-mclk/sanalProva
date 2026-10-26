@@ -2,6 +2,7 @@ import { Button } from '@mantine/core';
 import { useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useCategories, useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
+import { newIdempotencyKey } from '../../shared/api/idempotency';
 import { ApiError } from '../../shared/api/http';
 import type { CategoryDto, DraftDto, ProductListItem } from '../../shared/api/types';
 import { useAuth } from '../../shared/auth/AuthContext';
@@ -79,7 +80,7 @@ function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, 
   const { entries, setEntries, warnings, flush, saveError } = useDraftItems(sessionId, 'FreeCombination', serverDraft);
   const start = useStartGeneration(sessionId);
   const [error, setError] = useState<string | null>(null);
-  const idempotencyKey = useRef<string>(crypto.randomUUID());
+  const idempotencyKey = useRef<string>(newIdempotencyKey());
 
   // Yalnızca ürünü olan kategoriler, katalogdaki sıraya göre
   const tabs = useMemo(() => {
@@ -96,12 +97,12 @@ function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, 
   const toggle = (product: ProductListItem) => {
     const category = categories.find((c) => c.id === product.categoryId);
     setError(null);
-    idempotencyKey.current = crypto.randomUUID();
+    idempotencyKey.current = newIdempotencyKey();
     setEntries(toggleEntry(entries, product, category?.maxSelection ?? 1, categoryOf));
   };
 
   const remove = (productId: string) => {
-    idempotencyKey.current = crypto.randomUUID();
+    idempotencyKey.current = newIdempotencyKey();
     setEntries(entries.filter((e) => e.productId !== productId));
   };
 

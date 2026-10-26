@@ -2,6 +2,7 @@ import { Button, Chip, Menu, Select, TextInput } from '@mantine/core';
 import { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
+import { newIdempotencyKey } from '../../shared/api/idempotency';
 import type { DraftDto, ProductListItem } from '../../shared/api/types';
 import { ApiError } from '../../shared/api/http';
 import { useTryOnOptions, type TryOnOptions } from '../../shared/api/usage';
@@ -80,7 +81,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [sort, setSort] = useState<PickerSort>('recommended');
   const [error, setError] = useState<string | null>(null);
-  const idempotencyKey = useRef<string>(crypto.randomUUID());
+  const idempotencyKey = useRef<string>(newIdempotencyKey());
   const options = useTryOnOptions();
   const [model, setModel] = useState<{ key?: string; quality?: string }>({});
   const overBudget = options.data ? resolvePick(options.data, model)?.quality?.exceedsJobLimit === true : false;
@@ -95,7 +96,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
     const product = items.find((p) => p.id === productId);
     if (!product) return;
     setError(null);
-    idempotencyKey.current = crypto.randomUUID(); // seçim değişince yeni üretim isteği
+    idempotencyKey.current = newIdempotencyKey(); // seçim değişince yeni üretim isteği
     setEntries(toggleEntry(entries, product, 1, categoryOf));
   };
 
@@ -207,7 +208,7 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
             options={options.data}
             value={model}
             onChange={(next) => {
-              idempotencyKey.current = crypto.randomUUID(); // farklı model/kalite bilinçli yeni istektir
+              idempotencyKey.current = newIdempotencyKey(); // farklı model/kalite bilinçli yeni istektir
               setModel(next);
             }}
           />
