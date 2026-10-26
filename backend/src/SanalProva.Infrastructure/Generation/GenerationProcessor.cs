@@ -107,6 +107,7 @@ public sealed class GenerationProcessor(
     }
 
     /// <summary>SKIP LOCKED ile en eski bekleyen işi atomik olarak "Running" yapar. EF'in alt sorguya sardığı SqlQuery yerine doğrudan komut.</summary>
+    /// <remarks>MSSQL GEÇİŞİ M2: aşağıdaki SQL hâlâ PostgreSQL sözdizimidir; T-SQL karşılığı (UPDLOCK + READPAST + OUTPUT) ve eşzamanlılık testleri M2'de.</remarks>
     private async Task<Guid?> ClaimAsync(AppDbContext db, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
@@ -147,15 +148,8 @@ public sealed class GenerationProcessor(
     {
         var parameter = command.CreateParameter();
         parameter.ParameterName = name;
-        parameter.Value = value.UtcDateTime;
-        parameter.DbType = DbType.DateTime;
-        // Npgsql: timestamptz için UTC DateTime kabul edilir
-        if (parameter is Npgsql.NpgsqlParameter npgsql)
-        {
-            npgsql.NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.TimestampTz;
-            npgsql.Value = value.UtcDateTime;
-        }
-
+        parameter.DbType = DbType.DateTimeOffset; // sütunlar datetimeoffset
+        parameter.Value = value;
         command.Parameters.Add(parameter);
     }
 
@@ -291,6 +285,7 @@ public sealed class GenerationProcessor(
             // Sürüm numarası (oturum içinde 1, 2, 3...) paralel worker'larda çakışmasın: oturum başına advisory kilit,
             // sürüm hesabı + sonuç + iş durumu tek işlemde yazılır
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            // MSSQL GEÇİŞİ M2: PostgreSQL advisory lock; SQL Server karşılığı sp_getapplock (transaction sahipli) M2'de
             await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({job.SessionId.ToString("N")}, 0))", ct);
 
             // İş beklerken iptal edildiyse sonuç atılır; ücret doğmuş olabileceğinden kullanım kaydı yine yazılır

@@ -147,8 +147,10 @@ public static class CatalogEndpoints
 
         if (!string.IsNullOrWhiteSpace(q))
         {
-            var pattern = $"%{q.Trim().Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal)}%";
-            query = query.Where(p => EF.Functions.ILike(p.Name, pattern) || EF.Functions.ILike(p.Code, pattern));
+            // LIKE joker karakterleri (T-SQL'de "[" de karakter sınıfı başlatır) kaçırılır; büyük/küçük harf duyarsızlığını
+            // sütun collation'ı sağlar (ad: Turkish_100_CI_AS, kod: Latin1_General_100_CI_AS_SC)
+            var pattern = $"%{q.Trim().Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal)}%";
+            query = query.Where(p => EF.Functions.Like(p.Name, pattern, "\\") || EF.Functions.Like(p.Code, pattern, "\\"));
         }
 
         if (tryOn)

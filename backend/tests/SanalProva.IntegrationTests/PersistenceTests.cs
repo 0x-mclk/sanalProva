@@ -90,10 +90,40 @@ public sealed class PersistenceTests(ApiFactory factory)
         using var scope = factory.Services.CreateScope();
         await using var db = CreateContext(scope, NoTenantContext.Instance);
 
-        var ex = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => db.Database.ExecuteSqlInterpolatedAsync(
+        var ex = await Assert.ThrowsAsync<Microsoft.Data.SqlClient.SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE user_store_roles SET role = 'SuperAdmin' WHERE organization_id = {tenant.OrganizationId}",
             TestContext.Current.CancellationToken));
 
-        Assert.Equal("ck_user_store_roles_role", ex.ConstraintName);
+        // 547: CHECK / FOREIGN KEY constraint ihlali; SQL Server constraint adını yalnızca mesajda verir
+        Assert.Equal(547, ex.Number);
+        Assert.Contains("ck_user_store_roles_role", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Veritabani_collation_RCSI_uyumluluk_ve_turkce_arama_sutunu_beklendigi_gibidir()
+    {
+        ApiFactory.RequireDatabase(factory);
+        using var scope = factory.Services.CreateScope();
+        await using var db = CreateContext(scope, NoTenantContext.Instance);
+        var ct = TestContext.Current.CancellationToken;
+
+        // Bu ayarlar migration'da değil veritabanı oluşturulurken verilir (migrator ALTER DATABASE yetkisine sahip değil): sapma testte yakalanır
+        var connection = db.Database.GetDbConnection();
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT CAST(DATABASEPROPERTYEX(DB_NAME(), 'Collation') AS nvarchar(128)),
+                   d.is_read_committed_snapshot_on,
+                   d.compatibility_level,
+                   (SELECT c.collation_name FROM sys.columns c WHERE c.object_id = OBJECT_ID(N'dbo.products') AND c.name = N'name')
+            FROM sys.databases d WHERE d.name = DB_NAME()
+            """;
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        Assert.True(await reader.ReadAsync(ct));
+
+        Assert.Equal(AppDbContext.DatabaseCollation, reader.GetString(0));
+        Assert.True(reader.GetBoolean(1), "READ_COMMITTED_SNAPSHOT kapalı");
+        Assert.Equal(160, reader.GetByte(2));
+        Assert.Equal(AppDbContext.TurkishSearchCollation, reader.GetString(3));
     }
 }

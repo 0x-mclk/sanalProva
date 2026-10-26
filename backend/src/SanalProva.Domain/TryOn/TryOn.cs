@@ -44,7 +44,7 @@ public sealed class TryOnSession : Entity, IStoreOwned
     public List<SessionPhoto> Photos { get; } = [];
 }
 
-/// <summary>Taslak seçim (jsonb). "Üret" anında değişmez <see cref="OutfitSelection"/> kaydına dönüşür.</summary>
+/// <summary>Taslak seçim (JSON sütunu). "Üret" anında değişmez <see cref="OutfitSelection"/> kaydına dönüşür.</summary>
 public sealed class SessionDraft
 {
     public OutfitMode Mode { get; set; }

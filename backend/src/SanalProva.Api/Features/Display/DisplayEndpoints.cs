@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Npgsql;
 using SanalProva.Api.Hubs;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Display;
@@ -89,7 +88,7 @@ public static class DisplayEndpoints
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
         {
             // Aynı kod aynı anda başka istekle kullanıldı (cihaz belirteci özeti benzersizdir): bu istek kaybetti
             return invalid;
@@ -227,7 +226,7 @@ public static class DisplayEndpoints
         {
             return ApiProblems.NotFound("TV bulunamadı.");
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
         {
             return ApiProblems.Conflict("SESSION_ON_OTHER_DISPLAY", "Bu prova başka bir TV'ye bağlı.");
         }

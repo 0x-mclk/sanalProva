@@ -11,7 +11,7 @@ public sealed class Organization : Entity
     public bool IsActive { get; set; } = true;
 }
 
-/// <summary>Firma ayarları (jsonb).</summary>
+/// <summary>Firma ayarları (JSON sütunu).</summary>
 public sealed class OrganizationSettings
 {
     /// <summary>Müşteri görsellerinin varsayılan saklama süresi (saat). Üst sınır <see cref="RetentionPolicy.MaxExtendedRetention"/>.</summary>

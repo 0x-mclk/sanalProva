@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,14 +68,21 @@ internal sealed class FaultInjectingProvider(MockImageProvider inner) : ITryOnPr
 }
 
 /// <summary>
-/// Gerçek PostgreSQL test veritabanına (sanalprova_test) karşı çalışan API.
-/// Bağlantı dizesi: SANALPROVA_TEST_DB ortam değişkeni veya API projesinin user-secrets'ındaki ConnectionStrings:Test.
+/// Gerçek SQL Server test veritabanına (sanalprova_test) karşı çalışan API.
+/// Bağlantı dizeleri: SANALPROVA_TEST_DB / SANALPROVA_TEST_DB_MIGRATOR ortam değişkenleri veya API projesinin user-secrets'ındaki
+/// ConnectionStrings:Test (uygulama hesabı: yalnızca veri) ve ConnectionStrings:TestMigrator (şema + sıfırlama). Migrator verilmezse
+/// aynı dize kullanılır (ör. CI'da tek hesap). API uygulama hesabıyla çalışır: çalışma zamanında DDL deneyen kod testte hata verir.
 /// Bağlantı yoksa veritabanı gerektiren testler atlanır (Skip) — hiçbir zaman geliştirme veritabanına yazılmaz.
 /// Üretim worker'ı çalışır (hızlı yoklama, gecikmesiz mock); saklama süpürmesi testlerde elle tetiklenir.
 /// </summary>
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    public const string SkipReason = "Test veritabanı yapılandırılmamış (./scripts/db.ps1 init).";
+    public const string SkipReason = "Test veritabanı yapılandırılmamış (ConnectionStrings:Test / SANALPROVA_TEST_DB).";
+
+    /// <summary>Veritabanı yokken host'un kurulabilmesi için geçersiz ama SQL Server biçimli dize (bağlantı denenmez).</summary>
+    internal const string NoDatabase = "Server=tcp:127.0.0.1,1;Database=none;User ID=none;Password=none;Encrypt=False;Connect Timeout=1";
+
+    private const string TestDatabase = "sanalprova_test";
 
     private readonly string _storageRoot = Path.Combine(Path.GetTempPath(), "sanalprova-it", Guid.NewGuid().ToString("N"));
 
@@ -82,9 +90,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     {
         var secrets = new ConfigurationBuilder().AddUserSecrets(typeof(Program).Assembly, optional: true).Build();
         TestConnectionString = Environment.GetEnvironmentVariable("SANALPROVA_TEST_DB") ?? secrets.GetConnectionString("Test");
+        MigratorConnectionString = Environment.GetEnvironmentVariable("SANALPROVA_TEST_DB_MIGRATOR") ?? secrets.GetConnectionString("TestMigrator") ?? TestConnectionString;
     }
 
+    /// <summary>Uygulama hesabı (API host'u ve testlerin kendi DbContext'leri).</summary>
     public string? TestConnectionString { get; }
+
+    /// <summary>Şema (migration) ve test verisi sıfırlama hesabı.</summary>
+    public string? MigratorConnectionString { get; }
 
     /// <summary>Test host'unun yerel dosya deposu kökü (özel işlemci kurulumları aynı dosyaları okuyabilsin diye).</summary>
     public string StorageRoot => _storageRoot;
@@ -100,7 +113,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Main", TestConnectionString ?? "Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none");
+        builder.UseSetting("ConnectionStrings:Main", TestConnectionString ?? NoDatabase);
         builder.UseSetting("Seed:Enabled", "false");
         builder.UseSetting("Security:LoginRateLimitPerMinute", "100000"); // testler aynı IP kovasını paylaşır
         builder.UseSetting("Storage:LocalRoot", _storageRoot);
@@ -126,29 +139,55 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        if (string.IsNullOrEmpty(TestConnectionString))
+        if (string.IsNullOrEmpty(TestConnectionString) || string.IsNullOrEmpty(MigratorConnectionString))
         {
             return;
         }
 
-        // Güvenlik ağı: yalnızca adı "_test" ile biten veritabanı temizlenir
-        if (!TestConnectionString.Contains("Database=sanalprova_test", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Entegrasyon testleri yalnızca sanalprova_test veritabanında çalışır.");
-        }
+        // Güvenlik ağı 1 (bağlanmadan): her iki dize de yalnızca sanalprova_test'i hedeflemeli; SQLEXPRESS örnekleri yasak
+        EnsureTestTarget(TestConnectionString);
+        EnsureTestTarget(MigratorConnectionString);
 
         // Host (ve üretim worker'ı) başlamadan ÖNCE şema hazırlanır: worker'ın ilk yoklaması boş şemaya çarpmasın
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(TestConnectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history")).UseSnakeCaseNamingConvention().Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(MigratorConnectionString, AppDbContext.ConfigureSqlServer)
+            .UseSnakeCaseNamingConvention()
+            .Options;
         await using (var db = new AppDbContext(options, NoTenantContext.Instance))
         {
+            // Güvenlik ağı 2 (bağlandıktan sonra): sunucunun bildirdiği veritabanı ve örnek adı doğrulanır
+            var connection = db.Database.GetDbConnection();
+            await connection.OpenAsync();
+            await using (var check = connection.CreateCommand())
+            {
+                check.CommandText = "SELECT DB_NAME(), CAST(SERVERPROPERTY('InstanceName') AS nvarchar(128))";
+                await using var reader = await check.ExecuteReaderAsync();
+                await reader.ReadAsync();
+                var database = reader.GetString(0);
+                var instance = reader.IsDBNull(1) ? null : reader.GetString(1);
+                if (!string.Equals(database, TestDatabase, StringComparison.OrdinalIgnoreCase)
+                    || (instance is not null && instance.StartsWith("SQLEXPRESS", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new InvalidOperationException($"Beklenmeyen test hedefi: {instance ?? "(varsayılan örnek)"} / {database}. Hiçbir şey silinmedi.");
+                }
+            }
+
+            await connection.CloseAsync();
             await db.Database.MigrateAsync();
+
+            // SQL Server yabancı anahtarlı tabloda TRUNCATE'e izin vermez: constraint'ler geçici kapatılır, tablolar boşaltılır,
+            // constraint'ler WITH CHECK ile (verinin doğrulanmasıyla, "trusted" olarak) yeniden açılır. Migrator hesabı yeter (DDL + DELETE).
             var tables = await db.Database
-                .SqlQueryRaw<string>("SELECT tablename AS \"Value\" FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__ef_migrations_history'")
+                .SqlQueryRaw<string>("SELECT t.name AS [Value] FROM sys.tables t WHERE t.is_ms_shipped = 0 AND SCHEMA_NAME(t.schema_id) = N'dbo' AND t.name <> N'__ef_migrations_history'")
                 .ToListAsync();
             if (tables.Count > 0)
             {
+                var quoted = tables.Select(t => $"[dbo].[{t.Replace("]", "]]", StringComparison.Ordinal)}]").ToList();
+                var reset = string.Concat(quoted.Select(t => $"ALTER TABLE {t} NOCHECK CONSTRAINT ALL;\n"))
+                    + string.Concat(quoted.Select(t => $"DELETE FROM {t};\n"))
+                    + string.Concat(quoted.Select(t => $"ALTER TABLE {t} WITH CHECK CHECK CONSTRAINT ALL;\n"));
 #pragma warning disable EF1002 // Tablo adları sistem kataloğundan gelir, kullanıcı girdisi değil
-                await db.Database.ExecuteSqlRawAsync($"TRUNCATE {string.Join(", ", tables.Select(t => $"\"{t}\""))} RESTART IDENTITY CASCADE");
+                await db.Database.ExecuteSqlRawAsync(reset);
 #pragma warning restore EF1002
             }
         }
@@ -157,6 +196,20 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         // eşzamanlı ilk erişimler birden fazla host (ve birden fazla üretim worker'ı) yaratıp bildirimleri kaybettirir
         _ = Services;
         HasDatabase = true;
+    }
+
+    private static void EnsureTestTarget(string connectionString)
+    {
+        var builder = new SqlConnectionStringBuilder(connectionString);
+        if (!string.Equals(builder.InitialCatalog, TestDatabase, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Entegrasyon testleri yalnızca {TestDatabase} veritabanında çalışır.");
+        }
+
+        if (builder.DataSource.Contains("SQLEXPRESS", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Entegrasyon testleri SQLEXPRESS örneklerinde çalıştırılmaz.");
+        }
     }
 
     public override async ValueTask DisposeAsync()

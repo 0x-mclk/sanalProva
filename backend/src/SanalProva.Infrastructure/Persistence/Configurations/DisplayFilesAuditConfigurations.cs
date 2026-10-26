@@ -61,7 +61,7 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
 {
     public void Configure(EntityTypeBuilder<AuditLog> builder)
     {
-        builder.Property(x => x.Id).UseIdentityAlwaysColumn();
+        builder.Property(x => x.Id).UseIdentityColumn();
         builder.Property(x => x.Action).HasMaxLength(60);
         builder.Property(x => x.EntityType).HasMaxLength(60);
         builder.Property(x => x.IpHash).HasMaxLength(64);

@@ -177,7 +177,7 @@ public static class GenerationEndpoints
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (DbErrors.IsUniqueViolation(ex))
         {
             // Aynı anahtarla eşzamanlı ikinci istek: mevcut işi döndür
             db.ChangeTracker.Clear();

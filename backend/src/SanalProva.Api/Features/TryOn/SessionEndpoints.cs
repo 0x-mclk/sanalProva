@@ -222,7 +222,12 @@ public static class SessionEndpoints
         db.SessionPhotos.Add(photo);
         reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
         audit.Record("Photo.Uploaded", nameof(SessionPhoto), photo.Id);
-        await db.SaveChangesAsync(ct);
+        await using (var transaction = await db.Database.BeginTransactionAsync(ct))
+        {
+            await DetachPhotosFromJobsAsync(db, [.. replaced.Select(p => p.Id)], ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
         if (replaced.Count > 0)
         {
             // Yeniden çekimde eski fotoğraf silinir: TV'de o oturumun görüntüsü kalmasın
@@ -250,12 +255,34 @@ public static class SessionEndpoints
         }
 
         audit.Record("Photo.Deleted", nameof(SessionPhoto), photoId);
-        await db.SaveChangesAsync(ct);
+        await using (var transaction = await db.Database.BeginTransactionAsync(ct))
+        {
+            await DetachPhotosFromJobsAsync(db, [photoId], ct);
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
 
         // Fotoğraf silme müşteri verisinin geri çekilmesidir: o oturumun TV görüntüsü anında temizlenir (oturum bağlı kalır)
         await displays.ResetBySessionAsync(id, DisplayStateReason.PrivacyCleared, detach: false, ct);
         await DeleteFilesAsync(db, images, [photo.FileId], ct);
         return TypedResults.Ok(await reader.BuildDetailAsync(session, ct));
+    }
+
+    /// <summary>
+    /// Silinecek fotoğraflardan üretilmiş işlerin kaynak bağlantısını NULL'a çeker; iş, sonuç ve maliyet kaydı kalır.
+    /// SQL Server bir tabloya tek zincirleme silme yolu kabul ettiği için bu bağlantı veritabanında NO ACTION'dır
+    /// (PostgreSQL'de ON DELETE SET NULL idi). Çağıran, fotoğraf silme ile aynı transaction'da çağırır.
+    /// </summary>
+    private static async Task DetachPhotosFromJobsAsync(AppDbContext db, IReadOnlyCollection<Guid> photoIds, CancellationToken ct)
+    {
+        if (photoIds.Count == 0)
+        {
+            return;
+        }
+
+        await db.GenerationJobs
+            .Where(j => j.SourcePhotoId != null && photoIds.Contains(j.SourcePhotoId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.SourcePhotoId, (Guid?)null), ct);
     }
 
     private static async Task DeleteFilesAsync(AppDbContext db, ImageStore images, IEnumerable<Guid> fileIds, CancellationToken ct)

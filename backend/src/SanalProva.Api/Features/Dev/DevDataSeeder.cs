@@ -77,7 +77,7 @@ public static partial class DevDataSeeder
                 return;
             }
         }
-        catch (Npgsql.NpgsqlException)
+        catch (System.Data.Common.DbException)
         {
             LogSkipped(logger, "veritabanı erişilemiyor");
             return;

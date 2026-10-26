@@ -30,10 +30,10 @@ public static class DependencyInjection
         // Veritabanı
         var connectionString = configuration.GetConnectionString("Main")
             ?? throw new InvalidOperationException(
-                "ConnectionStrings:Main tanımlı değil. Yerel geliştirme için './scripts/db.ps1 init' çalıştırın (değer dotnet user-secrets'a yazılır).");
+                "ConnectionStrings:Main tanımlı değil (SQL Server, uygulama hesabı). Değer dotnet user-secrets'tan gelir; kaynak koda yazılmaz.");
         services.AddSingleton<TimestampInterceptor>();
         services.AddDbContext<AppDbContext>((sp, options) => options
-            .UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__ef_migrations_history"))
+            .UseSqlServer(connectionString, AppDbContext.ConfigureSqlServer)
             .UseSnakeCaseNamingConvention()
             .AddInterceptors(sp.GetRequiredService<TimestampInterceptor>()));
 

@@ -13,7 +13,7 @@ internal sealed class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(x => x.Name).HasMaxLength(80);
         builder.Property(x => x.Slug).HasMaxLength(60);
         builder.Property(x => x.AiHint).HasMaxLength(500);
-        builder.Property(x => x.ConflictsWith).HasColumnType("uuid[]");
+        // ConflictsWith: ilkel koleksiyon, JSON dizisi olarak nvarchar(max) (yalnızca bellekte okunur, sorgulanmaz)
         builder.HasIndex(x => new { x.OrganizationId, x.Slug }).IsUnique();
         builder.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         builder.ToTable(t => t.HasCheckConstraint("ck_categories_max_selection", "max_selection >= 1"));
@@ -25,7 +25,8 @@ internal sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
     public void Configure(EntityTypeBuilder<Product> builder)
     {
         builder.Property(x => x.Code).HasMaxLength(40);
-        builder.Property(x => x.Name).HasMaxLength(120);
+        // Personel ürünü adıyla arar: Türkçe kuralı "istanbul" ile "İSTANBUL"u eşler (Latin1 collation eşlemez)
+        builder.Property(x => x.Name).HasMaxLength(120).UseCollation(AppDbContext.TurkishSearchCollation);
         builder.Property(x => x.Description).HasMaxLength(2000);
         builder.Property(x => x.Tagline).HasMaxLength(60);
         builder.Property(x => x.AiNotes).HasMaxLength(500);
@@ -50,8 +51,10 @@ internal sealed class ProductVariantConfiguration : IEntityTypeConfiguration<Pro
         builder.HasIndex(x => new { x.ProductId, x.Code }).IsUnique();
 
         // Ürün başına tek varsayılan varyant
-        builder.HasIndex(x => x.ProductId).IsUnique().HasFilter("is_default").HasDatabaseName("ux_product_variants_default");
-        builder.ToTable(t => t.HasCheckConstraint("ck_product_variants_color_hex", "color_hex IS NULL OR color_hex ~ '^#[0-9A-Fa-f]{6}$'"));
+        builder.HasIndex(x => x.ProductId).IsUnique().HasFilter("[is_default] = 1").HasDatabaseName("ux_product_variants_default");
+        // T-SQL'de regex yok: LIKE karakter sınıflarıyla "#" + 6 onaltılık hane (sütun sabit 7 karakter)
+        builder.ToTable(t => t.HasCheckConstraint("ck_product_variants_color_hex",
+            "[color_hex] IS NULL OR [color_hex] LIKE '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'"));
     }
 }
 
@@ -59,15 +62,17 @@ internal sealed class ProductImageConfiguration : IEntityTypeConfiguration<Produ
 {
     public void Configure(EntityTypeBuilder<ProductImage> builder)
     {
-        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.Cascade);
+        // SQL Server tek zincirleme silme yoluna izin verir: görsel üründen siliniyor (ürün → görsel), varyant yolu NO ACTION.
+        // Varyant silen bir akış eklenirse önce o varyantın görselleri silinmelidir (bugün varyant silinmiyor).
+        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.VariantId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<StoredFile>().WithMany().HasForeignKey(x => x.FileId).OnDelete(DeleteBehavior.Restrict);
 
         // Ürün + varyant (null = tüm varyantlar) + açı başına en fazla bir AI referans görseli.
         // FASHN tek ürün görseli aldığı için hazır takımda bu görsel takımın tamamını gösterir.
+        // SQL Server benzersiz indekste NULL'ları eşit sayar: "varyantsız" referans da tek kalır.
         builder.HasIndex(x => new { x.ProductId, x.VariantId, x.Angle })
             .IsUnique()
-            .AreNullsDistinct(false)
-            .HasFilter("is_ai_reference")
+            .HasFilter("[is_ai_reference] = 1")
             .HasDatabaseName("ux_product_images_ai_reference");
     }
 }
@@ -78,7 +83,9 @@ internal sealed class OutfitSetComponentConfiguration : IEntityTypeConfiguration
     {
         builder.HasKey(x => new { x.SetProductId, x.ComponentProductId });
         builder.HasOne<Product>().WithMany().HasForeignKey(x => x.ComponentProductId).OnDelete(DeleteBehavior.Restrict);
-        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.ComponentVariantId).OnDelete(DeleteBehavior.SetNull);
+        // Bileşen takım ürününden siliniyor (ürün → bileşen); varyant yolu ikinci zincir olacağı için veritabanında NO ACTION,
+        // EF yalnızca izlenen kayıtlarda NULL'a çeker (bugün varyant silinmiyor)
+        builder.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.ComponentVariantId).OnDelete(DeleteBehavior.ClientSetNull);
         builder.ToTable(t => t.HasCheckConstraint("ck_outfit_set_components_not_self", "set_product_id <> component_product_id"));
     }
 }

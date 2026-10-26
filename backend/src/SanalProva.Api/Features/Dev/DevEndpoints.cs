@@ -53,7 +53,7 @@ public static class DevEndpoints
                 canConnect ? [.. await db.Database.GetAppliedMigrationsAsync(ct)] : [],
                 canConnect ? [.. await db.Database.GetPendingMigrationsAsync(ct)] : [.. db.Database.GetMigrations()]);
         }
-        catch (Npgsql.NpgsqlException)
+        catch (System.Data.Common.DbException)
         {
             database = new DatabaseInfo(false, null, null, [], [.. db.Database.GetMigrations()]);
         }

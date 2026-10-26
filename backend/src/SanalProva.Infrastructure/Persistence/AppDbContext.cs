@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using SanalProva.Domain.Audit;
 using SanalProva.Domain.Catalog;
 using SanalProva.Domain.Common;
@@ -53,6 +54,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
 
     public DbSet<StoredFile> StoredFiles => Set<StoredFile>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
+    /// <summary>Veritabanı collation'ı. Veritabanı oluşturulurken verilir (migration ALTER DATABASE yetkisi gerektireceği için modelde ayarlanmaz).</summary>
+    public const string DatabaseCollation = "Latin1_General_100_CI_AS_SC";
+
+    /// <summary>Türkçe büyük/küçük harf kuralıyla (i/İ, ı/I) aranan metin sütunları.</summary>
+    public const string TurkishSearchCollation = "Turkish_100_CI_AS";
+
+    /// <summary>
+    /// SQL Server sağlayıcı ayarları; uygulama ve testler aynı ayarı kullanır.
+    /// Uyumluluk seviyesi 160 (SQL Server 2022): JSON sütunları nvarchar(max) olur, 2025'in yerel json tipine bağımlılık yoktur.
+    /// </summary>
+    public static void ConfigureSqlServer(SqlServerDbContextOptionsBuilder sql)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        sql.MigrationsHistoryTable("__ef_migrations_history");
+        sql.UseCompatibilityLevel(160);
+    }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -126,9 +144,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
                 }
 
                 var column = property.GetColumnName();
-                var values = string.Join(", ", Enum.GetNames(enumType).Select(n => $"'{n}'"));
+                var values = string.Join(", ", Enum.GetNames(enumType).Select(n => $"N'{n}'"));
                 builder.Entity(entityType.ClrType)
-                    .ToTable(t => t.HasCheckConstraint($"ck_{table}_{column}", $"{column} IN ({values})"));
+                    .ToTable(t => t.HasCheckConstraint($"ck_{table}_{column}", $"[{column}] IN ({values})"));
             }
         }
     }
@@ -139,5 +157,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
         builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");
         builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
         builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
+
+        // SQL Server kümelenmiş indeks anahtarı en fazla 900 bayttır; Identity'nin varsayılan nvarchar(450) bileşik anahtarları bunu aşar
+        // (1800 bayta kadar). Identity'nin SQL Server için önerdiği 128 karakter sınırı uygulanır.
+        builder.Entity<IdentityUserLogin<Guid>>(b =>
+        {
+            b.Property(x => x.LoginProvider).HasMaxLength(128);
+            b.Property(x => x.ProviderKey).HasMaxLength(128);
+        });
+        builder.Entity<IdentityUserToken<Guid>>(b =>
+        {
+            b.Property(x => x.LoginProvider).HasMaxLength(128);
+            b.Property(x => x.Name).HasMaxLength(128);
+        });
     }
 }

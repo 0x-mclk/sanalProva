@@ -35,7 +35,7 @@ public sealed class RealModeApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:Main", ConnectionString ?? "Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none");
+        builder.UseSetting("ConnectionStrings:Main", ConnectionString ?? ApiFactory.NoDatabase);
         builder.UseSetting("Seed:Enabled", "false");
         builder.UseSetting("Security:LoginRateLimitPerMinute", "100000");
         builder.UseSetting("Storage:LocalRoot", _storageRoot);
