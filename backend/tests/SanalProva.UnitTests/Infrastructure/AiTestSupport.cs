@@ -35,7 +35,8 @@ internal sealed class StubHandler : HttpMessageHandler
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         Requests.Add(new RecordedRequest(
             request.Method, request.RequestUri!.AbsolutePath, body,
-            request.Headers.ToDictionary(h => h.Key, h => string.Join(',', h.Value), StringComparer.OrdinalIgnoreCase)));
+            request.Headers.ToDictionary(h => h.Key, h => string.Join(',', h.Value), StringComparer.OrdinalIgnoreCase),
+            request.Content?.Headers.ContentType?.ToString()));
         if (_responses.Count == 0)
         {
             throw new InvalidOperationException($"Beklenmeyen istek: {request.Method} {request.RequestUri}");
@@ -45,7 +46,7 @@ internal sealed class StubHandler : HttpMessageHandler
     }
 }
 
-internal sealed record RecordedRequest(HttpMethod Method, string Path, string? Body, IReadOnlyDictionary<string, string> Headers)
+internal sealed record RecordedRequest(HttpMethod Method, string Path, string? Body, IReadOnlyDictionary<string, string> Headers, string? ContentType = null)
 {
     public JsonDocument BodyJson() => JsonDocument.Parse(Body ?? "{}");
 }

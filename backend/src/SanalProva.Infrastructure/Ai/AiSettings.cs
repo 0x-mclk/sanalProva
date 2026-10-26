@@ -57,7 +57,7 @@ public sealed class FalOptions
 
 /// <summary>
 /// Pruna API (P-Image Try-On). Anahtar: <c>Ai__Pruna__ApiKey</c>. Doğrulanan davranış (docs.api.pruna.ai/openapi.yaml, 2026-10-22):
-/// base64 desteklenmez; girdiler <c>POST /v1/files</c> ile geçici yüklenir (30 dk sonra otomatik silinir, silme uç noktası yok);
+/// base64 desteklenmez; girdiler <c>POST /v1/files</c> ile geçici yüklenir (gerçek yanıtta expires_at = yüklemeden 24 saat sonra; silme uç noktası yok);
 /// tahmin <c>POST /v1/predictions</c> (<c>Model: p-image-try-on</c>), durum <c>GET /v1/predictions/status/{id}</c>, çıktı 24 saat erişilebilir.
 /// </summary>
 public sealed class PrunaOptions

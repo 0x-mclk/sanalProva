@@ -18,7 +18,7 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
 | Çıktı | `images[].url` (`sync_mode: true` ile data URI) | aynı | `generation_url` (API anahtarıyla indirilir) |
 | Fiyat | **0,027 $/görsel** (fal model sayfası) | Kalite × boyut tablosu. Ek olarak referans görsel başı ≈ 0,008 $. Kullanıcı ölçümü (`image_size: auto`): low **0,0135 $**, medium **0,0173 $**, high ort. **0,0391 $** | Standart **0,015 $** (ilk parça), turbo **0,008 $**/parça |
 | İstek başı gerçek maliyet bildirimi | **Yok** (yalnızca `metrics.inference_time`) | Yok | Yok |
-| Saklama | `X-Fal-Store-IO: 0` yük saklamayı kapatır; `sync_mode` çıktıyı geçmişte tutmaz | aynı | Yüklenen dosyalar **30 dk** sonra otomatik silinir; **silme uç noktası yok**. Çıktı **24 saat** erişilebilir (FAQ: bağlantı herkese açık) |
+| Saklama | `X-Fal-Store-IO: 0` yük saklamayı kapatır; `sync_mode` çıktıyı geçmişte tutmaz | aynı | Yüklenen dosyalar şemaya göre 30 dk, **gerçek yanıtta 24 saat** sonra silinir (`expires_at`); **silme uç noktası yok**. Çıktı **24 saat** erişilebilir (FAQ: bağlantı herkese açık) |
 
 **Doğrulanamayan / varsayım:**
 - Hiçbir model bu projede canlı çağrıyla doğrulanmadı (`LiveVerified=false`; yönetici ekranında "Canlı doğrulanmadı").
@@ -26,7 +26,8 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
 - fal, istek başına ücret alanı döndürmüyor. Bu yüzden maliyet **tahmin** olarak kaydediliyor (`actual_cost_usd = NULL`); mutabakat fatura ile yapılır.
 - GPT Image ölçümleri `image_size: auto` ile alındı: sabit çözünürlüğün garantili fiyatı değil. Bilgi olarak saklanır ("ölçülen"); tahmin formülü değiştirmez (§2a).
 - `image_size: auto` çıktısının kişi fotoğrafının boyutunu izlediği varsayılır (fal: "infer from input images"); canlı testte doğrulanacak.
-- Pruna şemasında yükleme süresi açıklamada 30 dk, örnek yanıtta 24 saat görünüyor; temkinli yorum: **en geç 24 saat**.
+- Pruna şemasında yükleme süresi açıklamada 30 dk, örnek yanıtta 24 saat görünüyor. 2026-10-22 gerçek yüklemede `expires_at` = **yükleme + 24 saat** (doğrulandı).
+- Pruna `/v1/files`, .NET'in varsayılan multipart biçimini (`name=content; filename*=…`) **500** ile reddeder; standart tırnaklı biçim (`name="content"; filename="x.jpg"`) gerekir (2026-10-22 ücretsiz yükleme denemesiyle doğrulandı, düzeltildi).
 
 ## 2. Mimari ve değişen dosyalar
 
@@ -115,7 +116,7 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
   - Çıktı yalnızca fal medya alan adlarından ve anahtar gönderilmeden indirilir.
   - fal'ın veri işleme sözleşmesi ve yurt dışı aktarım değerlendirmesi hukuki onay bekliyor.
 - **Pruna:**
-  - Base64 desteklenmediği için müşteri fotoğrafı ve ürün görseli Pruna'ya **geçici dosya olarak yüklenir**. Otomatik silme 30 dk (en geç 24 saat).
+  - Base64 desteklenmediği için müşteri fotoğrafı ve ürün görseli Pruna'ya **geçici dosya olarak yüklenir**. Otomatik silme gerçekte 24 saat sonra (`expires_at`).
   - **Elle silme mümkün değil.** Üretilen görsel Pruna'da **24 saat** erişilebilir ve FAQ'ya göre bağlantısı herkese açık.
   - Pruna GDPR DPA'sı var, ancak saklama süresi bizim kontrolümüzde değil.
   - Alternatif: bizim kısa ömürlü (5 dk) imzalı bağlantımızı vermek. Bu, sunucunun internetten erişilebilir olmasını gerektirir ve çıktının 24 saatlik saklanmasını yine değiştirmez.

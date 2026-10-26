@@ -310,13 +310,16 @@ public sealed class PrunaContractTests
             Assert.Equal(HttpMethod.Post, r.Method);
             Assert.Equal("/v1/files", r.Path);
             Assert.Equal("pruna-key-321", r.Headers["apikey"]);
-            Assert.Contains("name=content", r.Body, StringComparison.Ordinal);
+            // Pruna .NET varsayılan biçimini (name=content; filename*=...) 500 ile reddeder: standart tırnaklı biçim zorunlu
+            Assert.Matches("Content-Disposition: form-data; name=\"content\"; filename=\"(person|garment)\\.jpg\"\r\n", r.Body);
+            Assert.DoesNotContain("filename*", r.Body, StringComparison.Ordinal);
         });
 
         // 3: tahmin (asenkron: Try-Sync yok)
         var predict = handler.Requests[2];
         Assert.Equal("/v1/predictions", predict.Path);
         Assert.Equal("p-image-try-on", predict.Headers["Model"]);
+        Assert.Equal("application/json", predict.ContentType); // Pruna "; charset=utf-8" ekini 400 ile reddeder
         Assert.False(predict.Headers.ContainsKey("Try-Sync"));
         using (var body = predict.BodyJson())
         {

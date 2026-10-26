@@ -89,7 +89,7 @@ public static class TryOnModels
             Legacy: false, LiveVerified: false,
             PriceSource: "fal.ai model sayfası (2026-10-22): kalite × çözünürlük çıktı tablosu + referans görsel başına ≈ 0,008–0,012 $ + prompt 5 $/1M jeton. Ölçülen (image_size auto): low 0,0135 / medium 0,0173 / high ort. 0,0391 $",
             Pricing: TryOnPricingKind.GptImageTokens),
-        new(Pruna, "Pruna", "p-image-try-on", "Pruna P-Image Try-On", "Ekonomik alternatif. Görseller Pruna'ya geçici dosya olarak yüklenir (30 dk sonra otomatik silinir).",
+        new(Pruna, "Pruna", "p-image-try-on", "Pruna P-Image Try-On", "Ekonomik alternatif. Görseller Pruna'ya geçici dosya olarak yüklenir (24 saat sonra otomatik silinir; erken silinemez).",
             [
                 new("standard", "Standart", 0.015m, P(("turbo", "false"))),
                 new("turbo", "Turbo", 0.008m, P(("turbo", "true"))),

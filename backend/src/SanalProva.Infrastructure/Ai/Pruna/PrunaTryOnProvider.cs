@@ -13,7 +13,7 @@ namespace SanalProva.Infrastructure.Ai.Pruna;
 /// Pruna P-Image Try-On (doğrudan Pruna API). Resmî OpenAPI şeması (docs.api.pruna.ai/openapi.yaml, 2026-10-22):
 /// <list type="number">
 /// <item>Base64 desteklenmez: kişi ve ürün görseli <c>POST /v1/files</c> (multipart <c>content</c>) ile geçici yüklenir. Şemaya göre dosyalar
-/// <b>30 dakika</b> sonra otomatik silinir; silme uç noktası <b>yoktur</b> (KVKK riski, docs/12 §4).</item>
+/// 30 dakika sonra silinir; ancak 2026-10-22 gerçek yanıtında <c>expires_at</c> yüklemeden <b>24 saat</b> sonraydı. Silme uç noktası <b>yoktur</b> (KVKK riski, docs/12 §4).</item>
 /// <item><c>POST /v1/predictions</c>, başlıklar <c>apikey</c> + <c>Model: p-image-try-on</c>, gövde <c>{ input: { person_image, garment_images, turbo, seed, output_format, output_quality, preserve_input_size } }</c> → <c>id</c>.</item>
 /// <item><c>GET /v1/predictions/status/{id}</c>: <c>starting / processing / succeeded / failed / canceled</c>; başarıda <c>generation_url</c>.</item>
 /// <item>Çıktı <c>generation_url</c>'den API anahtarıyla indirilir; Pruna'da 24 saat erişilebilir kalır.</item>
@@ -70,7 +70,10 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
         var form = new MultipartFormDataContent();
         var content = new ByteArrayContent(image.Content.ToArray());
         content.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(image.ContentType) ? "image/jpeg" : image.ContentType);
-        form.Add(content, "content", fileName);
+        // Pruna yalnızca standart biçimi (name="content"; filename="x.jpg") ayrıştırır; .NET'in varsayılanı (tırnaksız ad + filename*) 500 döndürür
+        // (2026-10-22 ücretsiz yükleme denemesiyle doğrulandı)
+        content.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data") { Name = "\"content\"", FileName = $"\"{fileName}\"" };
+        form.Add(content);
         message.Content = form;
         using var response = await SendCheckedAsync(message, resuming: false, config, ct);
         using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
@@ -99,7 +102,9 @@ public sealed class PrunaTryOnProvider(HttpClient http, IOptions<PrunaOptions> c
 
         using var message = Request(HttpMethod.Post, "v1/predictions", config);
         message.Headers.TryAddWithoutValidation("Model", ModelHeader); // asenkron mod: Try-Sync gönderilmez
-        message.Content = new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["input"] = input }), Encoding.UTF8, "application/json");
+        message.Content = new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["input"] = input }), Encoding.UTF8);
+        // Pruna "application/json; charset=utf-8" başlığını 400 ("specified Content-Type is not allowed") ile reddeder (2026-10-22 doğrulandı)
+        message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         using var response = await SendCheckedAsync(message, resuming: false, config, ct);
         using var json = await ProviderHttp.ReadJsonAsync(response, Provider, ct);
         var id = json.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
