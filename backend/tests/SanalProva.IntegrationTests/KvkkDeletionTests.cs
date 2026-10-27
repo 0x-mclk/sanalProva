@@ -403,8 +403,13 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
         var upload = client.UploadAsync($"/api/v1/sessions/{session.Id}/photos", TestImages.Portrait(77));
         var delete = client.SendAsync(HttpMethod.Delete, $"/api/v1/sessions/{session.Id}");
         await Task.WhenAll(upload, delete);
-        (await upload).Dispose();
-        (await delete).Dispose();
+        using (var uploadResponse = await upload)
+        using (var deleteResponse = await delete)
+        {
+            // Yarışın hangi tarafı kazanırsa kazansın sunucu hatası (500) yok: yükleme 201 ya da 404, silme 204 ya da (kilitlenme yeniden denemeleri bitmişse) hiç 5xx değil
+            Assert.True((int)uploadResponse.StatusCode < 500, $"Yükleme {(int)uploadResponse.StatusCode} döndü");
+            Assert.True((int)deleteResponse.StatusCode < 500, $"Silme {(int)deleteResponse.StatusCode} döndü");
+        }
 
         var dir = Path.Combine(Factory.StorageRoot, tenant.OrganizationId.ToString("N"), tenant.StoreId.ToString("N"), "sessions", session.Id.ToString("N"));
         var clock = new OffsetClock { Offset = TimeSpan.FromHours(2) };

@@ -1,4 +1,4 @@
-# Devam notu (son güncelleme: M3.5 sonu)
+# Devam notu (son güncelleme: M3.6 sonu)
 
 Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al.
 
@@ -37,7 +37,7 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 1. Dev boş kalır (M5'e kadar).
 2. (Yapıldı) Append-only `sanalprova_test`'te uygulandı.
 3. (Yapıldı) **M3.5** KVKK silme (oturum silme/saklama/onay geri alma, dosya deposu, TV, maliyet defteri).
-4. M3.6 eşzamanlılık ölçümü, M3.7 idempotency, M3.8 frontend/backend sözleşmesi (`OutcomeUncertain` arayüzü dahil), M3.9 uçtan uca (Playwright), M3.10 rapor + R5 kredi veri tasarımı belgesi + platform yöneticisi sağlama komutu.
+4. (Yapıldı) M3.6 eşzamanlılık ölçümü; sıradaki: M3.7 idempotency, M3.8 frontend/backend sözleşmesi (`OutcomeUncertain` arayüzü dahil), M3.9 uçtan uca (Playwright), M3.10 rapor + R5 kredi veri tasarımı belgesi + platform yöneticisi sağlama komutu.
 5. M4 yalnızca onayla.
 
 ## Canlıya çıkış öncesi ZORUNLU işler (kullanıcı kararı)
@@ -47,3 +47,6 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 3. Maliyet ve denetim kayıtları için saklama politikası (şu an sonsuz; hukuki süre kararı).
 4. AI sağlayıcılarının kişisel veri saklama ve silme koşulları: sözleşme/DPA, Pruna elle silme yok, canlı doğrulama; aydınlatma metni.
 Ayrıca: gerçek mağaza TV denemesi, hukuki onaylı aydınlatma metni, S3 için `ListSessionFoldersAsync`.
+
+## M3.6 bulgusu
+Bütçe kapısı yarışı: eşikte paralel işler limiti 4-5 kat aşabilir (ölçüldü); production varsayılanı 4 paralel iş/ana makine ile üst sınır 3×birim tutar. R5 rezervasyonu zorunlu (kredi sisteminden önce).

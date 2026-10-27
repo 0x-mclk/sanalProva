@@ -229,10 +229,15 @@ public static class SessionEndpoints
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
-        catch
+        catch (Exception ex)
         {
             // Dosya depoya yazıldı ama kayıt işlenemedi (ör. oturum eşzamanlı silindi): yetim müşteri fotoğrafı bırakılmaz
             await images.DeleteAsync(saved.File, CancellationToken.None);
+            if (ex is DbUpdateConcurrencyException || (ex is DbUpdateException update && DbErrors.IsForeignKeyViolation(update)))
+            {
+                return ApiProblems.NotFound("Prova bulunamadı."); // oturum yükleme sırasında silindi: 500 değil 404
+            }
+
             throw;
         }
         if (replaced.Count > 0)

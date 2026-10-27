@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -25,7 +26,11 @@ internal sealed class TestHostEnvironment : IHostEnvironment
 /// <summary>Sahte "gerçek" Try-On sağlayıcısı: çağrıları sayar ve senaryoya göre davranır. Ağ çağrısı yok, ücret yok.</summary>
 internal sealed class ScriptedTryOn(Func<int, ProviderRequestOptions, CancellationToken, Task<ProviderResult>> script) : ITryOnProvider
 {
-    public int Calls { get; private set; }
+    private readonly object _gate = new();
+    private int _calls;
+
+    /// <summary>Eşzamanlı işlerde de doğru sayar (yük testleri 16 paralel çağrı yapar).</summary>
+    public int Calls => Volatile.Read(ref _calls);
 
     public List<ProviderRequestOptions> Seen { get; } = [];
 
@@ -34,10 +39,15 @@ internal sealed class ScriptedTryOn(Func<int, ProviderRequestOptions, Cancellati
 
     public Task<ProviderResult> TryOnAsync(ImageInput person, ImageInput garment, ProviderRequestOptions options, CancellationToken ct)
     {
-        Calls++;
-        Seen.Add(options);
-        Inputs.Add((person, garment));
-        return script(Calls, options, ct);
+        int call;
+        lock (_gate)
+        {
+            call = ++_calls;
+            Seen.Add(options);
+            Inputs.Add((person, garment));
+        }
+
+        return script(call, options, ct);
     }
 }
 
@@ -1053,6 +1063,145 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         }
 
         Assert.Equal(0, FileCount(SessionDir(tenant, sessionId)));
+    }
+
+    // ---------------------------------------------------------------- M3.6: bütçe kapısı yarışı ve uygulama kilidi zaman aşımı
+
+    /// <summary>
+    /// Bütçe kapısı "kontrol et, sonra çağır" (kilitsiz) çalışır: eşzamanlı işler aynı harcamayı görüp birlikte geçebilir. Bu test aşımı <b>ölçer</b> ve üst sınırı doğrular
+    /// (R5 rezervasyonu öncesi taban değer); sıralı çalışmada ise aşım olmadığını kanıtlar. Çift maliyet olmadığı (harcama = çağrı × birim tutar) her durumda zorunludur.
+    /// </summary>
+    [Fact]
+    public async Task Butce_kapisi_yarisi_esikte_paralel_islerde_asim_olculur_ust_sinir_korunur_siralida_asim_yoktur_maliyet_cift_yazilmaz()
+    {
+        const int parallel = 16, rounds = 3;
+        const decimal limit = 0.50m, unit = 0.15m; // sıralı: en fazla 3 çağrı (3×0,15 = 0,45; dördüncü 0,60 > 0,50 engellenir)
+        var results = new List<object>();
+        decimal maxParallelOvershoot = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            foreach (var concurrent in new[] { false, true })
+            {
+                var (tenant, client, catalog) = await TenantAsync();
+                var fashn = new ScriptedTryOn(async (n, options, ct) =>
+                {
+                    await options.OnSubmitting!();
+                    await Task.Delay(80, ct); // çağrılar çakışsın
+                    await options.OnSubmitted!($"pred-{n}");
+                    return Result("Fashn", "tryon-max", $"pred-{n}", unit, 2, unit);
+                });
+                await using var harness = BuildHarness(fashn, daily: limit);
+                var jobIds = new List<Guid>();
+                for (var i = 0; i < parallel; i++)
+                {
+                    jobIds.Add((await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet)).JobId);
+                }
+
+                var ct = TestContext.Current.CancellationToken;
+                if (concurrent)
+                {
+                    await Task.WhenAll(jobIds.Select(id => harness.Processor.ProcessClaimedAsync(id, ct)));
+                }
+                else
+                {
+                    foreach (var id in jobIds)
+                    {
+                        await harness.Processor.ProcessClaimedAsync(id, ct);
+                    }
+                }
+
+                var (scope, db) = OpenDb();
+                using (scope)
+                {
+                    var logs = await db.AiUsageLogs.IgnoreQueryFilters().Where(l => l.OrganizationId == tenant.OrganizationId).ToListAsync(ct);
+                    var spend = logs.Sum(l => l.EstimatedCostUsd);
+                    var calls = fashn.Calls;
+                    var diagnostics = string.Join("; ", logs.GroupBy(l => l.JobId).Where(g => g.Count() > 1 || g.Key is null).Select(g => $"iş {g.Key}: {string.Join(',', g.Select(l => $"{l.EstimatedCostUsd}/{l.Success}/{l.ErrorCode}/a{l.Attempt}"))}"));
+                    Assert.True(calls * unit == spend, $"Çift/eksik maliyet: çağrı {calls}, harcama {spend}. {diagnostics}"); // çift maliyet / eksik maliyet yok
+                    Assert.Equal(calls, logs.Count(l => l.Success));
+                    var blocked = await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => jobIds.Contains(j.Id) && j.ErrorCode == GenerationErrorCode.BudgetExceeded, ct);
+                    Assert.Equal(parallel - calls, blocked); // çağrılmayan her iş BudgetExceeded: sağlayıcıya gitmedi, ücret yok
+                    var overshoot = Math.Max(0, spend - limit);
+                    if (!concurrent)
+                    {
+                        Assert.Equal(3, calls);
+                        Assert.Equal(0m, overshoot);
+                    }
+                    else
+                    {
+                        Assert.True(calls <= parallel); // teorik üst sınır
+                        maxParallelOvershoot = Math.Max(maxParallelOvershoot, overshoot);
+                    }
+
+                    results.Add(new { Round = round, Mode = concurrent ? "paralel" : "sirali", Calls = calls, SpendUsd = spend, LimitUsd = limit, OvershootUsd = overshoot, BlockedJobs = blocked });
+                }
+            }
+        }
+
+        LoadMeasurementTests.WriteReport("budget_race", new { Parallel = parallel, UnitUsd = unit, LimitUsd = limit, MaxParallelOvershootUsd = maxParallelOvershoot, TheoreticalMaxOvershootUsd = (parallel - 3) * unit, Runs = results });
+    }
+
+    private async Task<SqlConnection> HoldSessionLockAsync(Guid sessionId)
+    {
+        var connection = new SqlConnection(Factory.MigratorConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+        await using var command = new SqlCommand($"BEGIN TRAN; DECLARE @r int; EXEC @r = sys.sp_getapplock @Resource = N'{SanalProva.Infrastructure.Persistence.AppLocks.SessionVersion(sessionId)}', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 1000; IF @r < 0 THROW 51002, N'kilit alinamadi', 1;", connection);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        return connection;
+    }
+
+    [Fact]
+    public async Task Sonuc_yazimi_oturum_kilidini_bekler_zaman_asiminda_yeniden_dener_sonunda_tek_sonuc_tek_maliyet_saglayici_tekrar_cagrilmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = new ScriptedTryOn((n, options, _) => Task.FromResult(Result("Fashn", "tryon-max", $"pred-{n}", 0.15m, 2, 0.15m)));
+        await using var harness = BuildHarness(fashn);
+        var (jobId, sessionId) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        // Başka bir transaction oturum sürüm kilidini 12 sn tutar: bekleme zaman aşımı (10 sn) bir kez dolar (51001), yeniden deneme kilit bırakılınca başarılı olur
+        await using var holder = await HoldSessionLockAsync(sessionId);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var processing = harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(12), TestContext.Current.CancellationToken);
+        await using (var release = new SqlCommand("COMMIT TRAN;", holder))
+        {
+            await release.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        await processing;
+        watch.Stop();
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
+        Assert.Single(images);
+        Assert.Equal(0.15m, Assert.Single(logs).EstimatedCostUsd);
+        Assert.Equal(1, fashn.Calls); // zaman aşımı sağlayıcıyı yeniden çağırmadı: ücret bir kez
+        Assert.True(watch.Elapsed > TimeSpan.FromSeconds(10), $"Kilit beklenmedi: {watch.Elapsed}");
+        LoadMeasurementTests.WriteReport("applock_timeout", new { HeldSeconds = 12, WaitTimeoutSeconds = 10, Retried = true, ElapsedSeconds = Math.Round(watch.Elapsed.TotalSeconds, 1), ProviderCalls = fashn.Calls });
+    }
+
+    [Fact]
+    public async Task Oturum_kilidi_tum_denemelerde_alinamazsa_ucretli_sonuc_kaybolmaz_maliyet_bir_kez_yazilir_is_basarisiz_olur()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = new ScriptedTryOn((n, options, _) => Task.FromResult(Result("Fashn", "tryon-max", $"pred-{n}", 0.15m, 2, 0.15m)));
+        await using var harness = BuildHarness(fashn);
+        var (jobId, sessionId) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await using var holder = await HoldSessionLockAsync(sessionId); // asla bırakılmaz (test sonunda geri alınır)
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken); // 3 deneme × 10 sn
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Failed, job.Status);
+        Assert.Empty(images);
+        var log = Assert.Single(logs);
+        Assert.Equal(0.15m, log.EstimatedCostUsd); // ücret doğdu: bütçeden kaybolmadı
+        Assert.False(log.Success);
+        Assert.Equal(1, fashn.Calls); // tekrar ücretli çağrı yok
+
+        await using var rollback = new SqlCommand("ROLLBACK TRAN;", holder);
+        await rollback.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     [Fact]
