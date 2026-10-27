@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEMO_MANAGER, devPassword, StaffApi } from './support';
 
-const SHOTS = resolve(import.meta.dirname, '../../docs/screenshots/asama-3');
+const SHOTS = process.env.E2E_SHOTS_DIR ?? resolve(import.meta.dirname, '../test-results/screens');
 mkdirSync(SHOTS, { recursive: true });
 
 // 400 ms: görsellerin yumuşak geçişi (300 ms) bitmeden ekran görüntüsü alınmaz

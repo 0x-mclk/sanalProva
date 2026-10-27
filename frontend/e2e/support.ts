@@ -1,8 +1,29 @@
 import { execFileSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
-import type { APIRequestContext, APIResponse } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
 
 export const DEMO_MANAGER = 'yonetici@lal.local';
+export const OTHER_FIRM_USER = 'baska@firma.local';
+export const MAIN_STORE = 'Nişantaşı Butik';
+
+/** Şube sırası sabit değildir: giriş yapmış tarayıcının etkin şubesini açıkça seçer (arayüz ve API aynı şubede çalışsın). */
+export async function selectStore(page: Page, name: string): Promise<void> {
+  await page.evaluate(async (storeName) => {
+    const me = (await (await fetch('/api/v1/auth/me')).json()) as { stores: { id: string; name: string }[] };
+    window.localStorage.setItem('sp.activeStore', me.stores.find((s) => s.name === storeName)!.id);
+  }, name);
+  await page.reload();
+}
+
+/** Yalnızca izole `sanalprova_e2e` veritabanında tek değerli sorgu (sayaç doğrulamaları için). */
+export function sqlScalar(query: string): string {
+  const connection = process.env.SANALPROVA_E2E_DB ?? '';
+  const database = /Database=([^;]+)/i.exec(connection)?.[1];
+  const server = /Server=([^;]+)/i.exec(connection)?.[1];
+  if (database !== 'sanalprova_e2e' || !server) throw new Error('E2E veritabanı doğrulanamadı.');
+  const out = execFileSync('sqlcmd', ['-S', server, '-d', database, '-E', '-C', '-I', '-f', '65001', '-h', '-1', '-W', '-b', '-Q', `SET NOCOUNT ON; ${query}`], { encoding: 'utf8' });
+  return out.trim();
+}
 
 /** Demo hesap parolası: E2E_PASSWORD, yoksa API projesinin user-secrets'ındaki Seed:DevPassword. */
 export function devPassword(): string {
@@ -81,9 +102,11 @@ export class StaffApi {
 
   constructor(private readonly request: APIRequestContext) {}
 
-  async init(): Promise<void> {
-    const me = await this.json<{ stores: { id: string }[] }>(await this.request.get('/api/v1/auth/me'));
-    this.storeId = me.stores[0]!.id;
+  async init(storeName?: string): Promise<void> {
+    const me = await this.json<{ stores: { id: string; name: string }[] }>(await this.request.get('/api/v1/auth/me'));
+    const store = storeName ? me.stores.find((s) => s.name === storeName) : me.stores[0];
+    if (!store) throw new Error(`Şube bulunamadı: ${storeName}`);
+    this.storeId = store.id;
   }
 
   private async headers(write: boolean): Promise<Record<string, string>> {
@@ -110,8 +133,8 @@ export class StaffApi {
     return response.status() === 204 ? undefined : ((await response.json()) as T);
   }
 
-  /** Onaylı, fotoğraflı, DEMO sonucu hazır bir prova oluşturur. */
-  async createSessionWithResult(label: string, seed = 1): Promise<{ sessionId: string; photoId: string; imageId: string }> {
+  /** Onaylı, fotoğraflı (üretimsiz) bir prova oluşturur. */
+  async createSessionWithoutGenerating(label: string, seed = 1): Promise<{ sessionId: string; photoId: string }> {
     const session = (await this.send<{ id: string }>('POST', '/api/v1/sessions', { customerLabel: label }))!;
     const notice = await this.get<{ version: string }>('/api/v1/consent-notice/current');
     await this.send('POST', `/api/v1/sessions/${session.id}/consent`, {
@@ -122,21 +145,33 @@ export class StaffApi {
       multipart: { file: { name: 'sentetik.png', mimeType: 'image/png', buffer: syntheticPortraitPng(900, 1500, seed) } },
     });
     const photo = await this.json<{ id: string }>(upload);
-    const imageId = await this.generate(session.id);
-    return { sessionId: session.id, photoId: photo.id, imageId };
+    return { sessionId: session.id, photoId: photo.id };
   }
 
-  /** Taslak seçimden (ilk hazır takım) bir DEMO sonucu üretir ve tamamlanmasını bekler. */
-  async generate(sessionId: string): Promise<string> {
+  /** Onaylı, fotoğraflı, DEMO sonucu hazır bir prova oluşturur. */
+  async createSessionWithResult(label: string, seed = 1): Promise<{ sessionId: string; photoId: string; imageId: string }> {
+    const created = await this.createSessionWithoutGenerating(label, seed);
+    const imageId = await this.generate(created.sessionId);
+    return { ...created, imageId };
+  }
+
+  /** Taslak seçimi kaydeder (ilk hazır takım) ve üretimi başlatır; iş kimliğini döner. */
+  async startGeneration(sessionId: string): Promise<string> {
     const products = await this.get<{ items: { id: string; isReadyForAi: boolean; variants: { id: string; isDefault: boolean }[] }[] }>(
       '/api/v1/products?type=OutfitSet&selectable=true&pageSize=10',
     );
     const product = products.items.find((p) => p.isReadyForAi);
-    if (!product) throw new Error('Demo katalogda hazır takım yok. Geliştirme API\'si Seed:Enabled ile başlatılmalı.');
+    if (!product) throw new Error('Demo katalogda hazır takım yok. Geliştirme API Seed:Enabled ile başlatılmalı.');
     await this.send('PUT', `/api/v1/sessions/${sessionId}/draft`, { mode: 'OutfitSet', items: [{ productId: product.id, variantId: (product.variants.find((v) => v.isDefault) ?? product.variants[0])?.id }] });
     const job = (await this.send<{ id: string }>('POST', `/api/v1/sessions/${sessionId}/generations`, {}, { 'Idempotency-Key': crypto.randomUUID().replaceAll('-', '') }))!;
+    return job.id;
+  }
+
+  /** Taslak seçimden (ilk hazır takım) bir DEMO sonucu üretir ve tamamlanmasını bekler. */
+  async generate(sessionId: string): Promise<string> {
+    const jobId = await this.startGeneration(sessionId);
     for (let i = 0; i < 100; i++) {
-      const current = await this.get<{ status: string; resultImageId: string | null }>(`/api/v1/jobs/${job.id}`);
+      const current = await this.get<{ status: string; resultImageId: string | null }>(`/api/v1/jobs/${jobId}`);
       if (current.status === 'Succeeded' && current.resultImageId) return current.resultImageId;
       if (current.status === 'Failed' || current.status === 'Cancelled') throw new Error(`Üretim başarısız: ${current.status}`);
       await new Promise((resolve) => setTimeout(resolve, 300));

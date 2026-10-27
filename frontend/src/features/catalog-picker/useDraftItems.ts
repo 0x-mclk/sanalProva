@@ -15,17 +15,34 @@ export function useDraftItems(sessionId: string, mode: OutfitMode, serverDraft: 
   const latest = useRef(entries);
   const dirty = useRef(false);
 
+  const inflight = useRef<Promise<void> | null>(null);
+
   const persist = useCallback(async () => {
     if (timer.current) {
       window.clearTimeout(timer.current);
       timer.current = null;
     }
+    // Yazma sürüyorsa (zamanlayıcı az önce tetiklendi) bitmesi beklenir: aksi halde "Üret" taslak sunucuya ulaşmadan başlar (EMPTY_SELECTION)
+    // ve iki yazma arasında sıra bozulabilir. Önceki yazmanın hatası bu çağrıyı engellemez (değişiklik kirli kalır ve yeniden denenir).
+    while (inflight.current) {
+      await inflight.current.catch(() => undefined);
+    }
     if (!dirty.current) {
       return;
     }
     dirty.current = false;
-    const draft = await save.mutateAsync({ mode, items: latest.current });
-    setWarnings([...draft.warnings]);
+    const write = save
+      .mutateAsync({ mode, items: latest.current })
+      .then((draft) => setWarnings([...draft.warnings]))
+      .catch((error: unknown) => {
+        dirty.current = true;
+        throw error;
+      })
+      .finally(() => {
+        inflight.current = null;
+      });
+    inflight.current = write;
+    await write;
   }, [mode, save]);
 
   const setEntries = useCallback(
