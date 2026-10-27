@@ -98,7 +98,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
     private Harness BuildHarness(
         ScriptedTryOn? fashn = null, ScriptedCompose? gemini = null, bool allowPaid = true, decimal daily = 10m, decimal monthly = 150m, decimal maxJob = 0.5m,
-        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max", bool liveCombination = false, int? leaseSeconds = null, double retryBackoffSeconds = 0.01)
+        string freeModel = "gemini-3-pro-image", string setModel = "tryon-max", bool liveCombination = false, int? leaseSeconds = null, double retryBackoffSeconds = 0.01, ScriptedTryOn? tryOn = null)
     {
         var values = new Dictionary<string, string?>
         {
@@ -145,13 +145,18 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         services.AddKeyedSingleton<IImageGenerationProvider>("Gemini", gemini);
 
         // Yeni modeller: gerçek adapter'lar gibi maliyeti girdi boyutları, kalite ve görsel sayısından hesaplar (fal/Pruna istek başına maliyet döndürmez)
-        ScriptedTryOn tryOn = null!;
-        tryOn = new ScriptedTryOn((n, options, _) =>
+        if (tryOn is null)
         {
-            var model = TryOnModels.Find(options.Parameters["model_key"])!;
-            var (person, garment) = tryOn.Inputs[^1];
-            return Task.FromResult(Result(model.Provider, options.Model, $"req-{n}", ProviderHttp.EstimatedCost(options, new PricingSettings(), person, garment)));
-        });
+            ScriptedTryOn defaultTryOn = null!;
+            defaultTryOn = new ScriptedTryOn((n, options, _) =>
+            {
+                var model = TryOnModels.Find(options.Parameters["model_key"])!;
+                var (person, garment) = defaultTryOn.Inputs[^1];
+                return Task.FromResult(Result(model.Provider, options.Model, $"req-{n}", ProviderHttp.EstimatedCost(options, new PricingSettings(), person, garment)));
+            });
+            tryOn = defaultTryOn;
+        }
+
         foreach (var key in new[] { "FalSeedream", "FalGptImage", "Pruna" })
         {
             services.AddKeyedSingleton<ITryOnProvider>(key, tryOn);
@@ -1434,6 +1439,82 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         Assert.Empty(images);
         Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
         Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+    }
+
+    // ---------------------------------------------------------------- M3.7: tekrar istekleri, çökme ve rezervasyon
+
+    [Fact]
+    public async Task Tekrar_istekleri_calisan_cokmus_ve_belirsiz_isi_ayni_isle_eslestirir_ikinci_is_ikinci_rezervasyon_veya_ikinci_gonderim_olusmaz()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        using var real = new RealModeApiFactory(Factory.StorageRoot);
+        var tenant = await TestData.CreateTenantAsync(real.Services);
+        var catalog = await TestData.CreateCatalogAsync(real.Services, tenant.OrganizationId);
+        var client = await ApiClient.LoginAsync(real, tenant.Email, tenant.StoreId);
+        using var crash = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var provider = new ScriptedTryOn(async (_, options, _) =>
+        {
+            await options.OnSubmitting!(); // niyet + rezervasyon kalıcı
+            await crash.CancelAsync(); // worker çöküyor; kimlik alınmadı
+            throw new OperationCanceledException(crash.Token);
+        });
+        await using var harness = BuildHarness(tryOn: provider);
+
+        // 1) İlk istek: tek iş. Ana host'un (mock) worker'ı da kuyruğu yoklar: "hâlâ Queued ise Running yap" koşuluyla atomik; kapılırsa yeni oturumla yeniden denenir
+        SanalProva.Api.Features.TryOn.SessionDetail session = null!;
+        SanalProva.Api.Features.TryOn.JobDto first = null!;
+        for (var attempt = 0; attempt < 20 && first is null; attempt++)
+        {
+            var (candidateSession, _) = await PreparedSessionAsync(client);
+            await SaveDraftAsync(client, candidateSession.Id, OutfitMode.OutfitSet, catalog.SetProduct);
+            var candidate = await StartGenerationAsync(client, candidateSession.Id, "ilk");
+            var (scope, db) = OpenDb();
+            using (scope)
+            {
+                var rows = await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == candidate.Id && j.Status == GenerationJobStatus.Queued).ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, GenerationJobStatus.Running).SetProperty(j => j.Attempt, 1).SetProperty(j => j.Stage, GenerationStage.Preparing)
+                    .SetProperty(j => j.LeaseUntil, DateTimeOffset.UtcNow.AddMinutes(10)), TestContext.Current.CancellationToken);
+                if (rows == 1)
+                {
+                    (session, first) = (candidateSession, candidate);
+                }
+            }
+        }
+
+        Assert.NotNull(first);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => harness.Processor.ProcessClaimedAsync(first.Id, crash.Token));
+
+        async Task AssertSingleJobAsync(string phase)
+        {
+            var (s, d) = OpenDb();
+            using (s)
+            {
+                Assert.True(1 == await d.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == session.Id, TestContext.Current.CancellationToken), $"{phase}: ikinci iş açıldı");
+            }
+        }
+
+        // 2) Worker çöktü (iş Running, rezervasyon açık): aynı anahtar da farklı anahtar da AYNI işi döner; ikinci rezervasyon/gönderim yok
+        var reservedBefore = await OpenReservedAsync(tenant.OrganizationId);
+        Assert.True(reservedBefore > 0m);
+        var repeats = await Task.WhenAll(Enumerable.Range(0, 10).Select(i => StartGenerationAsync(client, session.Id, i % 2 == 0 ? "ilk" : $"farkli-{i}")));
+        Assert.All(repeats, r => Assert.Equal(first.Id, r.Id));
+        await AssertSingleJobAsync("çökmüş Running");
+        Assert.Equal(reservedBefore, await OpenReservedAsync(tenant.OrganizationId)); // tekrar istekleri rezervasyon eklemedi
+        Assert.Equal(1, provider.Calls);
+
+        // 3) Kilit doldu, iş kuyruğa alındı, yeniden işlendi: belirsiz. Tekrar istekleri belirsiz işi döner (otomatik yeniden gönderim ve yeni iş yok); rezervasyon maliyet kaydına dönüştü
+        await SetJobAsync(first.Id, GenerationJobStatus.Queued);
+        await ReclaimAsync(first.Id);
+        await harness.Processor.ProcessClaimedAsync(first.Id, TestContext.Current.CancellationToken);
+        var uncertain = (await LoadAsync(first.Id)).Job;
+        Assert.Equal(GenerationErrorCode.OutcomeUncertain, uncertain.ErrorCode);
+
+        var after = await Task.WhenAll(Enumerable.Range(0, 10).Select(i => StartGenerationAsync(client, session.Id, i % 2 == 0 ? "ilk" : $"sonra-{i}")));
+        Assert.All(after, r => Assert.Equal((first.Id, GenerationErrorCode.OutcomeUncertain), (r.Id, r.ErrorCode)));
+        await AssertSingleJobAsync("belirsiz");
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+        Assert.Equal(reservedBefore, await SettledAsync(tenant.OrganizationId)); // tutar bir kez: rezervasyon → belirsiz maliyet kaydı, çift sayım yok
+        Assert.Equal(1, provider.Calls); // sağlayıcıya hiç ikinci gönderim yapılmadı
     }
 
     [Fact]

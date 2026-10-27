@@ -58,6 +58,7 @@ export const tr = {
     ADMISSION_BUSY: 'Şu an çok fazla istek var. Birkaç saniye sonra tekrar deneyin.',
     JOB_NOT_CANCELLABLE: 'İş zaten işleniyor veya tamamlandı; iptal edilemez.',
     JOB_NOT_FAILED: 'Yalnızca başarısız işler yeniden denenebilir.',
+    IDEMPOTENCY_KEY_REUSED: 'Bu istek anahtarı farklı bir işlem için kullanılmış. Lütfen işlemi yeniden başlatın.',
     NOT_IMPLEMENTED: 'Revizyon motoru henüz etkin değil. Yeni bir kombin oluşturabilirsiniz.',
     DUPLICATE_CODE: 'Bu kod zaten kullanılıyor.',
     DUPLICATE_SLUG: 'Bu kısa ad başka bir kategoride kullanılıyor.',

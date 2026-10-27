@@ -55,7 +55,15 @@ public static class GenerationEndpoints
         var existing = await db.GenerationJobs.SingleOrDefaultAsync(j => j.SessionId == id && j.IdempotencyKey == idempotencyKey, ct);
         if (existing is not null)
         {
-            return TypedResults.Accepted($"/api/v1/jobs/{existing.Id}", await reader.ToJobDtoAsync(existing, null, ct));
+            // Aynı anahtar farklı bir istekle (başka fotoğraf, model, kalite veya "yeni varyasyon") kullanıldıysa eski işi sessizce döndürmek istemciyi yanıltır: açık hata
+            if (KeyReusedWithDifferentRequest(existing, request, live: strategy.Resolve(existing.JobType).Provider != GenerationStrategy.MockProvider))
+            {
+                return ApiProblems.Unprocessable("IDEMPOTENCY_KEY_REUSED", "Bu Idempotency-Key farklı bir istek için kullanılmış. Yeni istek için yeni anahtar kullanın.");
+            }
+
+            // Yeniden oynatma, ilk yanıtla aynı bilgiyi taşır: tamamlanmış işin sonuç görseli dahil (istemci ağ hatasından sonra sonucu bulabilsin)
+            var finished = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == existing.Id, ct);
+            return TypedResults.Accepted($"/api/v1/jobs/{existing.Id}", await reader.ToJobDtoAsync(existing, finished, ct));
         }
 
         if (session.Status != SessionStatus.Open)
@@ -253,6 +261,16 @@ public static class GenerationEndpoints
         var image = await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == job.Id, ct);
         return TypedResults.Accepted($"/api/v1/jobs/{job.Id}", await reader.ToJobDtoAsync(job, image, ct));
     }
+
+    /// <summary>
+    /// Anahtarın bağlı olduğu iş ile bu isteğin gövdesi uyuşuyor mu. Yalnızca istekte <b>açıkça verilen</b> alanlar karşılaştırılır (boş = sunucu varsayılanı, her zaman uyumlu).
+    /// "Yeni varyasyon" iş satırında yalnızca gerçek modda izlenebilir (tekil anahtarı yok = varyasyon); mock modda varyasyonun anlamı yoktur.
+    /// </summary>
+    private static bool KeyReusedWithDifferentRequest(GenerationJob existing, StartGenerationRequest request, bool live) =>
+        (request.PhotoId is { } photo && existing.SourcePhotoId is { } source && photo != source)
+        || (request.ModelKey is { } model && existing.ModelKey is { } jobModel && !string.Equals(model, jobModel, StringComparison.Ordinal))
+        || (request.Quality is { } quality && existing.Quality is { } jobQuality && !string.Equals(quality, jobQuality, StringComparison.Ordinal))
+        || (live && request.AllowVariation != (existing.DedupeKey is null));
 
     /// <summary>Fotoğraf + iş tipi + sıralı (ürün, varyant) çiftlerinin özeti. Kişisel veri içermez.</summary>
     private static string Fingerprint(Guid photoId, GenerationJobType type, IEnumerable<DraftItem> items, string? modelKey, string? quality)
