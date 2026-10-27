@@ -387,8 +387,15 @@ public static class GenerationEndpoints
     /// aynı başarısız işe eşzamanlı "yeniden dene" tıklamaları gerçek modda tek ücretli iş açar.
     /// </summary>
     private static async Task<IResult> RetryAsync(
-        Guid id, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit, GenerationStrategy strategy, TimeProvider clock, CancellationToken ct)
+        Guid id, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit,
+        GenerationStrategy strategy, TimeProvider clock, CancellationToken ct)
     {
+        // Başlık isteğe bağlıdır (eski istemciler anahtarsız çağırır: her çağrı yeni anahtar alır). Verilirse ağ hatasında aynı anahtarla tekrar göndermek tek yeni iş açar.
+        if (idempotencyKey is not null && (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64))
+        {
+            return ApiProblems.BadRequest("IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key başlığı (en fazla 64 karakter) gerekli.");
+        }
+
         var failed = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
         if (failed is null)
         {
@@ -411,8 +418,23 @@ public static class GenerationEndpoints
             return ApiProblems.Conflict("NO_PHOTO", "Fotoğraf silinmiş. Yeni fotoğraf yükleyip tekrar üretin.");
         }
 
+        if (idempotencyKey is not null)
+        {
+            // Aynı anahtar daha önce bu yeniden denemede kullanıldıysa o iş döner; başka bir işlem (özgün iş veya farklı istek) için kullanıldıysa açık hata
+            var used = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.SessionId == session.Id && j.IdempotencyKey == idempotencyKey, ct);
+            if (used is not null)
+            {
+                if (used.Id == failed.Id || used.RequestFingerprint != failed.RequestFingerprint)
+                {
+                    return ApiProblems.Unprocessable("IDEMPOTENCY_KEY_REUSED", "Bu Idempotency-Key farklı bir istek için kullanılmış. Yeni istek için yeni anahtar kullanın.");
+                }
+
+                return TypedResults.Accepted($"/api/v1/jobs/{used.Id}", await reader.ToJobDtoAsync(used, await db.GeneratedImages.AsNoTracking().FirstOrDefaultAsync(i => i.JobId == used.Id, ct), ct));
+            }
+        }
+
         var live = strategy.Resolve(failed.JobType).Provider != GenerationStrategy.MockProvider;
-        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
+        var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, idempotencyKey ?? Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
             failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null);
         // Bilinçli personel kararı: sonucu belirsiz iş yeniden denenebilir (ikinci ücret olasılığı iletide yazar); etkin aynı iş varsa yine o döner
         var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, includeUncertain: false, ct);

@@ -59,6 +59,8 @@ export const tr = {
     JOB_NOT_CANCELLABLE: 'İş zaten işleniyor veya tamamlandı; iptal edilemez.',
     JOB_NOT_FAILED: 'Yalnızca başarısız işler yeniden denenebilir.',
     IDEMPOTENCY_KEY_REUSED: 'Bu istek anahtarı farklı bir işlem için kullanılmış. Lütfen işlemi yeniden başlatın.',
+    IDEMPOTENCY_KEY_REQUIRED: 'İstek doğrulanamadı. Lütfen işlemi yeniden başlatın.',
+    DUPLICATE_PRODUCT: 'Aynı ürün birden fazla seçilemez.',
     NOT_IMPLEMENTED: 'Revizyon motoru henüz etkin değil. Yeni bir kombin oluşturabilirsiniz.',
     DUPLICATE_CODE: 'Bu kod zaten kullanılıyor.',
     DUPLICATE_SLUG: 'Bu kısa ad başka bir kategoride kullanılıyor.',

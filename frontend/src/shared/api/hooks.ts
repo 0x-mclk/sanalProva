@@ -235,7 +235,8 @@ export function useCancelJob() {
 export function useRetryJob() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => unwrap(api.POST('/api/v1/jobs/{id}/retry', { params: { path: { id } } })),
+    mutationFn: ({ id, idempotencyKey }: { id: string; idempotencyKey: string }) =>
+      unwrap(api.POST('/api/v1/jobs/{id}/retry', { params: { path: { id }, header: { 'Idempotency-Key': idempotencyKey } } })),
     onSuccess: (job) => {
       client.setQueryData(qk.job(job.id), job);
       void client.invalidateQueries({ queryKey: qk.session(job.sessionId) });

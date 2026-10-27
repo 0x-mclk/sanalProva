@@ -1,9 +1,10 @@
 import { Button, Loader } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { qk, useCancelJob, useJob, useRetryJob, useSession } from '../../shared/api/hooks';
 import { ApiError } from '../../shared/api/http';
+import { newIdempotencyKey } from '../../shared/api/idempotency';
 import { useAuth } from '../../shared/auth/AuthContext';
 import { errorMessage } from '../../shared/i18n/tr';
 import { useSessionHub } from '../../shared/realtime/useSessionHub';
@@ -26,6 +27,7 @@ export function GeneratingPage() {
   const job = useJob(jobId);
   const cancel = useCancelJob();
   const retry = useRetryJob();
+  const retryKey = useRef<{ jobId: string; key: string } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -77,7 +79,11 @@ export function GeneratingPage() {
 
   const doRetry = () => {
     setActionError(null);
-    retry.mutate(data.id, {
+    // Aynı başarısız iş için ağ hatasında yeniden gönderim aynı anahtarı taşır; başka bir (yeni) başarısız işte yeni anahtar üretilir
+    if (retryKey.current?.jobId !== data.id) {
+      retryKey.current = { jobId: data.id, key: newIdempotencyKey() };
+    }
+    retry.mutate({ id: data.id, idempotencyKey: retryKey.current.key }, {
       onSuccess: (next) => void navigate(`/prova/${id}/uretim/${next.id}`, { replace: true }),
       onError: (e) => setActionError(errorMessage(e instanceof ApiError ? e.code : 'UNKNOWN')),
     });

@@ -315,6 +315,70 @@ public sealed class IdempotencyTests(ApiFactory factory) : ApiTestBase(factory),
         await ApiClient.AssertProblemAsync(await client.SendAsync(HttpMethod.Post, $"/api/v1/jobs/{retried}/retry", new { }), HttpStatusCode.Conflict, "JOB_NOT_FAILED");
     }
 
+    private static Task<HttpResponseMessage> RetryRawAsync(ApiClient client, Guid jobId, string? key) =>
+        client.SendAsync(HttpMethod.Post, $"/api/v1/jobs/{jobId}/retry", new { }, configure: r =>
+        {
+            if (key is not null)
+            {
+                r.Headers.Add("Idempotency-Key", key);
+            }
+        });
+
+    [Fact]
+    public async Task Retry_anahtarli_eszamanli_istek_mock_modda_bile_tek_is_acar_ayni_anahtar_ayni_isi_doner_ozgun_anahtar_ve_gecersiz_anahtar_reddedilir_yeni_anahtar_yeni_is_acar()
+    {
+        var (_, client, _, session) = await ReadyAsync(Mock);
+        var photo = await UploadPhotoAsync(client, session.Id, TestImages.Portrait(seed: 4001));
+        TestFaults.FailFor(await client.DownloadAsync(photo.Urls.Url), InjectedFault.Permanent);
+        var failed = await WaitForJobAsync(client, (await StartGenerationAsync(client, session.Id, "rk-orijinal")).Id);
+        Assert.Equal(GenerationJobStatus.Failed, failed.Status);
+
+        // Aynı anahtarla 8 eşzamanlı retry (ağ yeniden denemesi / çift tıklama) → tek yeni iş
+        var responses = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => RetryRawAsync(client, failed.Id, "rk-1")));
+        var ids = new HashSet<Guid>();
+        foreach (var response in responses)
+        {
+            using (response)
+            {
+                ids.Add((await ApiClient.ReadAsync<JobDto>(response, HttpStatusCode.Accepted)).Id);
+            }
+        }
+
+        var retried = Assert.Single(ids);
+        Assert.NotEqual(failed.Id, retried);
+
+        // İş bittikten sonra da aynı anahtar aynı işi döner (resultImageId korunur); yeni iş açılmaz
+        var done = await WaitForJobAsync(client, retried);
+        using (var replayResponse = await RetryRawAsync(client, failed.Id, "rk-1"))
+        {
+            var replay = await ApiClient.ReadAsync<JobDto>(replayResponse, HttpStatusCode.Accepted);
+            Assert.Equal((retried, done.ResultImageId), (replay.Id, replay.ResultImageId));
+        }
+
+        // Özgün işin başlangıç anahtarı retry için kullanılamaz (aksi halde başarısız iş "yeni iş" gibi dönerdi)
+        await ApiClient.AssertProblemAsync(await RetryRawAsync(client, failed.Id, "rk-orijinal"), HttpStatusCode.UnprocessableEntity, "IDEMPOTENCY_KEY_REUSED");
+
+        // Geçersiz anahtar: boş veya 64 karakterden uzun
+        await ApiClient.AssertProblemAsync(await RetryRawAsync(client, failed.Id, new string('x', 65)), HttpStatusCode.BadRequest, "IDEMPOTENCY_KEY_REQUIRED");
+
+        // Gerçekten yeni kullanıcı eylemi (yeni anahtar) yeni iş açar; anahtarsız eski istemci de çalışır
+        using (var fresh = await RetryRawAsync(client, failed.Id, "rk-2"))
+        {
+            Assert.NotEqual(retried, (await ApiClient.ReadAsync<JobDto>(fresh, HttpStatusCode.Accepted)).Id);
+        }
+
+        using (var legacy = await RetryRawAsync(client, failed.Id, null))
+        {
+            Assert.Equal(HttpStatusCode.Accepted, legacy.StatusCode);
+        }
+
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            Assert.Equal(1 + 3, await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == session.Id, TestContext.Current.CancellationToken));
+        }
+    }
+
     [Fact]
     public async Task Olcum_mock_modda_eszamanli_retry_ucretsiz_oldugundan_dedupe_yoktur_ama_kota_asilmaz()
     {
