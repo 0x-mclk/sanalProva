@@ -48,5 +48,9 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 4. AI sağlayıcılarının kişisel veri saklama ve silme koşulları: sözleşme/DPA, Pruna elle silme yok, canlı doğrulama; aydınlatma metni.
 Ayrıca: gerçek mağaza TV denemesi, hukuki onaylı aydınlatma metni, S3 için `ListSessionFoldersAsync`.
 
-## M3.6 bulgusu
-Bütçe kapısı yarışı: eşikte paralel işler limiti 4-5 kat aşabilir (ölçüldü); production varsayılanı 4 paralel iş/ana makine ile üst sınır 3×birim tutar. R5 rezervasyonu zorunlu (kredi sisteminden önce).
+## M3.6 bulgusu ve düzeltmesi
+Bütçe kapısı yarışı (eşikte paralel işler limiti 4-5 kat aşıyordu) atomik rezervasyonla kapatıldı (BudgetGuard.ReserveAsync, firma applock + reserved_cost_usd). Limitler yalnızca firma başına günlük/aylık + iş başına; platform/şube düzeyi limit yok (R5 kararı). Kredi/paket/abonelik R5.
+
+## R5 öncesi açık riskler (korunacak)
+- İptal edilmiş + maliyet kaydı yazılmamış işlerin rezervasyonu worker çökerse sonsuza kadar açık sayılabilir: zaman aşımlı kapanış kuralı/süpürücü gerekli.
+- Platform genelinde bütçe limiti yok (yalnızca firma günlük/aylık + iş başı); şube düzeyi limit de yok.

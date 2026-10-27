@@ -238,12 +238,14 @@ public sealed class GenerationProcessor(
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 WITH next_job AS (
-                    SELECT TOP (1) id, status, attempt, stage, started_at, lease_until, updated_at
+                    SELECT TOP (1) id, status, attempt, stage, started_at, lease_until, updated_at, reserved_cost_usd, provider_request_id, provider_submit_started_at
                       FROM generation_jobs WITH (UPDLOCK, READPAST, ROWLOCK)
                      WHERE status = N'Queued' AND next_attempt_at <= @now
                      ORDER BY next_attempt_at, created_at)
                 UPDATE next_job
                    SET status = N'Running', attempt = attempt + 1, stage = N'Preparing',
+                       -- önceki denemenin rezervasyonu: sağlayıcıda bekleyen istek (kimlik/niyet) yoksa serbest; yeni deneme kendi rezervasyonunu yapar
+                       reserved_cost_usd = CASE WHEN provider_request_id IS NULL AND provider_submit_started_at IS NULL THEN NULL ELSE reserved_cost_usd END,
                        started_at = COALESCE(started_at, @now), lease_until = @lease, updated_at = @now
                 OUTPUT inserted.id;
                 """;
@@ -379,7 +381,8 @@ public sealed class GenerationProcessor(
 
                 if (resumeId is null)
                 {
-                    await budget.EnsureAllowedAsync(db, job.OrganizationId, job.Id, worstCase, ct);
+                    // Atomik bütçe kapısı + rezervasyon (firma başına kilit, tek transaction): paralel worker/örnekler aynı bütçeyi kontrolsüz tüketemez
+                    await budget.ReserveAsync(db, job, worstCase, ct);
                 }
             }
 
@@ -810,6 +813,7 @@ public sealed class GenerationProcessor(
             // Sağlayıcıda süren istek yok: yeni gönderim güvenli
             job.ProviderRequestId = null;
             job.ProviderSubmitStartedAt = null;
+            job.ReservedCostUsd = null; // kesin sonuç (ücret yok/yok sayıldı): rezervasyon serbest; maliyet kaydı (varsa) tutarı taşır
         }
 
         if (job.ProviderRequestId is not null && ex.Retryable && job.Attempt >= job.MaxAttempts)

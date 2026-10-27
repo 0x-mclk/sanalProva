@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SanalProva.Domain.Generation;
 using SanalProva.Infrastructure.Ai;
@@ -34,34 +34,87 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
         return new SpendSummary(today, month, job);
     }
 
-    /// <summary>Çağrı yapılabilirse sessizce döner; yapılamıyorsa yeniden denenmez bir <see cref="ProviderException"/> fırlatır (sağlayıcıya hiçbir şey gönderilmez).</summary>
-    public async Task EnsureAllowedAsync(AppDbContext db, Guid organizationId, Guid jobId, decimal worstCasePerCallUsd, CancellationToken ct)
+    /// <summary>
+    /// Açık rezervasyonlar: sağlayıcıda sürüyor olabilecek, henüz maliyet kaydına dönüşmemiş çağrıların ayrılmış en kötü durum tutarı (<see cref="GenerationJob.ReservedCostUsd"/>).
+    /// Ayrı bir defter yoktur: rezervasyon iş satırındadır ve işin maliyet kaydı yazıldığında (aynı kayıtla durum değişir) kendiliğinden kapanır.
+    /// <list type="bullet">
+    /// <item><b>Running</b>: çağrı sürüyor (veya gönderilmek üzere).</item>
+    /// <item><b>Queued + (kimlik veya gönderim niyeti var)</b>: yoklamada geçici hata ya da worker çökmesi; istek sağlayıcıda sürüyor/ücretlenmiş olabilir.</item>
+    /// <item><b>Cancelled + o deneme için maliyet kaydı yok</b>: iptal edildi ama worker henüz en kötü durum kaydını yazmadı.</item>
+    /// </list>
+    /// Succeeded/Failed işler sayılmaz: maliyetleri (kesin, belirsiz veya 0) maliyet kaydındadır; böylece aynı tutar iki kez sayılmaz.
+    /// </summary>
+    internal static IQueryable<GenerationJob> OpenReservations(AppDbContext db, Guid organizationId) =>
+        db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.OrganizationId == organizationId && j.ReservedCostUsd != null
+            && (j.Status == GenerationJobStatus.Running
+                || (j.Status == GenerationJobStatus.Queued && (j.ProviderRequestId != null || j.ProviderSubmitStartedAt != null))
+                || (j.Status == GenerationJobStatus.Cancelled && !db.AiUsageLogs.IgnoreQueryFilters().Any(l => l.JobId == j.Id && l.Attempt == j.Attempt && !l.IsAdjustment))));
+
+    /// <summary>
+    /// Ücretli çağrıdan önce <b>atomik</b> bütçe kapısı + rezervasyon. Tek transaction ve firma başına uygulama kilidi (<c>sp_getapplock</c>): kilit altında (1) kesinleşmiş harcama
+    /// (maliyet kayıtları + düzeltmeler) ile (2) diğer işlerin açık rezervasyonları toplanır, bu çağrının en kötü durum tutarı eklenerek günlük/aylık/iş sınırlarına karşı denetlenir ve
+    /// (3) sınır aşılmıyorsa rezervasyon (<c>reserved_cost_usd</c>) aynı transaction'da yazılır. Kilit transaction'a aittir; COMMIT ile bırakılır. Kilit ve veritabanı paylaşıldığı için
+    /// farklı worker'lar ve uygulama örnekleri aynı bütçeyi kontrolsüz tüketemez. Kontrol ile rezervasyon arasında boşluk yoktur.
+    /// </summary>
+    /// <exception cref="ProviderException">Sınır aşılırsa (yeniden denenmez, sağlayıcıya hiçbir şey gitmez) veya kilit alınamazsa (yeniden denenir, ücret yok).</exception>
+    /// <exception cref="JobOwnershipLostException">İş bu worker'ın elinden çıktıysa (rezervasyon yazılmaz).</exception>
+    public async Task ReserveAsync(AppDbContext db, GenerationJob job, decimal worstCasePerCallUsd, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(job);
         var budget = settings.CurrentValue.Budget;
         if (!budget.AllowPaidCalls)
         {
             throw new ProviderException(GenerationErrorCode.ProviderNotConfigured, "Gerçek AI çağrıları kapalı (ücretli çağrılar için yönetici onayı ve yapılandırma gerekir).", retryable: false);
         }
 
-        if (!budget.Enforce)
+        try
         {
-            return;
-        }
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await AppLocks.AcquireExclusiveAsync(db, AppLocks.OrganizationBudget(job.OrganizationId), LockTimeout, ct);
 
-        var spend = await GetSpendAsync(db, organizationId, jobId, ct);
-        if (spend.Job + worstCasePerCallUsd > budget.MaxJobCostUsd)
-        {
-            throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Bu işin AI maliyet sınırı aşılacaktı; sağlayıcı çağrılmadı.", retryable: false);
-        }
+            if (budget.Enforce)
+            {
+                // SIRA ÖNEMLİ: önce açık rezervasyonlar, sonra kesinleşmiş harcama. READ_COMMITTED_SNAPSHOT her deyimde yeni bir anlık görüntü okur; bu iki sorgu arasında bir iş
+                // biterse (maliyet kaydı yazılır, rezervasyon kapanır) ters sırada okumak onu hiç saymazdı (eksik sayım → bütçe aşımı). Bu sırayla en kötü ihtimal çift sayımdır (güvenli taraf).
+                var open = await OpenReservations(db, job.OrganizationId).Where(j => j.Id != job.Id).SumAsync(j => (decimal?)j.ReservedCostUsd, ct) ?? 0m;
+                var spend = await GetSpendAsync(db, job.OrganizationId, job.Id, ct);
+                if (spend.Job + worstCasePerCallUsd > budget.MaxJobCostUsd)
+                {
+                    throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Bu işin AI maliyet sınırı aşılacaktı; sağlayıcı çağrılmadı.", retryable: false);
+                }
 
-        if (spend.Today + worstCasePerCallUsd > budget.DailyLimitUsd)
-        {
-            throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Günlük AI bütçesi doldu; sağlayıcı çağrılmadı.", retryable: false);
-        }
+                if (spend.Today + open + worstCasePerCallUsd > budget.DailyLimitUsd)
+                {
+                    throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Günlük AI bütçesi doldu (devam eden işlemlerin ayrılmış tutarı dahil); sağlayıcı çağrılmadı.", retryable: false);
+                }
 
-        if (spend.Month + worstCasePerCallUsd > budget.MonthlyLimitUsd)
+                if (spend.Month + open + worstCasePerCallUsd > budget.MonthlyLimitUsd)
+                {
+                    throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Aylık AI bütçesi doldu (devam eden işlemlerin ayrılmış tutarı dahil); sağlayıcı çağrılmadı.", retryable: false);
+                }
+            }
+
+            // Rezervasyon: sahiplik (deneme numarası = çit belirteci) ve "Running" koşuluyla; iş elden çıktıysa hiçbir şey ayrılmaz
+            var attempt = job.Attempt;
+            var rows = await db.GenerationJobs.IgnoreQueryFilters()
+                .Where(j => j.Id == job.Id && j.Attempt == attempt && j.Status == GenerationJobStatus.Running)
+                .ExecuteUpdateAsync(s => s.SetProperty(j => j.ReservedCostUsd, worstCasePerCallUsd), ct);
+            if (rows != 1)
+            {
+                throw new JobOwnershipLostException("İş bütçe rezervasyonu sırasında bu worker'ın elinden çıktı.");
+            }
+
+            await transaction.CommitAsync(ct);
+            job.ReservedCostUsd = worstCasePerCallUsd; // izlenen varlık veritabanıyla aynı değere gelir
+            db.Entry(job).Property(j => j.ReservedCostUsd).IsModified = false;
+        }
+        catch (Exception ex) when (ex is not ProviderException and not JobOwnershipLostException && DbErrors.IsTransientLockFailure(ex))
         {
-            throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Aylık AI bütçesi doldu; sağlayıcı çağrılmadı.", retryable: false);
+            // Bütçe kilidi/kilitlenme: hiçbir şey ayrılmadı, sağlayıcıya gidilmedi; iş ücretsiz yeniden kuyruğa alınır
+            throw new ProviderException(GenerationErrorCode.RateLimited, "Bütçe kontrolü meşgul; iş yeniden denenecek.", retryable: true);
         }
     }
+
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(10);
 }

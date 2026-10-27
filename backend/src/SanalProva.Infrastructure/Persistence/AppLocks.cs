@@ -20,6 +20,9 @@ public static class AppLocks
     /// <summary>Şubenin yeni iş kabul kilidi: günlük kota, oturum sınırı ve tekil ücretli iş kontrolü + ekleme bu kilit altında yapılır.</summary>
     public static string StoreAdmission(Guid storeId) => $"sanalprova:store-admission:{storeId:N}";
 
+    /// <summary>Firmanın AI bütçe kapısı: harcama + açık rezervasyon hesabı ve yeni rezervasyonun yazılması bu kilit altında, tek transaction'da yapılır.</summary>
+    public static string OrganizationBudget(Guid organizationId) => $"sanalprova:org-budget:{organizationId:N}";
+
     /// <summary>Açık transaction içinde özel (exclusive) kilit alır; alınamazsa <see cref="NotGrantedError"/> numaralı SqlException fırlatır.</summary>
     public static async Task AcquireExclusiveAsync(AppDbContext db, string resource, TimeSpan timeout, CancellationToken ct)
     {

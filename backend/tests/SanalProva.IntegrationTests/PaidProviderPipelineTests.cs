@@ -1072,7 +1072,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
     /// (R5 rezervasyonu öncesi taban değer); sıralı çalışmada ise aşım olmadığını kanıtlar. Çift maliyet olmadığı (harcama = çağrı × birim tutar) her durumda zorunludur.
     /// </summary>
     [Fact]
-    public async Task Butce_kapisi_yarisi_esikte_paralel_islerde_asim_olculur_ust_sinir_korunur_siralida_asim_yoktur_maliyet_cift_yazilmaz()
+    public async Task Butce_kapisi_esikte_16_paralel_isten_en_fazla_3_kabul_eder_asim_sifir_siralida_ve_paralelde_ayni_sonuc_maliyet_cift_yazilmaz()
     {
         const int parallel = 16, rounds = 3;
         const decimal limit = 0.50m, unit = 0.15m; // sıralı: en fazla 3 çağrı (3×0,15 = 0,45; dördüncü 0,60 > 0,50 engellenir)
@@ -1123,14 +1123,11 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
                     var blocked = await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => jobIds.Contains(j.Id) && j.ErrorCode == GenerationErrorCode.BudgetExceeded, ct);
                     Assert.Equal(parallel - calls, blocked); // çağrılmayan her iş BudgetExceeded: sağlayıcıya gitmedi, ücret yok
                     var overshoot = Math.Max(0, spend - limit);
-                    if (!concurrent)
+                    // Atomik rezervasyon (M3.6 düzeltmesi): paralelde de tam 3 çağrı kabul edilir, aşım 0 (önceki ölçüm: 15–16 çağrı, 1,75–1,90 $ aşım)
+                    Assert.Equal(3, calls);
+                    Assert.Equal(0m, overshoot);
+                    if (concurrent)
                     {
-                        Assert.Equal(3, calls);
-                        Assert.Equal(0m, overshoot);
-                    }
-                    else
-                    {
-                        Assert.True(calls <= parallel); // teorik üst sınır
                         maxParallelOvershoot = Math.Max(maxParallelOvershoot, overshoot);
                     }
 
@@ -1202,6 +1199,241 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
         await using var rollback = new SqlCommand("ROLLBACK TRAN;", holder);
         await rollback.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+    }
+
+    // ---------------------------------------------------------------- Atomik bütçe rezervasyonu (reserved_cost_usd)
+
+    private async Task<decimal> OpenReservedAsync(Guid organizationId)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            return await SanalProva.Infrastructure.Generation.BudgetGuard.OpenReservations(db, organizationId).SumAsync(j => (decimal?)j.ReservedCostUsd, TestContext.Current.CancellationToken) ?? 0m;
+        }
+    }
+
+    private async Task<decimal> SettledAsync(Guid organizationId)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            return await db.AiUsageLogs.IgnoreQueryFilters().Where(l => l.OrganizationId == organizationId).SumAsync(l => (decimal?)l.EstimatedCostUsd, TestContext.Current.CancellationToken) ?? 0m;
+        }
+    }
+
+    private static ScriptedTryOn Succeeding(decimal unit = 0.15m, int delayMs = 0) => new(async (n, options, ct) =>
+    {
+        await options.OnSubmitting!();
+        if (delayMs > 0)
+        {
+            await Task.Delay(delayMs, ct);
+        }
+
+        await options.OnSubmitted!($"pred-{n}");
+        return Result("Fashn", "tryon-max", $"pred-{n}", unit, 2, unit);
+    });
+
+    [Fact]
+    public async Task Rezervasyon_devam_eden_islerin_tutarini_butceye_katar_is_bitince_tutar_maliyet_kaydina_donusur_cift_sayilmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness(Succeeding(), daily: 0.20m);
+        var (first, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (second, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        // Birinci iş "Running" ve 0,15 ayrılmış (henüz maliyet kaydı yok: devam eden çağrı)
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == first).ExecuteUpdateAsync(s => s.SetProperty(j => j.ReservedCostUsd, 0.15m), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId));
+        await harness.Processor.ProcessClaimedAsync(second, TestContext.Current.CancellationToken);
+        var (blocked, blockedLogs, _) = await LoadAsync(second);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, blocked.ErrorCode); // 0,15 (açık) + 0,15 (yeni) > 0,20: sağlayıcı çağrılmadı
+        Assert.All(blockedLogs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+
+        // Birinci iş kesin biter (başarısız, ücretsiz): rezervasyon kapanır ve ikinci iş geçer
+        (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == first).ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.ProviderUnavailable), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+        var (third, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await harness.Processor.ProcessClaimedAsync(third, TestContext.Current.CancellationToken);
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(third)).Job.Status);
+
+        // Başarı sonrası: harcama = tek maliyet kaydı (0,15); rezervasyon açık sayılmaz (iş Succeeded): çift sayım yok
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Worker_gonderimden_sonra_cokerse_rezervasyon_acik_kalir_kurtarma_belirsiz_kaydeder_tutar_bir_kez_sayilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        using var crash = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var fashn = new ScriptedTryOn(async (_, options, _) =>
+        {
+            await options.OnSubmitting!(); // niyet + rezervasyon kalıcı
+            await crash.CancelAsync(); // süreç çöküyor; kimlik hiç alınmadı
+            throw new OperationCanceledException(crash.Token);
+        });
+        await using var harness = BuildHarness(fashn, daily: 0.20m);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => harness.Processor.ProcessClaimedAsync(jobId, crash.Token));
+
+        // Çökmüş (Running) iş: çağrı sağlayıcıda olabilir → rezervasyon açık, yeni iş (0,15 + 0,15 > 0,20) engellenir
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId));
+        var (other, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await using var healthy = BuildHarness(Succeeding(), daily: 0.20m);
+        await healthy.Processor.ProcessClaimedAsync(other, TestContext.Current.CancellationToken);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(other)).Job.ErrorCode);
+        Assert.Equal(0, healthy.Fashn.Calls);
+
+        // Kilit doldu → kuyruğa alındı (niyet var: hâlâ açık rezervasyon) → yeniden işlendi → belirsiz: tutar maliyet kaydına geçti, açık rezervasyon 0, toplam 0,15 (çift değil)
+        await SetJobAsync(jobId, GenerationJobStatus.Queued);
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId)); // Queued + gönderim niyeti
+        await ReclaimAsync(jobId);
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationErrorCode.OutcomeUncertain, job.ErrorCode);
+        Assert.Equal(0.15m, Assert.Single(logs).EstimatedCostUsd);
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+        Assert.Equal(1, fashn.Calls); // yeniden gönderim yok
+    }
+
+    [Fact]
+    public async Task Kesin_basarisizlik_rezervasyonu_serbest_birakir_yeniden_deneme_yeni_rezervasyon_yapar_butce_etkilenmez()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = new ScriptedTryOn(async (n, options, _) =>
+        {
+            await options.OnSubmitting!();
+            if (n == 1)
+            {
+                throw new ProviderException(GenerationErrorCode.RateLimited, "429", retryable: true); // yanıtlı ret: ücret yok
+            }
+
+            await options.OnSubmitted!("pred-2");
+            return Result("Fashn", "tryon-max", "pred-2", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn, daily: 0.20m, retryBackoffSeconds: QueuedHoldSeconds);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        var afterFirst = (await LoadAsync(jobId)).Job;
+        Assert.Equal(GenerationJobStatus.Queued, afterFirst.Status);
+        Assert.Null(afterFirst.ReservedCostUsd); // kesin ret: rezervasyon serbest
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+
+        await ReclaimAsync(jobId);
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(jobId)).Job.Status); // 0,15 ≤ 0,20: ilk reddin rezervasyonu bütçeyi tüketmedi
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Yoklamada_gecici_hata_kimlikli_istegin_rezervasyonunu_tutar_iptal_edilen_calisan_is_kaydi_yazilana_kadar_sayilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = new ScriptedTryOn(async (_, options, _) =>
+        {
+            await options.OnSubmitting!();
+            await options.OnSubmitted!("pred-net");
+            throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "bağlantı koptu", retryable: true); // istek sağlayıcıda sürüyor olabilir
+        });
+        await using var harness = BuildHarness(fashn, daily: 0.20m, retryBackoffSeconds: QueuedHoldSeconds);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var queued = (await LoadAsync(jobId)).Job;
+        Assert.Equal((GenerationJobStatus.Queued, "pred-net", 0.15m), (queued.Status, queued.ProviderRequestId, queued.ReservedCostUsd));
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId)); // Queued + kimlik: istek sağlayıcıda sürüyor olabilir
+        Assert.Equal(0m, await SettledAsync(tenant.OrganizationId)); // henüz maliyet kaydı yok (ChargedUsd 0)
+
+        // İptal edilmiş ama worker henüz en kötü durum kaydını yazmamış iş de açık sayılır; kayıt yazılınca kapanır (kayıt tutarı taşır)
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Cancelled).SetProperty(j => j.MaxAttempts, 5).SetProperty(j => j.Attempt, 5), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId));
+        (scope, db) = OpenDb();
+        using (scope)
+        {
+            db.AiUsageLogs.Add(new AiUsageLog { OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, JobId = jobId, Provider = "Fashn", Model = "m", Operation = "OutfitSet", Attempt = 5, Success = false, EstimatedCostUsd = 0.15m });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Iki_uygulama_ornegi_ayni_butceyi_paylasir_firmalar_birbirinin_butcesini_tuketmez()
+    {
+        // İki ayrı ServiceProvider = iki uygulama örneği (ayrı bellek, ortak veritabanı); iki firma
+        var (tenantA, clientA, catalogA) = await TenantAsync();
+        var (tenantB, clientB, catalogB) = await TenantAsync();
+        var fashnA1 = Succeeding(delayMs: 60);
+        var fashnA2 = Succeeding(delayMs: 60);
+        var fashnB = Succeeding(delayMs: 60);
+        await using var instance1 = BuildHarness(fashnA1, daily: 0.50m);
+        await using var instance2 = BuildHarness(fashnA2, daily: 0.50m);
+        await using var instanceB = BuildHarness(fashnB, daily: 0.50m);
+
+        var jobsA = new List<Guid>();
+        var jobsB = new List<Guid>();
+        for (var i = 0; i < 8; i++)
+        {
+            jobsA.Add((await RunningJobAsync(tenantA, clientA, catalogA, OutfitMode.OutfitSet)).JobId);
+            jobsB.Add((await RunningJobAsync(tenantB, clientB, catalogB, OutfitMode.OutfitSet)).JobId);
+        }
+
+        var ct = TestContext.Current.CancellationToken;
+        await Task.WhenAll(jobsA.Select((id, i) => (i % 2 == 0 ? instance1 : instance2).Processor.ProcessClaimedAsync(id, ct))
+            .Concat(jobsB.Select(id => instanceB.Processor.ProcessClaimedAsync(id, ct))));
+
+        Assert.Equal(3, fashnA1.Calls + fashnA2.Calls); // iki örnek birlikte yalnızca 3 çağrı: tek bütçe
+        Assert.Equal(3, fashnB.Calls); // B firması kendi bütçesinden tam 3 çağrı: A'nın tüketimi B'yi etkilemedi
+        Assert.Equal(0.45m, await SettledAsync(tenantA.OrganizationId));
+        Assert.Equal(0.45m, await SettledAsync(tenantB.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Butce_kilidi_alinamazsa_sagliciya_gidilmez_ucret_yok_is_ucretsiz_yeniden_kuyruga_girer()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var fashn = Succeeding();
+        await using var harness = BuildHarness(fashn, retryBackoffSeconds: QueuedHoldSeconds);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await using var holder = new SqlConnection(Factory.MigratorConnectionString);
+        await holder.OpenAsync(TestContext.Current.CancellationToken);
+        await using (var hold = new SqlCommand($"BEGIN TRAN; DECLARE @r int; EXEC @r = sys.sp_getapplock @Resource = N'{SanalProva.Infrastructure.Persistence.AppLocks.OrganizationBudget(tenant.OrganizationId)}', @LockMode = N'Exclusive', @LockOwner = N'Transaction', @LockTimeout = 1000; IF @r < 0 THROW 51002, N'kilit alinamadi', 1;", holder))
+        {
+            await hold.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken); // 10 sn bekler, vazgeçer
+        await using (var rollback = new SqlCommand("ROLLBACK TRAN;", holder))
+        {
+            await rollback.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Queued, job.Status); // hata değil: ücretsiz yeniden deneme
+        Assert.Equal(0, fashn.Calls);
+        Assert.Empty(images);
+        Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
     }
 
     [Fact]

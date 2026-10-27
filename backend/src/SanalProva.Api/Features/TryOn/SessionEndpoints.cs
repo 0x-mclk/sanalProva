@@ -205,6 +205,16 @@ public static class SessionEndpoints
         {
             return ApiProblems.FromImage(ex);
         }
+        catch (IOException)
+        {
+            // Dosya yazılırken oturum klasörü KVKK silmesiyle kalkmış olabilir (eşzamanlı silme): oturum yoksa sunucu hatası değil 404; varsa gerçek bir depo hatasıdır
+            if (await db.TryOnSessions.AsNoTracking().AnyAsync(s => s.Id == id, CancellationToken.None))
+            {
+                throw;
+            }
+
+            return ApiProblems.NotFound("Prova bulunamadı.");
+        }
 
         // "Yeniden çek": aynı açının önceki fotoğrafı silinir (veri azaltma); yenisi birincil olur
         var replaced = session.Photos.Where(p => p.Angle == form.Angle).ToList();

@@ -360,7 +360,7 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
         var clock = new OffsetClock();
         var sweeper = new OrphanSweeper(Services.GetRequiredService<IServiceScopeFactory>(), Services.GetRequiredService<IImageStorageService>(), clock,
             Options.Create(new RetentionSettings { OrphanGraceMinutes = 60 }), NullLogger<OrphanSweeper>.Instance);
-        var fresh = await sweeper.SweepAsync(ct);
+        var fresh = await sweeper.SweepAsync(ct, tenant.OrganizationId); // yalnızca bu firma: saat ileri alındığı için paylaşılan ortamda başka testlerin taze verisi silinmesin
         Assert.Equal(0, fresh.FileRecords); // taze yetim kayıtlar bekleme payı içinde dokunulmaz
         Assert.True(Directory.EnumerateFiles(SessionDir(doomed), "*", SearchOption.AllDirectories).Any(), "Taze yetim klasör bekleme payı dolmadan silindi");
 
@@ -373,7 +373,7 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
 
         // Pay dolunca (saat 2 saat ileri): yetim klasör ve yetim metadata silinir; kullanımdaki oturumun dosyaları ve kayıtları dokunulmaz
         clock.Offset = TimeSpan.FromHours(2);
-        var result = await sweeper.SweepAsync(ct);
+        var result = await sweeper.SweepAsync(ct, tenant.OrganizationId);
         Assert.True(result.Folders >= 1 && result.FileRecords >= doomed.FileIds.Count, $"Süpürücü yetimi temizlemedi: {result}");
         Assert.False(Directory.Exists(SessionDir(doomed)) && Directory.EnumerateFileSystemEntries(SessionDir(doomed)).Any());
         (scope, db) = OpenDb();
@@ -386,7 +386,7 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
         await AssertSurvivesAsync(survivor, client);
 
         // Tekrar çalıştırmak zararsız (idempotent)
-        var again = await sweeper.SweepAsync(ct);
+        var again = await sweeper.SweepAsync(ct, tenant.OrganizationId);
         Assert.Equal(0, again.FileRecords);
         await AssertSurvivesAsync(survivor, client);
     }
@@ -414,7 +414,7 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
         var dir = Path.Combine(Factory.StorageRoot, tenant.OrganizationId.ToString("N"), tenant.StoreId.ToString("N"), "sessions", session.Id.ToString("N"));
         var clock = new OffsetClock { Offset = TimeSpan.FromHours(2) };
         await new OrphanSweeper(Services.GetRequiredService<IServiceScopeFactory>(), Services.GetRequiredService<IImageStorageService>(), clock,
-            Options.Create(new RetentionSettings { OrphanGraceMinutes = 60 }), NullLogger<OrphanSweeper>.Instance).SweepAsync(ct);
+            Options.Create(new RetentionSettings { OrphanGraceMinutes = 60 }), NullLogger<OrphanSweeper>.Instance).SweepAsync(ct, tenant.OrganizationId);
 
         Assert.False(Directory.Exists(dir) && Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(), "Eşzamanlı yükleme müşteri fotoğrafını yetim bıraktı");
 

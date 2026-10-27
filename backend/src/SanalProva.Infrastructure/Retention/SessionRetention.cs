@@ -105,7 +105,8 @@ public sealed class OrphanSweeper(IServiceScopeFactory scopes, IImageStorageServ
 {
     public sealed record Result(int Folders, int FileRecords);
 
-    public async Task<Result> SweepAsync(CancellationToken ct)
+    /// <param name="organizationId">Verilirse yalnızca bu firmanın klasörleri/kayıtları taranır (firma bazlı bakım ve paylaşılan test ortamında yalıtım). Üretim süpürmesi null kullanır.</param>
+    public async Task<Result> SweepAsync(CancellationToken ct, Guid? organizationId = null)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -114,7 +115,8 @@ public sealed class OrphanSweeper(IServiceScopeFactory scopes, IImageStorageServ
         var folders = 0;
         foreach (var folder in await storage.ListSessionFoldersAsync(ct))
         {
-            if (folder.LastWriteUtc > cutoff || await db.TryOnSessions.IgnoreQueryFilters().AsNoTracking().AnyAsync(s => s.Id == folder.SessionId, ct))
+            if ((organizationId is { } scopeOrg && !folder.Prefix.StartsWith($"{scopeOrg:N}/", StringComparison.Ordinal))
+                || folder.LastWriteUtc > cutoff || await db.TryOnSessions.IgnoreQueryFilters().AsNoTracking().AnyAsync(s => s.Id == folder.SessionId, ct))
             {
                 continue;
             }
@@ -125,7 +127,7 @@ public sealed class OrphanSweeper(IServiceScopeFactory scopes, IImageStorageServ
         }
 
         var orphans = await db.StoredFiles.IgnoreQueryFilters()
-            .Where(f => (f.Purpose == FilePurpose.CustomerPhoto || f.Purpose == FilePurpose.GeneratedImage) && f.CreatedAt < cutoff
+            .Where(f => (organizationId == null || f.OrganizationId == organizationId) && (f.Purpose == FilePurpose.CustomerPhoto || f.Purpose == FilePurpose.GeneratedImage) && f.CreatedAt < cutoff
                 && !db.SessionPhotos.IgnoreQueryFilters().Any(p => p.FileId == f.Id) && !db.GeneratedImages.IgnoreQueryFilters().Any(i => i.FileId == f.Id))
             .Take(500).ToListAsync(ct);
         foreach (var file in orphans)
