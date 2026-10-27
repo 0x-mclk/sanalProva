@@ -980,6 +980,81 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         }
     }
 
+    // ---------------------------------------------------------------- M3.5: silme ile eşzamanlı çalışan worker
+
+    private string SessionDir(TestTenant tenant, Guid sessionId) =>
+        Path.Combine(Factory.StorageRoot, tenant.OrganizationId.ToString("N"), tenant.StoreId.ToString("N"), "sessions", sessionId.ToString("N"));
+
+    private static int FileCount(string dir) => Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count() : 0;
+
+    private async Task PurgeDuringCallAsync(Guid sessionId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.SessionPurger>().PurgeAsync(db, sessionId, "Session.PurgedByStaff", null, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Sonuc_hazirken_oturum_silinmisse_worker_dosya_veya_kayit_birakmaz_ucret_maliyet_kaydina_yazilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var sessionId = Guid.Empty;
+        var fashn = new ScriptedTryOn(async (_, options, _) =>
+        {
+            await options.OnSubmitting!();
+            await options.OnSubmitted!("pred-purged");
+            await PurgeDuringCallAsync(sessionId); // personel oturumu sağlayıcı beklenirken siliyor; sonuç yine de geliyor (ücret doğdu)
+            return Result("Fashn", "tryon-max", "pred-purged", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn);
+        (var jobId, sessionId) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken); // fırlatmamalı
+
+        Assert.Equal(0, FileCount(SessionDir(tenant, sessionId))); // silinmiş oturumun klasöründe müşteri verisi kalmadı
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var ct = TestContext.Current.CancellationToken;
+            Assert.False(await db.TryOnSessions.IgnoreQueryFilters().AnyAsync(s => s.Id == sessionId, ct));
+            Assert.False(await db.GeneratedImages.IgnoreQueryFilters().AnyAsync(i => i.SessionId == sessionId, ct));
+            var prefix = $"{tenant.OrganizationId:N}/{tenant.StoreId:N}/sessions/{sessionId:N}/";
+            Assert.False(await db.StoredFiles.IgnoreQueryFilters().AnyAsync(f => f.StorageKey.StartsWith(prefix), ct));
+
+            // Ücret doğdu: maliyet bütçeden kaybolmaz; kayıt kişisel veri içermez ve silinmiş işe bağlı değildir
+            var log = Assert.Single(await db.AiUsageLogs.IgnoreQueryFilters().Where(l => l.OrganizationId == tenant.OrganizationId).ToListAsync(ct));
+            Assert.Equal((0.15m, null), (log.EstimatedCostUsd, log.JobId));
+        }
+    }
+
+    [Fact]
+    public async Task Is_silinirken_iptal_dalinda_maliyet_kaydi_silinmis_ise_baglanmadan_yazilir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        var sessionId = Guid.Empty;
+        var fashn = new ScriptedTryOn(async (_, options, ct) =>
+        {
+            await options.OnSubmitting!();
+            await options.OnSubmitted!("pred-gone");
+            await PurgeDuringCallAsync(sessionId);
+            await Task.Delay(TimeSpan.FromSeconds(20), ct); // izleyici işin silindiğini görüp bekleyişi iptal eder
+            return Result("Fashn", "tryon-max", "pred-gone", 0.15m, 2, 0.15m);
+        });
+        await using var harness = BuildHarness(fashn);
+        (var jobId, sessionId) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var log = Assert.Single(await db.AiUsageLogs.IgnoreQueryFilters().Where(l => l.OrganizationId == tenant.OrganizationId).ToListAsync(TestContext.Current.CancellationToken));
+            Assert.Equal((0.15m, null), (log.EstimatedCostUsd, log.JobId)); // çağrı başlamıştı: en kötü durum maliyeti kayıtlı
+        }
+
+        Assert.Equal(0, FileCount(SessionDir(tenant, sessionId)));
+    }
+
     [Fact]
     public async Task Gecersiz_cikti_ucreti_kaydedilir_ve_tekrar_denenmez()
     {

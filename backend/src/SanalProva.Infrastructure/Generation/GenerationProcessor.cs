@@ -424,6 +424,15 @@ public sealed class GenerationProcessor(
             var result = await CallProviderAsync(job, resolved, options, inputs, jobCts.Token);
             paid = result;
 
+            if (await JobGoneAsync(db, job.Id))
+            {
+                // Sağlayıcı yanıtlarken oturum KVKK silmesiyle silindi: sonuç atılır (müşteri verisi geri doğmaz), ücret maliyet kaydına işe bağlanmadan yazılır
+                db.AiUsageLogs.Add(UsageLog(job, result, stopwatch.ElapsedMilliseconds, success: true, errorCode: null));
+                DetachDeletedJob(db, job);
+                await db.SaveChangesAsync(CancellationToken.None);
+                return;
+            }
+
             job.Stage = GenerationStage.Validating;
             await db.SaveChangesAsync(ct);
             await NotifyAsync(job, null, ct);
@@ -474,6 +483,11 @@ public sealed class GenerationProcessor(
                     Operation = job.JobType.ToString(), Quality = job.Quality, Attempt = job.Attempt, Success = false, DurationMs = (int)stopwatch.ElapsedMilliseconds,
                     EstimatedCostUsd = worstCase, ProviderRequestId = job.ProviderRequestId,
                 });
+                if (await JobGoneAsync(db, job.Id))
+                {
+                    DetachDeletedJob(db, job); // oturum silindi: iş de gitti; maliyet kaydı işe bağlanmadan yazılır
+                }
+
                 await db.SaveChangesAsync(CancellationToken.None);
             }
         }
@@ -533,7 +547,17 @@ public sealed class GenerationProcessor(
                 db.AiUsageLogs.Add(usage);
 
                 // İş beklerken iptal edildiyse sonuç atılır; ücret doğmuş olabileceğinden kullanım kaydı yine yazılır
-                var currentStatus = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == job.Id).Select(j => j.Status).SingleAsync(ct);
+                var currentStatus = await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.Id == job.Id).Select(j => (GenerationJobStatus?)j.Status).SingleOrDefaultAsync(ct);
+                if (currentStatus is null)
+                {
+                    // Oturum KVKK silmesiyle (iş dahil) silindi: sonuç dosyası hiç yazılmaz, müşteri verisi geri doğmaz; ücret doğmuş olabilir: maliyet işe bağlanmadan kaydedilir
+                    usage.JobId = null;
+                    await db.SaveChangesAsync(ct);
+                    await transaction.CommitAsync(ct);
+                    DetachDeletedJob(db, job);
+                    return null;
+                }
+
                 if (currentStatus == GenerationJobStatus.Cancelled)
                 {
                     await db.SaveChangesAsync(ct);
@@ -567,6 +591,19 @@ public sealed class GenerationProcessor(
                     logger.LogWarning(ex, "Sonuç kaydı geçici kilit hatasına takıldı, yeniden deneniyor: {JobId} ({Attempt}/{Max})", job.Id, attempt, FinalizeAttempts);
                     await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), ct);
                     continue;
+                }
+
+                // Dosya depoya yazıldı ama kayıt işlenemedi (ör. oturum az önce silindi → yabancı anahtar ihlali): yetim müşteri verisi bırakılmaz
+                if (saved is not null)
+                {
+                    try
+                    {
+                        await images.DeleteAsync(saved.File, CancellationToken.None);
+                    }
+                    catch (Exception cleanup)
+                    {
+                        logger.LogError(cleanup, "Yazılamayan sonuç dosyası silinemedi (yetim dosya süpürücüsü temizler): {JobId}", job.Id);
+                    }
                 }
 
                 throw;
@@ -799,7 +836,11 @@ public sealed class GenerationProcessor(
             job.NextAttemptAt = clock.GetUtcNow() + backoff;
             job.ErrorCode = ex.Code;
             job.ErrorMessage = "Geçici bir hata oluştu, yeniden denenecek.";
-            await db.SaveChangesAsync(ct);
+            if (!await SaveOrKeepCostAsync(db, job, ct))
+            {
+                return;
+            }
+
             logger.LogWarning(ex, "Üretim işi geçici hata verdi, yeniden denenecek: {JobId} (deneme {Attempt}/{Max})", job.Id, job.Attempt, job.MaxAttempts);
             await NotifyAsync(job, null, ct);
             return;
@@ -864,8 +905,43 @@ public sealed class GenerationProcessor(
         job.ErrorCode = code;
         job.ErrorMessage = message.Length > 500 ? message[..500] : message; // kişisel veri içermez: yalnızca sabit/ProviderException mesajları
         job.FinishedAt = clock.GetUtcNow();
-        await db.SaveChangesAsync(ct);
+        if (!await SaveOrKeepCostAsync(db, job, ct))
+        {
+            return; // iş (oturumuyla birlikte) silinmiş: yalnızca maliyet kaydı yazıldı
+        }
+
         await NotifyAsync(job, null, ct);
+    }
+
+    /// <summary>
+    /// İş satırını (ve bekleyen maliyet kayıtlarını) kaydeder. Oturum KVKK nedeniyle silindiyse iş de silinmiştir (zincirleme): iş güncellemesi
+    /// <see cref="DbUpdateConcurrencyException"/> ile patlar ve aynı kayıttaki maliyet kaydı da kaybolurdu (ücret doğmuş olabilir). Bu durumda iş izlemeden çıkarılır,
+    /// bekleyen maliyet kayıtlarının iş bağlantısı koparılır (muhasebe kaydı kişisel veri içermez, kalır) ve yalnızca onlar yazılır.
+    /// </summary>
+    /// <returns>İş hâlâ varsa true; silinmişse false.</returns>
+    private static async Task<bool> SaveOrKeepCostAsync(AppDbContext db, GenerationJob job, CancellationToken ct)
+    {
+        if (!await JobGoneAsync(db, job.Id))
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+
+        DetachDeletedJob(db, job);
+        await db.SaveChangesAsync(CancellationToken.None);
+        return false;
+    }
+
+    private static async Task<bool> JobGoneAsync(AppDbContext db, Guid jobId) =>
+        !await db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().AnyAsync(j => j.Id == jobId, CancellationToken.None);
+
+    private static void DetachDeletedJob(AppDbContext db, GenerationJob job)
+    {
+        db.Entry(job).State = EntityState.Detached;
+        foreach (var entry in db.ChangeTracker.Entries<AiUsageLog>().Where(e => e.State == EntityState.Added))
+        {
+            entry.Entity.JobId = null;
+        }
     }
 
     private async Task NotifyAsync(GenerationJob job, Guid? imageId, CancellationToken ct)

@@ -222,11 +222,18 @@ public static class SessionEndpoints
         db.SessionPhotos.Add(photo);
         reader.Touch(session, await reader.GetSettingsAsync(user.OrganizationId, ct));
         audit.Record("Photo.Uploaded", nameof(SessionPhoto), photo.Id);
-        await using (var transaction = await db.Database.BeginTransactionAsync(ct))
+        try
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
             await DetachPhotosFromJobsAsync(db, [.. replaced.Select(p => p.Id)], ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            // Dosya depoya yazıldı ama kayıt işlenemedi (ör. oturum eşzamanlı silindi): yetim müşteri fotoğrafı bırakılmaz
+            await images.DeleteAsync(saved.File, CancellationToken.None);
+            throw;
         }
         if (replaced.Count > 0)
         {

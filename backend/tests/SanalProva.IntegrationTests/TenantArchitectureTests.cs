@@ -101,13 +101,13 @@ public sealed class TenantArchitectureTests
     private static readonly Dictionary<string, (int IgnoreFilters, int RawSql, int BulkWrite, string Reason)> Inventory = new(StringComparer.Ordinal)
     {
         // --- Arka plan işleyicileri: firmalar arası çalışmak zorundadır; her iş için kiracı bağlamı işin firmasına ayarlanır, girdiler (fotoğraf, seçim, ürün, dosya) FİLTRELİ sorgularla yüklenir
-        ["SanalProva.Infrastructure/Generation/GenerationProcessor.cs"] = (10, 2, 4, "Kuyruk (iş kimliğiyle, firma bağlamı işten ayarlanır), kilit yenileme/kurtarma ve kurtarmada atomik maliyet kaydı (SQL'de job.organization_id taşınır). Girdi yükleme filtrelidir."),
+        ["SanalProva.Infrastructure/Generation/GenerationProcessor.cs"] = (11, 2, 4, "Kuyruk (iş kimliğiyle, firma bağlamı işten ayarlanır), kilit yenileme/kurtarma ve kurtarmada atomik maliyet kaydı (SQL'de job.organization_id taşınır). Girdi yükleme filtrelidir. İş silinmiş mi denetimi (KVKK silmesiyle yarış) yalnızca iş kimliğiyle."),
         ["SanalProva.Infrastructure/Generation/CostReconciliation.cs"] = (5, 3, 0, "Süpürücü ve mutabakat servisi: firmalar arası bakım. Yalnızca platform yöneticisi uç noktasından ve süpürücüden çağrılır; kayıtlar kendi firma/şubelerini taşır."),
         ["SanalProva.Infrastructure/Generation/BudgetGuard.cs"] = (2, 0, 0, "Bütçe toplamı: sorgu açıkça organization_id ile sınırlı."),
         ["SanalProva.Infrastructure/Persistence/AppLocks.cs"] = (0, 1, 0, "sp_getapplock: veri değil kilit; kaynak adı şube/oturum kimliğidir."),
         ["SanalProva.Infrastructure/Persistence/AppDbContext.cs"] = (1, 0, 0, "Yalnızca belge yorumu (\"IgnoreQueryFilters()\" ile aşılır): kod kullanımı değil."),
         // --- Saklama / KVKK: oturum kimliğiyle silme (süpürücü firmalar arası çalışır)
-        ["SanalProva.Infrastructure/Retention/SessionRetention.cs"] = (7, 0, 3, "KVKK silmesi ve saklama süpürmesi: oturum kimliğiyle; zincirleme silme veritabanı FK'larındadır."),
+        ["SanalProva.Infrastructure/Retention/SessionRetention.cs"] = (11, 0, 3, "KVKK silmesi, saklama süpürmesi ve yetim dosya/kayıt süpürücüsü: oturum/dosya kimliğiyle (firmalar arası bakım); zincirleme silme veritabanı FK'larındadır."),
         // --- TV: cihaz belirteci kimliği; cihaz kendi şubesine/oturumuna bağlıdır
         ["SanalProva.Infrastructure/Displays/DisplayStateService.cs"] = (6, 0, 1, "TV durumu tek yazma noktası: cihaz kimliğiyle; görsel yalnızca cihazın bağlı oturumuna aitse gösterilir. Süresi dolan eşleştirme temizliği (firmasız tablo)."),
         ["SanalProva.Api/Hubs/Hubs.cs"] = (7, 0, 2, "SignalR: kimlik doğrulanmış bağlantının oturum/şube rolü açıkça sorgulanır (UserStoreRoles); TV hub'ı cihaz belirtecinden gelen cihaz kimliğini kullanır."),

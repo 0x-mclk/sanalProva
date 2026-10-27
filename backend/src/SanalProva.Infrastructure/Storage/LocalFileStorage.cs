@@ -54,6 +54,43 @@ public sealed class LocalFileStorage : IImageStorageService
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<StoredFolder>> ListSessionFoldersAsync(CancellationToken ct)
+    {
+        var result = new List<StoredFolder>();
+        if (!Directory.Exists(_root))
+        {
+            return Task.FromResult<IReadOnlyList<StoredFolder>>(result);
+        }
+
+        // {kök}/{firma}/{şube}/sessions/{oturum}
+        foreach (var organization in Directory.EnumerateDirectories(_root))
+        {
+            foreach (var store in Directory.EnumerateDirectories(organization))
+            {
+                var sessions = Path.Combine(store, "sessions");
+                if (!Directory.Exists(sessions))
+                {
+                    continue;
+                }
+
+                foreach (var folder in Directory.EnumerateDirectories(sessions))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!Guid.TryParseExact(Path.GetFileName(folder), "N", out var sessionId))
+                    {
+                        continue;
+                    }
+
+                    var last = Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Select(f => File.GetLastWriteTimeUtc(f)).DefaultIfEmpty(Directory.GetLastWriteTimeUtc(folder)).Max();
+                    var prefix = string.Join('/', Path.GetRelativePath(_root, folder).Split(Path.DirectorySeparatorChar)) + "/";
+                    result.Add(new StoredFolder(prefix, sessionId, new DateTimeOffset(last, TimeSpan.Zero)));
+                }
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<StoredFolder>>(result);
+    }
+
     public Task DeletePrefixAsync(string prefix, CancellationToken ct)
     {
         var path = ResolvePath(prefix.TrimEnd('/'));

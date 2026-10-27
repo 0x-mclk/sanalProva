@@ -16,6 +16,9 @@ public interface IImageStorageService
 
     Task DeleteAsync(string key, CancellationToken ct);
 
+    /// <summary>Depodaki oturum klasörleri (<c>{firma}/{şube}/sessions/{oturum}/</c>) ve son yazma zamanları: yetim dosya süpürücüsü için.</summary>
+    Task<IReadOnlyList<StoredFolder>> ListSessionFoldersAsync(CancellationToken ct);
+
     /// <summary>Bir önek altındaki tüm dosyaları siler (ör. oturum klasörü, KVKK saklama süresi dolunca).</summary>
     Task DeletePrefixAsync(string prefix, CancellationToken ct);
 
@@ -24,6 +27,11 @@ public interface IImageStorageService
 
     Task<bool> IsHealthyAsync(CancellationToken ct);
 }
+
+/// <param name="Prefix">Oturum klasörünün öneki (sonunda "/").</param>
+/// <param name="SessionId">Klasör adından okunan oturum kimliği.</param>
+/// <param name="LastWriteUtc">Klasördeki en yeni dosyanın yazma zamanı (boş klasörde klasörün kendisi).</param>
+public sealed record StoredFolder(string Prefix, Guid SessionId, DateTimeOffset LastWriteUtc);
 
 public sealed class StorageOptions
 {

@@ -105,6 +105,7 @@ public static class DependencyInjection
         services.AddOptions<Retention.RetentionSettings>().Bind(configuration.GetSection(Retention.RetentionSettings.Section));
         services.AddScoped<Retention.SessionPurger>();
         services.AddSingleton<Retention.RetentionSweeper>();
+        services.AddSingleton<Retention.OrphanSweeper>();
         services.AddHostedService<Retention.RetentionJob>();
 
         // Smart TV: eşleştirme, durum sürümü, çevrimiçi durumu ve bakım (boşta temizleme)
