@@ -55,7 +55,7 @@ Modüler monolit + ayrı Python servisi. Mikroservis, Redis, mesaj kuyruğu yok.
 - `backend/` — ASP.NET Core (**.NET 10**, Minimal API), EF Core + **SQL Server 2025 Express** (örnek `.\SANALPROVA`, snake_case, RCSI açık), SignalR, Identity (HttpOnly çerez + CSRF). `Domain` (bağımlılıksız) / `Infrastructure` / `Api`. Merkezi paket sürümleri `Directory.Packages.props`, `TreatWarningsAsErrors` açık.
 - `frontend/` — React 19 + TS + Vite PWA, Mantine, TanStack Query, openapi-fetch. İki giriş noktası: personel (`index.html`) ve TV (`tv.html`, Mantine'siz, küçük paket).
 - `image-worker/` — Python FastAPI + OpenCV (GPU/PyTorch yok). Renk değişimi ve SAM 2 için sözleşme ve iskelet var, motor Aşama 5'te.
-- `scripts/` — `dev-env.ps1`, `e2e-env.ps1` (izole E2E veritabanı up/down), `gen-api-client.ps1`, `gen-migration-script.ps1` (idempotent SQL), `apply-history-hardening.ps1` (dry-run varsayılan), `mssql/` (provision + sertleştirme SQL'leri), `image-worker.ps1`, `generate_icons.py`. **`db.ps1` eski PostgreSQL yöneticisidir (kullanılmıyor; M4'te MSSQL kurulum betiğiyle değiştirilecek).**
+- `scripts/` — `db.ps1` (**MSSQL**: `status` / `migrate` / `reset` / `script`; yalnızca `sanalprova_test`, `sanalprova_e2e`, `sanalprova_lab_<8hex>`; `sanalprova_dev` ve diğer örnekler kodla reddedilir; değiştirenler varsayılan kuru çalışma), `dev-env.ps1`, `e2e-env.ps1` (izole E2E veritabanı up/down), `gen-api-client.ps1`, `gen-migration-script.ps1` (idempotent SQL), `apply-history-hardening.ps1` (dry-run varsayılan), `mssql/` (provision + sertleştirme SQL'leri), `image-worker.ps1`, `generate_icons.py`. Eski PostgreSQL komutları (`init/start/stop/reseed-demo`) kaldırıldı.
 - `.local/` (eski taşınabilir PostgreSQL 18 verisi — **dokunulmaz**, yedekler ve `migrations/` çıktıları da burada), `storage/` (yerel dosya deposu) git'e girmez.
 
 Temel kararlar:
@@ -92,7 +92,8 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 Ayrıntı: [README.md](README.md). Özet (PowerShell, .NET 10 kullanıcı klasöründe kurulu — her oturumda önce `. ./scripts/dev-env.ps1`):
 
 ```powershell
-# Dev veritabanı (sanalprova_dev) M5'e kadar boş: elle çalıştırma için önce şema kurulumu gerekir (M4). Bugün doğrulama: testler + izole E2E (aşağıda).
+# Dev veritabanı (sanalprova_dev) M5'e kadar boş: elle çalıştırma için önce yeni bir geliştirme veritabanı kurulumu gerekir (README 'Veritabanı'). Bugün doğrulama: testler + izole E2E (aşağıda).
+./scripts/db.ps1 status                                  # MSSQL durumu (salt okunur)
 cd backend; dotnet run --project src/SanalProva.Api --launch-profile http   # :5080
 ./scripts/image-worker.ps1                               # :8090 (isteğe bağlı; Aşama 5)
 cd frontend; npm run dev                                 # :5173, /tv → TV girişi

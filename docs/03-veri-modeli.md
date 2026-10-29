@@ -1,6 +1,17 @@
-# 03 — PostgreSQL Veri Modeli
+# 03 — Veri Modeli
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> **Güncelleme (M4.1):** Veritabanı SQL Server 2025 Express'tir; aşağıdaki tablolar **mantıksal modeldir**, tipler PostgreSQL gösterimiyle yazılmıştır. Gerçek şema: EF Core modeli ve `Migrations/` (tek doğru kaynak). Tip karşılıkları:
+>
+> | Belgede | SQL Server'da |
+> |---|---|
+> | `uuid` | `uniqueidentifier` |
+> | `timestamptz` | `datetimeoffset` |
+> | `text` (enum) | `nvarchar(n)` + CHECK (enum'lar metin; SQL `MAX/ORDER BY` alfabetik olur) |
+> | `jsonb`, `uuid[]` | `nvarchar(max)` (JSON metni; EF dönüştürücü / owned) |
+> | kısmi indeks `WHERE …` | filtreli indeks (benzersiz indekste `NULL = NULL` sayılır: filtresiz indekste tek NULL) |
+> | `SKIP LOCKED` / advisory lock | `UPDLOCK, READPAST` + `OUTPUT` / `sp_getapplock` |
+>
+> Tenant tutarlılığı bileşik FK ile SQL Server tarafından zorlanır (`UNIQUE (id, organization_id)` + bileşik FK; ayrıntı `CLAUDE.md` M3.4). Güncel durum: `docs/DEVAM-NOTU.md`.
 
 ## 1. Genel kurallar
 

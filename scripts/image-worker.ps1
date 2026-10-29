@@ -18,7 +18,7 @@ if (-not (Test-Path $python)) {
 
 $secret = dotnet user-secrets list --project (Join-Path $root 'backend/src/SanalProva.Api') |
     Select-String '^ImageWorker:InternalKey = ' | Select-Object -First 1
-if (-not $secret) { throw "ImageWorker:InternalKey user-secrets'ta yok. './scripts/db.ps1 init' çalıştırın." }
+if (-not $secret) { throw "ImageWorker:InternalKey user-secrets'ta yok. 'dotnet user-secrets set ImageWorker:InternalKey <rastgele> --project backend/src/SanalProva.Api' ile ekleyin (README 'Veritabanı')." }
 
 $env:IMAGE_WORKER_INTERNAL_KEY = ($secret.ToString() -split ' = ', 2)[1]
 $env:IMAGE_WORKER_SEGMENTATION = 'mock'

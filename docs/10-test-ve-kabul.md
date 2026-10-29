@@ -1,6 +1,6 @@
 # 10 — MVP Kabul Kriterleri ve Test Planı
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> **Güncelleme (M4.1):** Veritabanı SQL Server 2025 Express'tir. Bu belgenin ilgili yerleri güncellendi; kalan eski ifadeler tarihseldir. Güncel durum: `CLAUDE.md`, `docs/DEVAM-NOTU.md`.
 
 ## 1. MVP kapsamı
 
@@ -52,7 +52,7 @@ MVP = Aşama 1–5 tamamlanmış, tek firma / tek pilot mağaza, 1–2 TV.
 | Seviye | Araç | Kapsam |
 |---|---|---|
 | Birim (.NET) | xUnit, FluentAssertions, NSubstitute | Kategori seçim kuralları, strateji seçimi, PromptBuilder, imzalı URL, kota, eşleştirme kodu üretimi, revizyon karar akışı |
-| Entegrasyon (.NET) | WebApplicationFactory + **Testcontainers PostgreSQL** | API sözleşmeleri, yetki matrisi, kiracı izolasyonu, kuyruk (lease, retry, SKIP LOCKED eşzamanlılığı), retention, SignalR hub'ları (test istemcisi) |
+| Entegrasyon (.NET) | WebApplicationFactory + **gerçek SQL Server `sanalprova_test`** (izin listeli, iki kat koruma) | API sözleşmeleri, yetki matrisi, kiracı izolasyonu, kuyruk (lease, retry, `READPAST` eşzamanlılığı), retention, SignalR hub'ları (test istemcisi) |
 | Sağlayıcı sözleşme | Kaydedilmiş HTTP yanıtları (WireMock.Net) | FASHN/Gemini istek biçimi, hata eşleme, polling — **ücretli çağrı yok** |
 | Birim (frontend) | Vitest + React Testing Library + MSW | Kombin seçimi, hata eşleme, form doğrulama, SignalR olay → önbellek güncelleme |
 | Python | pytest | Renk değişimi, nakış maskesi, kalite metrikleri (altın görseller / golden images), API |

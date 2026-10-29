@@ -1,6 +1,6 @@
 # Sanal Prova
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> Veritabanı **SQL Server 2025 Express**'tir (M4.1'de bu belge güncellendi). Güncel durum ve riskler: `CLAUDE.md`, `docs/DEVAM-NOTU.md`.
 
 Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şalvar takımı, kaftan, kına ve özel gün kıyafetleri).
 
@@ -12,10 +12,12 @@ Mimari ve planlama: [docs/](docs/README.md) · Tasarım referansı: [docs/design
 
 | Klasör | Teknoloji | Port (yerel) |
 |---|---|---|
-| `backend/` | ASP.NET Core (.NET 10), EF Core + PostgreSQL, SignalR | 5080 |
+| `backend/` | ASP.NET Core (.NET 10), EF Core + SQL Server, SignalR | 5080 |
 | `frontend/` | React 19 + TypeScript + Vite PWA, Mantine | 5173 (personel `/`, TV `/tv`) |
 | `image-worker/` | Python FastAPI + OpenCV (SAM 2 Aşama 5'te) | 8090 |
-| `.local/` | Taşınabilir PostgreSQL 18 + veri klasörü (git'e girmez) | 5433 |
+| SQL Server 2025 Express | Örnek adı `SANALPROVA` (Windows hizmeti; repo içinde değil) | TCP 14330 (uygulama), paylaşılan bellek `.\SANALPROVA` (yönetim) |
+
+> `.local/` altındaki `pgsql`, `pgdata`, `postgres*` eski PostgreSQL döneminden kalmadır; `backups/` yedekleri ve kurulum kayıtlarını içerir. Hiçbiri kullanılmaz, silinmez veya değiştirilmez (git'e girmez).
 
 ## Gereksinimler
 
@@ -26,39 +28,82 @@ Mimari ve planlama: [docs/](docs/README.md) · Tasarım referansı: [docs/design
   (Bu, yalnızca o oturumun PATH'ini değiştirir. Sistemdeki .NET 8 etkilenmez.)
 - **Node.js 22+**
 - **Python 3.10+**
-- **PostgreSQL** — `.local/pgsql` altında taşınabilir sürüm. Yeni bir makinede [EnterpriseDB Windows binaries](https://www.enterprisedb.com/download-postgresql-binaries) (zip) `.local/pgsql` klasörüne açılır.
+- **SQL Server 2025 Express** — **adlandırılmış örnek `SANALPROVA`**, Windows kimlik doğrulaması + karma mod (uygulama SQL girişleri için), TCP etkin ve sabit port `14330`. `sqlcmd` (ODBC 17+) PATH'te olmalı. `sa` hesabı ve gereksiz girişler `provision.sql` ile kapatılır. Diğer örnekler (ör. `SQLEXPRESS`) bu projeye ait değildir; betikler ve testler onlara bağlanmayı **reddeder**.
+- Repoda sabitlenmiş araçlar: `dotnet tool restore` (`dotnet-ef`).
 
-## İlk kurulum (bir kez)
+## Veritabanı
+
+Üç ayrı veritabanı rolü vardır; hepsi aynı örnekte, aynı harmanlamayla (`Latin1_General_100_CI_AS_SC`, RCSI açık, uyumluluk 160):
+
+| Veritabanı | Amaç | Kim kullanır |
+|---|---|---|
+| `sanalprova_dev` | Elle çalıştırılan geliştirme API'si | `ConnectionStrings:Main` (`sanalprova_app`), `ConnectionStrings:Migrator` |
+| `sanalprova_test` | Entegrasyon testleri (her çalıştırmada verisi sıfırlanır) | `ConnectionStrings:Test` / `:TestMigrator` |
+| `sanalprova_e2e`, `sanalprova_lab_<8hex>` | Geçici: izole E2E ve migration laboratuvarı (oluşturulur ve silinir) | `scripts/e2e-env.ps1`, migration testleri |
+
+> **Bu makinede `sanalprova_dev` bilerek boştur** (şema yok) ve M5'e kadar boş kalacaktır; `db.ps1` ve testler ona dokunmaz. Elle çalıştırılabilir bir geliştirme veritabanı M4.3/M5'te ayrıca kurulacaktır. Doğrulama bugün testler + izole E2E ile yapılır.
+
+### Yeni makinede ilk kurulum (bir kez, yönetici yetkisiyle)
+
+1. SQL Server 2025 Express'i `SANALPROVA` adıyla kurun (karma mod, TCP 14330).
+2. İki rastgele parola üretin ve **yalnızca o oturumun** ortam değişkenlerine koyun (kaynağa, günlüğe, belgeye yazmayın):
+   ```powershell
+   $env:SP_MIGRATOR_PW = '<rastgele-parola-1>'; $env:SP_APP_PW = '<rastgele-parola-2>'
+   sqlcmd -S .\SANALPROVA -E -C -I -b -i scripts/mssql/provision.sql
+   ```
+   Betik idempotenttir; `sanalprova_dev` ve `sanalprova_test` veritabanlarını, en az yetkili `sanalprova_migrator` (DDL + okuma/yazma) ve `sanalprova_app` (yalnızca okuma/yazma) girişlerini oluşturur ve sunucuyu sıkılaştırır (`sa` kapatılır). **Mevcut makinede yeniden çalıştırmayın**: giriş parolalarını sıfırlar.
+3. Gizli değerleri `dotnet user-secrets` ile kaydedin (API projesi; değerler **asla** repoya girmez). Bağlantı dizesi biçimi (parolalar yer tutucudur):
+   ```powershell
+   cd backend
+   dotnet user-secrets set "ConnectionStrings:Main"        "Server=tcp:127.0.0.1,14330;Database=sanalprova_dev;User ID=sanalprova_app;Password=<parola-2>;Encrypt=True;TrustServerCertificate=True;Application Name=SanalProva.Api" --project src/SanalProva.Api
+   dotnet user-secrets set "ConnectionStrings:Test"        "Server=tcp:127.0.0.1,14330;Database=sanalprova_test;User ID=sanalprova_app;Password=<parola-2>;Encrypt=True;TrustServerCertificate=True;Application Name=SanalProva.Tests" --project src/SanalProva.Api
+   dotnet user-secrets set "ConnectionStrings:TestMigrator" "Server=tcp:127.0.0.1,14330;Database=sanalprova_test;User ID=sanalprova_migrator;Password=<parola-1>;Encrypt=True;TrustServerCertificate=True;Application Name=SanalProva.Tests" --project src/SanalProva.Api
+   dotnet user-secrets set "Storage:SigningKey"      "<en az 32 karakter rastgele>" --project src/SanalProva.Api
+   dotnet user-secrets set "ImageWorker:InternalKey" "<rastgele>" --project src/SanalProva.Api
+   dotnet user-secrets set "Seed:DevPassword"        "<demo hesap parolası>" --project src/SanalProva.Api
+   cd ..
+   ```
+4. Şemayı **yeni makinedeki** geliştirme veritabanına migrator hesabıyla uygulayın (bu makinede M5'e kadar uygulanmaz):
+   ```powershell
+   cd backend; dotnet tool restore
+   dotnet ef database update -p src/SanalProva.Infrastructure -s src/SanalProva.Api --connection "<ConnectionStrings:Migrator değeri>"
+   cd ..
+   ```
+5. Migration sonrası sertleştirme (migration geçmişi ve maliyet mutabakatı tabloları için `sanalprova_app` DENY'leri; önce kuru çalışma):
+   ```powershell
+   ./scripts/apply-history-hardening.ps1 -Database sanalprova_test -Hardening All          # kuru çalışma
+   ./scripts/apply-history-hardening.ps1 -Database sanalprova_test -Hardening All -Apply   # uygular (onay sorar)
+   ```
+6. Frontend ve image-worker bağımlılıkları:
+   ```powershell
+   cd frontend; npm ci; cd ..
+   cd image-worker; python -m venv .venv; .venv\Scripts\python -m pip install -e ".[dev]"; cd ..
+   ```
+
+### Günlük veritabanı komutları (`scripts/db.ps1`)
+
+`db.ps1` Windows kimliğiyle `.\SANALPROVA` örneğine bağlanır; parola gerektirmez ve hiçbir gizli değer yazdırmaz. **Yalnızca `sanalprova_test`, `sanalprova_e2e` ve `sanalprova_lab_<8hex>`** hedeflenebilir; `sanalprova_dev`, `SQLEXPRESS` ve diğer her şey kodla reddedilir. Değiştiren komutlar varsayılan olarak **kuru çalışmadır** (`-Apply` gerekir).
 
 ```powershell
-. ./scripts/dev-env.ps1
-
-# 1) Yerel geliştirme veritabanı: rastgele parolalar üretir ve bağlantı dizelerini,
-#    imza anahtarını, iç servis anahtarını, demo parolasını dotnet user-secrets'a yazar.
-./scripts/db.ps1 init
-
-# 2) Migration (yalnızca sanalprova_dev veritabanına uygulanır)
-cd backend
-dotnet tool restore
-dotnet ef database update -p src/SanalProva.Infrastructure -s src/SanalProva.Api
-cd ..
-
-# 3) Frontend bağımlılıkları
-cd frontend; npm ci; cd ..
-
-# 4) Görsel servis sanal ortamı (GPU/PyTorch kurulmaz)
-cd image-worker
-python -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"
-cd ..
+./scripts/db.ps1 status                                    # salt okunur: örnek, veritabanları, tablo/migration sayıları (dev'e bağlanmaz)
+./scripts/db.ps1 migrate -Database sanalprova_test         # kuru çalışma: bekleyen migration'ları listeler
+./scripts/db.ps1 migrate -Database sanalprova_test -Apply  # migration uygular (veritabanı önceden var olmalı; yaratmaz)
+./scripts/db.ps1 reset   -Database sanalprova_test         # kuru çalışma: silinecek satır sayısı
+./scripts/db.ps1 reset   -Database sanalprova_test -Apply  # tüm VERİYİ siler, şema + migration geçmişi kalır (onay sorar)
+./scripts/db.ps1 script                                    # idempotent migration betiği (.local/migrations/), veritabanına bağlanmaz
 ```
 
-## Çalıştırma (üç ayrı terminal)
+Eski `init`, `start`, `stop`, `reseed-demo` komutları (PostgreSQL) kaldırılmıştır ve açıklayıcı bir hata verir. Sunucuyu Windows hizmeti (`MSSQL$SANALPROVA`) yönetir.
+
+**Migration politikası:** yalnızca ileri yönlü (`Down` maliyet/mutabakat verisini siler); geri dönüş yedekten yapılır. Üretim/dağıtım için `./scripts/db.ps1 script` ile idempotent betik üretilir ve migrator hesabıyla `sqlcmd -I` ile uygulanır.
+
+## Çalıştırma
+
+API şu an `sanalprova_dev` şemasını bekler; bu makinede o veritabanı M5'e kadar boş olduğundan **elle çalıştırma yeni bir geliştirme veritabanı kurulana kadar kullanılamaz** (bkz. "Yeni makinede ilk kurulum"). Kurulu bir makinede üç terminal:
 
 ```powershell
-# Terminal 1 — veritabanı + API
+# Terminal 1 — API
 . ./scripts/dev-env.ps1
-./scripts/db.ps1 start
 cd backend; dotnet run --project src/SanalProva.Api --launch-profile http
 
 # Terminal 2 — görsel servis (iç anahtarı user-secrets'tan okur)
@@ -72,16 +117,7 @@ cd frontend; npm run dev
 - TV ekranı: <http://127.0.0.1:5173/tv>
 - Sağlık: <http://127.0.0.1:5080/health/ready> · OpenAPI: <http://127.0.0.1:5080/openapi/v1.json>
 
-İlk çalıştırmada (Development) demo veriler yüklenir: 1 firma, 1 şube, 7 kategori ve `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@lal.local` (Owner) hesapları. Demo parola:
-
-```powershell
-dotnet user-secrets list --project backend/src/SanalProva.Api | Select-String Seed:DevPassword
-```
-
-Demo katalog (16 ürün, "Örnek" etiketli stilize görseller) API ilk açıldığında yüklenir. Sıfırlamak için: `./scripts/db.ps1 reseed-demo` ve API'yi yeniden başlatın.
-
-Veritabanını durdurmak için: `./scripts/db.ps1 stop`
-
+Development ortamında ilk çalıştırmada demo veriler yüklenir (`Seed:Enabled`): 1 firma, 1 şube, 7 kategori, 16 ürünlük "Örnek" etiketli demo katalog ve `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@lal.local` (Owner) hesapları; parola `Seed:DevPassword` değeridir. 
 ## Ekranlar (Aşama 2)
 
 `/giris` · `/` ana sayfa · `/prova/yeni` (müşteri onayı) · `/prova/:id/fotograf` · `/tur` · `/takim` · `/kombin` · `/uretim/:jobId` · `/sonuc` · `/revizyon` (arayüz) · `/karsilastir` · `/gecmis` · `/tv-cihazlar` (yer tutucu) · `/katalog`, `/katalog/urun/:id`, `/katalog/kategoriler` (Manager+). Ekran görüntüleri: [docs/screenshots/asama-2/](docs/screenshots/asama-2/).
@@ -100,13 +136,25 @@ Kayıtlı doküman güncel değilse entegrasyon testi (`OpenApiContractTests`) k
 
 ```powershell
 . ./scripts/dev-env.ps1
-cd backend; dotnet test --solution SanalProva.slnx           # birim + entegrasyon (sanalprova_test DB)
+cd backend; dotnet test --solution SanalProva.slnx           # birim + entegrasyon (sanalprova_test)
 cd ../frontend; npm run typecheck; npm run lint; npm test; npm run build
 cd ../image-worker; .venv\Scripts\python -m pytest
 ```
 
-- Entegrasyon testleri yalnızca `sanalprova_test` veritabanında çalışır ve başlangıçta onu temizler. Bağlantı yoksa veritabanı testleri atlanır.
+- **Entegrasyon testleri yalnızca `sanalprova_test`'te çalışır** ve başlangıçta onun verisini sıfırlar. `ApiFactory` iki kez korunur: bağlantı dizesinde veritabanı adı `sanalprova_test` değilse veya örnek `SQLEXPRESS` ise bağlanmadan reddeder; bağlandıktan sonra sunucunun bildirdiği veritabanı/örnek adını yeniden doğrular. Bağlantı yapılandırılmamışsa veritabanı testleri atlanır. Testlerde AI anahtarları etkisizdir (`Generation:Budget:AllowPaidCalls=false`); gerçek AI çağrısı yapılmaz.
+- **Migration laboratuvarı testleri** (`MigrationValidationTests` vb.) her senaryoda kendi geçici `sanalprova_lab_<8hex>` veritabanını kurar ve siler; veritabanı oluşturmak sunucu yetkisi ister, bu yüzden yalnızca `SANALPROVA_LAB_ADMIN` verilirse çalışır (yoksa atlanır):
+  ```powershell
+  $env:SANALPROVA_LAB_ADMIN = 'Server=.\SANALPROVA;Integrated Security=True;TrustServerCertificate=True;Encrypt=False'
+  ```
 - `ImageWorkerContractTests` C#–Python sözleşmesini gerçek servisle sınar; image-worker çalışmıyorsa atlanır.
+- **Tarayıcı E2E (Playwright)** izole çalışır: atılabilir `sanalprova_e2e` veritabanı + geçici depo, mock sağlayıcı. `playwright.config.ts` ortam hazır değilse veya veritabanı adı `sanalprova_e2e` değilse çalışmaz; çalışan sunucuyu yeniden kullanmaz.
+  ```powershell
+  . ./scripts/dev-env.ps1
+  . ./scripts/e2e-env.ps1 up          # DB + migration + geçici depo + rastgele parola (yalnızca bu oturumda)
+  cd frontend; npm run test:e2e; cd ..
+  . ./scripts/e2e-env.ps1 down        # DB ve geçici depoyu siler
+  ```
+- Sözleşme: backend API'si değişince `./scripts/gen-api-client.ps1`; `OpenApiContractTests` kayma varsa kırılır.
 
 ## Yapılandırma ve gizli değerler
 
@@ -114,7 +162,7 @@ Gizli değerler **asla** kaynak koda veya `appsettings*.json` dosyasına yazılm
 
 | Anahtar | Ortam değişkeni | Açıklama |
 |---|---|---|
-| `ConnectionStrings:Main` | `ConnectionStrings__Main` | PostgreSQL bağlantısı |
+| `ConnectionStrings:Main` | `ConnectionStrings__Main` | SQL Server bağlantısı (`sanalprova_app`, en az yetkili; biçim: "Veritabanı" bölümü). Migrator/Test bağlantıları yalnızca user-secrets'ta |
 | `Storage:SigningKey` | `Storage__SigningKey` | İmzalı dosya URL'i HMAC anahtarı (≥32 karakter) |
 | `ImageWorker:InternalKey` | `ImageWorker__InternalKey` | Backend ↔ image-worker paylaşılan anahtar |
 | `Ai:Fashn:ApiKey` | `Ai__Fashn__ApiKey` | Aşama 4 |

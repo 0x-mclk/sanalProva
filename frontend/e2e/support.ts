@@ -30,7 +30,7 @@ export function devPassword(): string {
   if (process.env.E2E_PASSWORD) return process.env.E2E_PASSWORD;
   const output = execFileSync('dotnet', ['user-secrets', 'list', '--project', '../backend/src/SanalProva.Api'], { encoding: 'utf8' });
   const match = /^Seed:DevPassword\s*=\s*(.+)$/m.exec(output);
-  if (!match) throw new Error('Seed:DevPassword bulunamadı. E2E_PASSWORD ortam değişkenini verin veya ./scripts/db.ps1 init çalıştırın.');
+  if (!match) throw new Error('Seed:DevPassword bulunamadı. E2E_PASSWORD ortam değişkenini verin (izole E2E için `. ./scripts/e2e-env.ps1 up` üretir).');
   return match[1]!.trim();
 }
 

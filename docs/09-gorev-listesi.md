@@ -1,6 +1,6 @@
 # 09 — Geliştirme Aşamaları ve Görev Listesi
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> **Güncelleme (M4.1):** Veritabanı SQL Server 2025 Express'tir. Bu belgenin ilgili yerleri güncellendi; kalan eski ifadeler tarihseldir. Güncel durum: `CLAUDE.md`, `docs/DEVAM-NOTU.md`.
 
 Her aşama küçük, test edilebilir görevlere bölünmüştür. **Her aşama sonunda:** testler çalıştırılır, kısa rapor (yapılan, test sonuçları, açık sorunlar) hazırlanır, onay alınmadan sonraki aşamaya geçilmez.
 
@@ -17,10 +17,10 @@ Her aşama küçük, test edilebilir görevlere bölünmüştür. **Her aşama s
 | # | Görev | Çıktı / doğrulama |
 |---|---|---|
 | 1.1 | Git deposu, `.gitignore`, `.editorconfig`, kök README | `git status` temiz |
-| 1.2 | `deploy/docker-compose.yml`: PostgreSQL (+ boş image-worker) | `docker compose up` → DB erişilebilir |
+| 1.2 | Yerel SQL Server 2025 Express (`SANALPROVA`) + `scripts/db.ps1`; Docker Compose M4.2'de | DB erişilebilir (`db.ps1 status`) |
 | 1.3 | Backend çözümü: `Api`, `Domain`, `Infrastructure`, test projeleri | `dotnet build` |
 | 1.4 | Serilog, ProblemDetails, sağlık uç noktaları, OpenAPI | `/health/ready` 200 |
-| 1.5 | EF Core + Npgsql, `AppDbContext`, snake_case, ilk migration (organizations, stores, users) | Migration uygulanır |
+| 1.5 | EF Core + SQL Server, `AppDbContext`, snake_case, ilk migration (organizations, stores, users) | Migration uygulanır |
 | 1.6 | Identity + cookie auth + roller, seed: demo firma, mağaza, 3 kullanıcı | Giriş entegrasyon testi |
 | 1.7 | `ITenantContext` + global query filter + izolasyon testi | İki firma verisi birbirini görmüyor (test) |
 | 1.8 | Frontend: Vite + React + TS, Mantine, tema token'ları, Router, TanStack Query, i18n | `npm run build` |
@@ -31,7 +31,7 @@ Her aşama küçük, test edilebilir görevlere bölünmüştür. **Her aşama s
 | 1.13 | CI (GitHub Actions veya eşdeğeri): build + test + lint | Yeşil pipeline |
 | 1.14 | `IImageStorageService` + `LocalFileStorage` + imzalı URL uç noktası | Birim + entegrasyon testi |
 
-**Çıkış kriteri:** Personel giriş yapıp ana sayfayı görür; backend–frontend–PostgreSQL bağlantısı çalışır; CI yeşil.
+**Çıkış kriteri:** Personel giriş yapıp ana sayfayı görür; backend–frontend–SQL Server bağlantısı çalışır; CI yeşil.
 
 ---
 

@@ -1,6 +1,6 @@
 # Sanal Prova — Aşama 0: Analiz ve Planlama
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> **Güncelleme (M4.1):** Veritabanı SQL Server 2025 Express'tir. Bu belgenin ilgili yerleri güncellendi; kalan eski ifadeler tarihseldir. Güncel durum: `CLAUDE.md`, `docs/DEVAM-NOTU.md`.
 
 > Durum: **Taslak — onay bekliyor** · Tarih: 2026-10-20
 
@@ -12,7 +12,7 @@ Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıkt
 |---|---|---|
 | 01 | [Gereksinim analizi](01-gereksinim-analizi.md) | Fonksiyonel / fonksiyonel olmayan gereksinimler, kapsam dışı, **eksik ve çelişkili kararlar** |
 | 02 | [Sistem mimarisi ve klasör yapısı](02-sistem-mimarisi.md) | Bileşenler, iş akışı, iş kuyruğu, depolama, klasör yapısı |
-| 03 | [Veri modeli](03-veri-modeli.md) | PostgreSQL ER modeli, tablolar, ilişkiler, indeksler |
+| 03 | [Veri modeli](03-veri-modeli.md) | Mantıksal ER modeli (SQL Server tip karşılıkları), tablolar, ilişkiler, indeksler |
 | 04 | [Backend API tasarımı](04-api-tasarimi.md) | REST uç noktaları, sözleşmeler, hata formatı, yetkiler |
 | 05 | [Frontend ekranları ve akışlar](05-frontend-ekranlar.md) | 15 ekran, kullanıcı akışları, PWA, tasarım sistemi |
 | 06 | [TV / SignalR mimarisi](06-tv-signalr.md) | Eşleştirme, hub'lar, gruplar, yeniden bağlanma, izolasyon |
@@ -26,7 +26,7 @@ Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıkt
 ## Özet: temel mimari kararlar
 
 1. **Modüler monolit.** Tek ASP.NET Core API + tek ayrı Python görsel işleme servisi. Mikroservis yok.
-2. **İş kuyruğu PostgreSQL'de.** AI işleri `generation_jobs` tablosunda tutulur, `BackgroundService` worker'ı `FOR UPDATE SKIP LOCKED` ile alır. Redis / Hangfire / RabbitMQ ilk sürümde yok.
+2. **İş kuyruğu SQL Server'da.** AI işleri `generation_jobs` tablosunda tutulur, `BackgroundService` worker'ı `UPDATE … OUTPUT` + `UPDLOCK, READPAST` ile alır. Redis / Hangfire / RabbitMQ ilk sürümde yok.
 3. **Sağlayıcıdan bağımsız iş kuralları.** Hangi AI modelinin kullanılacağına `GenerationStrategy` karar verir, yapılandırmadan okunur. Frontend sadece "hazır takım / kombin / revizyon" bilir.
 4. **Prompt'lar sunucuda, yapılandırılmış veriden üretilir.** Kullanıcı hiçbir zaman prompt yazmaz; şablonlar sürümlüdür.
 5. **Her çıktı bir sürüm.** Revizyonlar `generated_images.parent_image_id` ile ağaç oluşturur; hiçbir sonuç üzerine yazılmaz.

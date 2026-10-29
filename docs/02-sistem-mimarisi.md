@@ -1,6 +1,6 @@
 # 02 — Sistem Mimarisi ve Klasör Yapısı
 
-> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+> **Güncelleme (M4.1):** Veritabanı SQL Server 2025 Express'tir. Bu belgenin ilgili yerleri güncellendi; kalan eski ifadeler tarihseldir. Güncel durum: `CLAUDE.md`, `docs/DEVAM-NOTU.md`.
 
 ## 1. Mimari yaklaşım: modüler monolit
 
@@ -8,7 +8,7 @@ Ekip küçük, yük düşük (~200 üretim/gün), asıl karmaşıklık AI entegr
 
 - **Tek ASP.NET Core API** (REST + SignalR + arka plan worker aynı süreçte, ayrı ölçeklenebilir).
 - **Tek Python görsel işleme servisi** (OpenCV, ileride SAM 2). Ayrı çünkü dil/kütüphane ekosistemi farklı ve ileride GPU makinesine taşınabilmeli.
-- **PostgreSQL** hem iş verisi hem iş kuyruğu.
+- **SQL Server 2025 Express** (örnek `SANALPROVA`) hem iş verisi hem iş kuyruğu.
 - Mikroservis, mesaj kuyruğu, Redis, Kubernetes **yok**. Gerçek ihtiyaç doğarsa eklenir; iç sınırlar buna hazırdır.
 
 ## 2. Bileşen diyagramı
@@ -40,7 +40,7 @@ Ekip küçük, yük düşük (~200 üretim/gün), asıl karmaşıklık AI entegr
  └──────┼────────────┼──────────────────────────────────────────┘
         │            │                 │ HTTP (iç ağ)      │ HTTPS
  ┌──────▼─────┐ ┌────▼──────┐   ┌──────▼───────────┐ ┌─────▼─────────────┐
- │ Yerel disk │ │PostgreSQL │   │ image-worker     │ │ FASHN API         │
+ │ Yerel disk │ │SQL Server │   │ image-worker     │ │ FASHN API         │
  │ → S3 uyumlu│ │           │   │ Python FastAPI   │ │ Google Gemini API │
  └────────────┘ └───────────┘   │ OpenCV (+SAM 2)  │ │ (Bria - ops.)     │
                                 └──────────────────┘ └───────────────────┘
@@ -51,7 +51,7 @@ Ekip küçük, yük düşük (~200 üretim/gün), asıl karmaşıklık AI entegr
 | Katman | Seçim | Gerekçe |
 |---|---|---|
 | Backend | .NET 10 (LTS), ASP.NET Core Minimal API + endpoint grupları | LTS, sade, OpenAPI yerleşik |
-| ORM | EF Core + Npgsql | İstendi; migration yönetimi |
+| ORM | EF Core + SQL Server sağlayıcısı | İstendi; migration yönetimi (yalnızca ileri yönlü) |
 | Kimlik | ASP.NET Core Identity, **HttpOnly cookie** | PWA aynı origin'den servis edilir; JWT'yi localStorage'da tutmaktan daha güvenli |
 | Gerçek zamanlı | SignalR | İstendi; otomatik yeniden bağlanma |
 | Doğrulama | FluentValidation | Okunabilir kurallar |
@@ -65,7 +65,7 @@ Ekip küçük, yük düşük (~200 üretim/gün), asıl karmaşıklık AI entegr
 | API istemcisi | OpenAPI'den otomatik üretim (orval) | Frontend–backend sözleşme uyumu |
 | PWA | vite-plugin-pwa (Workbox) | |
 | Görsel servis | Python 3.12, FastAPI, OpenCV (headless), NumPy | GPU bağımlılığı **yok**; SAM 2 opsiyonel ve ayrı profil |
-| Geliştirme ortamı | Docker Compose (PostgreSQL + image-worker) | API ve web yerelde `dotnet run` / `vite` ile |
+| Geliştirme ortamı | Yerel SQL Server 2025 Express (`.\SANALPROVA`) + `dotnet run` / `vite`; Docker Compose (api + image-worker + SQL Server) M4.2'de | Betikler: `scripts/db.ps1`, `scripts/e2e-env.ps1` |
 
 > Aşama 1'de tüm paket sürümleri o günkü kararlı sürümlere sabitlenecek.
 
@@ -99,7 +99,7 @@ TryOn servisi: oturum açık mı? onay var mı? fotoğraf var mı? ürünler akt
   │ generation_jobs INSERT (status=Queued)  → 202 Accepted {jobId}
   ▼
 GenerationWorker (BackgroundService, N paralel slot)
-  │ SELECT ... FOR UPDATE SKIP LOCKED  → status=Running, attempt++
+  │ UPDATE ... OUTPUT (UPDLOCK, READPAST) → status=Running, attempt++
   │ 1. GenerationStrategy: job tipi + yapılandırma → hangi provider/model
   │ 2. ImagePreprocessor: EXIF sil, yönü düzelt, boyutlandır, JPEG/PNG
   │ 3. PromptBuilder: ürün metadata'sı → sürümlü şablon → prompt
@@ -162,7 +162,7 @@ sanalprova/
 │   │       └── ImageWorker/           # Python servis istemcisi (IImageSegmentationService, IRecolorService)
 │   └── tests/
 │       ├── SanalProva.UnitTests/
-│       └── SanalProva.IntegrationTests/   # WebApplicationFactory + Testcontainers PostgreSQL
+│       └── SanalProva.IntegrationTests/   # WebApplicationFactory + gerçek SQL Server (yalnızca sanalprova_test, iki kat korumalı)
 ├── frontend/
 │   ├── package.json
 │   ├── vite.config.ts
@@ -201,7 +201,7 @@ sanalprova/
 │   │   └── fixtures/                  # Test görselleri (müşteri fotoğrafı DEĞİL)
 │   └── Dockerfile
 ├── deploy/
-│   ├── docker-compose.yml             # postgres, image-worker (geliştirme)
+│   ├── docker-compose.yml             # M4.2: sqlserver, api, image-worker
 │   └── docker-compose.prod.yml        # Aşama 6
 ├── .editorconfig
 ├── .gitignore                         # storage/, .env, *.user
@@ -229,6 +229,6 @@ sanalprova/
 
 ## 9. Dağıtım (hedef — Aşama 6)
 
-- Tek Linux VM (Türkiye'de barındırma tercih): Docker Compose ile `api`, `image-worker`, `postgres`, reverse proxy (Caddy/Nginx, otomatik TLS).
+- Tek Linux VM (Türkiye'de barındırma tercih): Docker Compose ile `api`, `image-worker`, `sqlserver`, reverse proxy (Caddy/Nginx, otomatik TLS).
 - Frontend statik dosyaları API tarafından veya reverse proxy'den aynı origin'de servis edilir (cookie + SignalR için basitlik).
-- Yedekleme: PostgreSQL günlük yedek; müşteri görselleri **yedeklenmez** (kısa saklama, KVKK).
+- Yedekleme: SQL Server günlük tam + fark yedeği (geri yükleme provası zorunlu; silinen müşteri verisinin yedekten dönmemesi için silme defteri — bkz. `docs/DEVAM-NOTU.md` A-1/A-2); müşteri görselleri **yedeklenmez** (kısa saklama, KVKK).

@@ -1,6 +1,6 @@
-﻿# Devam notu (son güncelleme: M3.10 sonu — M3 tamamlandı)
+﻿# Devam notu (son güncelleme: M4.1 sonu — M3 tamamlandı, M4.2 onay bekliyor)
 
-Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **M4 için kullanıcı onayı beklenir.**
+Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **M4.2 için kullanıcı onayı beklenir.**
 
 ## Tamamlanan (commit'li)
 
@@ -19,7 +19,8 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 | M3.7 | Idempotency doğrulaması (replay `resultImageId`, anahtar yeniden kullanımı 422) | `35d2979` |
 | M3.8 | Frontend/backend sözleşmesi; `/retry` için isteğe bağlı `Idempotency-Key`; eksik Türkçe hata eşlemeleri | `fcd3a15` |
 | M3.9 | Playwright E2E (izole MSSQL), `useDraftItems.flush` yarışı düzeltmesi | `5113ebb` |
-| M3.10 | PostgreSQL kalıntı taraması, belge güncellemeleri, risk sınıflandırması, son regresyon | bu commit (`git log` ile bakın) |
+| M3.10 | PostgreSQL kalıntı taraması, belge güncellemeleri, risk sınıflandırması, son regresyon | `d7fc9eb` |
+| M4.1 | `db.ps1` MSSQL'e yeniden yazıldı (status/migrate/reset/script, izin listeli hedefler); README ve docs 02/03/09/10/README güncellendi | bu commit (`git log` ile bakın) |
 
 ## Ortamın durumu (önemli)
 
@@ -35,8 +36,8 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 
 - **Çalışan PostgreSQL kodu yok:** `Npgsql` paketi, `FOR UPDATE SKIP LOCKED`, `pg_advisory`, `ILIKE`, `jsonb`, 5433 bağlantısı kaynak/test/frontend kodunda bulunmuyor (`Directory.Packages.props` yalnızca `Microsoft.EntityFrameworkCore.SqlServer`).
 - **Kalan yalnızca açıklayıcı/kozmetik:** `SessionEndpoints.cs` ve `GenerationProcessor.cs` yorumları (PostgreSQL ile karşılaştırma, bilinçli), `DatabaseIntegrityTests`/`MigrationLab` yorumları, `PersistenceTests` test adı (`..._jsonb_ayarlar_...`; sütun artık `nvarchar` JSON), `DevStatusPage.tsx` açıklama yorumu ("PostgreSQL"), `playwright.config.ts` güvenlik yorumu.
-- **Eski araç:** `scripts/db.ps1` (taşınabilir PostgreSQL yöneticisi, `reseed-demo` psql DELETE'leri) hâlâ duruyor ama **kullanılmıyor**; silinmedi (veriye/yedeğe dokunmama kuralı). M4'te MSSQL kurulum betiğiyle değiştirilecek.
-- **Eski belgeler (M4'te yeniden yazılacak, bugün yalnızca "tarihsel" uyarısı eklendi):** `README.md` (kurulum, 5433, `db.ps1`, `ConnectionStrings:Main` açıklaması), `docs/02` (mimari, Docker/Testcontainers/yedekleme), `docs/03` (başlık "PostgreSQL Veri Modeli"), `docs/09`, `docs/10`, `docs/README.md`. `CLAUDE.md` ve `docs/12` güncellendi.
+- **Eski araç (M4.1'de çözüldü):** `scripts/db.ps1` MSSQL yöneticisi olarak yeniden yazıldı; PostgreSQL komutları (`init/start/stop/reseed-demo`) kaldırıldı. `.local/pgsql|pgdata|postgres*` ve `.local/backups` dokunulmadan duruyor.
+- **Belgeler (M4.1'de güncellendi):** `README.md` (MSSQL kurulum, veritabanı rolleri, `db.ps1`, test/E2E, gizli anahtarlar), `docs/02`, `docs/03` (tip karşılık tablosu), `docs/09`, `docs/10`, `docs/README.md`, `CLAUDE.md`, `docs/12`. Kalan eski ifadeler yalnızca `docs/03` gövdesindeki PostgreSQL tip gösterimi (üstteki tablo karşılıkları verir) ve `docs/01`/`docs/07`/`docs/08` gibi bağlam belgelerinde tarihsel anlatımdır.
 
 ## Açık riskler (üç grup)
 
@@ -50,7 +51,7 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 7. Bütçe/rezervasyon: aşağıdaki "R5 öncesi" iki risk (iptal edilmiş rezervasyon temizliği, platform geneli limit) gerçek para harcanmadan önce kapatılmalı.
 
 ### B. M4 / M5 kapsamında çözülecek
-- **M4 (altyapı ve belgeler, onay gerekir):** kapsamlı MSSQL kurulum/geliştirme ortamı betiği ve belgeleri (README, docs/02, 03, 09, 10, `db.ps1` değişimi), Docker (api + image-worker + SQL Server) ve CI/CD (derleme, birim, entegrasyon, E2E; E2E bugün elle kuruluyor), yedekleme/geri yükleme betikleri, `sanalprova_dev` şema kurulumu ve PostgreSQL kimliklerini koruma + TenantScan kararı (M5 hazırlığı).
+- **M4 (altyapı ve belgeler, onay gerekir):** (M4.1 yapıldı: `db.ps1`, README, docs) kalan: Docker (api + image-worker + SQL Server) ve CI/CD (derleme, birim, entegrasyon, E2E; E2E bugün elle kuruluyor), yedekleme/geri yükleme betikleri, `sanalprova_dev` şema kurulumu ve PostgreSQL kimliklerini koruma + TenantScan kararı (M5 hazırlığı).
 - **M5 (ticari özellikler, onay gerekir):** işletme kaydı (firma/şube açılışı), platform yöneticisi sağlama komutu/arayüzü + mutabakat arayüzü (bugün bayrak yalnızca veritabanında, arayüz yok), kredi paketleri/abonelik/ödeme (R5), bütçe için "R5 öncesi" iki kural, Aşama 5 revizyon motoru (sahiplik denetimi kabul kriteri), idempotency anahtarı saklama süresi.
 
 ### C. Daha sonra iyileştirilebilir
@@ -65,12 +66,18 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 
 Bugünkü model: `BudgetGuard.ReserveAsync` firma applock'u altında (kesinleşmiş harcama + diğer işlerin açık rezervasyonları + bu çağrının en kötü durumu) sınırlara karşı denetler ve rezervasyonu (`reserved_cost_usd`) aynı transaction'da yazar. Açık rezervasyon = Running; Queued + sağlayıcı kimliği/gönderim niyeti; maliyet kaydı olmayan Cancelled. Hata yönü **güvenli taraftadır** (fazla sayar, aşım olmaz; 0,50 $ / 0,15 $ / 16 paralel testte tam 3 çağrı, 0 aşım).
 
-1. **İptal edilmiş + maliyet kaydı yazılmamış iş** (worker çökmesi): rezervasyon süresiz açık kalabilir → firma bütçesini haksız yere tüketir (yanlış `BudgetExceeded`; aşım değil). Gerekli: zaman aşımlı kapanış kuralı (lease + sağlayıcı azami bekleme + pay sonrası). **Karar bekliyor:** kapanışta en kötü durum maliyetini kayda geçirmek (muhafazakâr) mı, rezervasyonu bırakmak (eksik sayma riski) mı.
-2. **Platform geneli limit yok**; yalnızca firma günlük/aylık + iş başına. N firma × günlük limit platform bütçesini aşabilir. **Şube düzeyi limit de yok.**
+1. **İptal edilmiş + maliyet kaydı yazılmamış iş** (worker çökmesi): rezervasyon süresiz açık kalabilir → firma bütçesini haksız yere tüketir (yanlış `BudgetExceeded`; aşım değil). **KARAR (kullanıcı, M4.1; R5 öncesi ZORUNLU iş, henüz UYGULANMADI):**
+   - Sağlayıcıya gönderilmediği **kesin** olan işin rezervasyonu serbest bırakılabilir (ör. gönderim niyeti/`provider_submit_started_at` ve sağlayıcı kimliği yok).
+   - Sağlayıcıya gönderilmiş **veya gönderim sonucu belirsiz** işin rezervasyonu **doğrudan serbest bırakılmaz**.
+   - Belirlenen **kurtarma süresi** (lease + sağlayıcı azami bekleme + pay) sonunda bu işler **idempotent** biçimde `OutcomeUncertain` maliyet kaydına dönüştürülür (tek sorgu/transaction; olay anahtarı `event_key` filtreli benzersiz indeksi ve `attempt` çiti ile aynı iş için ikinci maliyet kaydı veya çift ücret oluşmaz; süpürücü yeniden çalıştırılabilir).
+   - Dönüştürülen kayıt sonradan **sağlayıcı paneli üzerinden mutabakata** açıktır (mevcut `ai_cost_reconciliations` / düzeltme satırları akışı; platform yöneticisi arayüzü M5.1 ile gelir).
+   - **Muhasebe ayrımı:** *maliyet rezervasyonu* (bizim sağlayıcıya ödeyeceğimiz en kötü durum tutarı, `reserved_cost_usd`) ile ilerideki *müşteri kredi rezervasyonu* (müşterinin satın aldığı kredinin bloke edilmesi) **ayrı muhasebe kavramlarıdır**; birbirinin yerine kullanılmaz, aynı alana yazılmaz (aynı iş akışına bağlanabilir ama ayrı kayıt/alan).
+   - Uygulama: M5.2 başında, R5/kredi işinden **önce**; kabul testleri: çökme sonrası iptal, gönderilmemiş iş serbest, belirsiz iş zaman aşımında tek `OutcomeUncertain` kaydı, süpürücü iki kez çalışınca ikinci kayıt yok, bütçe toplamı doğru.
+2. **(Karar verildi — madde 1)** Önceki açık soru ("en kötü durumu kayda geç mi, bırak mı") yukarıdaki kararla kapandı: gönderilmiş/belirsiz → en kötü durumla `OutcomeUncertain` maliyet kaydına dönüşür.
 3. **Belirsiz sonuç** (`OutcomeUncertain`) en kötü durumla sayılır ve platform yöneticisi mutabakatına kadar öyle kalır; mutabakat arayüzü yok.
 4. **Günlük sınır UTC gününe göre**, mağaza saat dilimine göre değil (TR gece yarısı kaydırması).
 5. fal ve Pruna istek başına gerçek maliyet döndürmez: harcama **tahmindir**; kredi/fatura R5'te gerçek maliyetle uzlaştırılmalı.
-6. **R5 tasarım ilkesi:** kredi bakiyesi aynı rezervasyon satırını/transaction'ı kullanmalı; ikinci defter açılmamalı (M3.6 kararı).
+6. **R5 tasarım ilkesi (M4.1 kararıyla netleşti):** *maliyet rezervasyonu* ile *müşteri kredi rezervasyonu* ayrı muhasebe kavramlarıdır. Kredi akışı aynı iş/transaction sınırına bağlanabilir, ancak maliyet rezervasyonunun yerine geçmez ve aynı sütunu paylaşmaz (M3.6'daki "ikinci defter açılmamalı" notu maliyet tarafı içindi: maliyet için ikinci defter yok).
 
 ## Canlıya çıkış öncesi ZORUNLU işler (kullanıcı kararı — A grubundaki 1–4'ün kaynağı)
 
@@ -82,7 +89,7 @@ Ayrıca: gerçek mağaza TV denemesi, hukuki onaylı aydınlatma metni, S3 için
 
 ## Önerilen yol haritası (öneri; her adım onayla)
 
-1. **M4.1 Geliştirici ortamı + belgeler:** MSSQL kurulum/başlatma betiği (`db.ps1` yerine), README ve docs/02–03–09–10 yeniden yazımı, `.local` PostgreSQL arşiv kararı.
+1. ~~**M4.1 Geliştirici ortamı + belgeler**~~ — **yapıldı** (`db.ps1` MSSQL, README, docs; `.local` PostgreSQL arşiv kararı: dokunulmaz, M4.3'te yedek stratejisiyle birlikte yeniden ele alınır).
 2. **M4.2 Konteyner + CI:** Docker Compose (api, image-worker, SQL Server), CI hattı (derleme, birim, entegrasyon, izole E2E), idempotent migration betiğiyle dağıtım.
 3. **M4.3 Yedek/geri yükleme + üretim sertleştirme:** A-1, A-2, A-5 (prova dahil); dev şema kurulumu ve PostgreSQL kimliklerini koruma kararı.
 4. **M5.1 İşletme kaydı + platform yönetimi:** firma/şube açılışı, platform yöneticisi sağlama ve mutabakat arayüzü.
