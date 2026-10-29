@@ -12,11 +12,11 @@ COPY src/ src/
 RUN dotnet restore src/SanalProva.Api/SanalProva.Api.csproj
 RUN dotnet publish src/SanalProva.Api/SanalProva.Api.csproj -c Release --no-restore -o /out/api /p:UseAppHost=false
 
-# EF migration paketi: tek dosya, SDK gerektirmeden çalışır. Tasarım zamanı yüklemesi bağlantı dizesi ister; sahte ve ASLA bağlanılmayan bir değer verilir.
+# EF migration paketi: tek dosya, SDK gerektirmeden çalışır. Bağlamı AppDbContextFactory (tasarım zamanı fabrikası) üretir: uygulama
+# yapılandırması / ConnectionStrings:Main gerekmez (ne derlemede ne çalışmada). Gerçek bağlantı çalışma anında --connection ile verilir (compose: db-migrate).
 FROM build AS migrations
 RUN dotnet tool restore
-RUN ConnectionStrings__Main="Server=tcp:127.0.0.1,1;Database=design_only_never_connected;User ID=x;Password=x;Encrypt=False" \
-    dotnet ef migrations bundle --self-contained -r linux-x64 --force \
+RUN dotnet ef migrations bundle --self-contained -r linux-x64 --force \
       --project src/SanalProva.Infrastructure --startup-project src/SanalProva.Api -o /out/efbundle
 
 # Migration işi (compose: db-migrate). Giriş noktası paketin kendisidir: efbundle --connection "<dize>"
