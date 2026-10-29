@@ -1,6 +1,6 @@
-﻿# Devam notu (son güncelleme: M4.2 sonu — M4.3 onay bekliyor)
+﻿# Devam notu (son güncelleme: M4.2 tamamlandı — CI #9 yeşil; sıradaki aşama onay bekliyor)
 
-Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **M4.3 için kullanıcı onayı beklenir.**
+Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **Sıradaki geliştirme aşaması için kullanıcı onayı beklenir (aşağıda \
 
 ## Tamamlanan (commit'li)
 
@@ -21,7 +21,7 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 | M3.9 | Playwright E2E (izole MSSQL), `useDraftItems.flush` yarışı düzeltmesi | `5113ebb` |
 | M3.10 | PostgreSQL kalıntı taraması, belge güncellemeleri, risk sınıflandırması, son regresyon | `d7fc9eb` |
 | M4.1 | `db.ps1` MSSQL'e yeniden yazıldı (status/migrate/reset/script, izin listeli hedefler); README ve docs 02/03/09/10/README güncellendi | `fc0d8a1` |
-| M4.2 | Docker (API, migration paketi, image-worker, SQL Server 2025 Express konteyneri) + Compose + GitHub Actions CI; **Docker/CI fiilen çalıştırılmadı** (aşağıda) | bu commit (`git log` ile bakın) |
+| M4.2 | Docker (API, migration paketi, image-worker, SQL Server 2025 Express konteyneri) + Compose + GitHub Actions CI | `1b9b6b7` … `670ccf3` (CI #1–#9 düzeltmeleri dahil); **CI #9: 6 işin tamamı yeşil** |
 
 ## Ortamın durumu (önemli)
 
@@ -71,6 +71,36 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 **Sekizinci GitHub Actions koşusu (CI #8):** backend, frontend, image-worker, **compose-smoke ve Playwright E2E geçti** (E2E'nin CI'daki ilk başarılı koşusu); MSSQL entegrasyon 248 test: 216 başarılı, 31 atlanan (laboratuvar testleri, `SANALPROVA_LAB_ADMIN` yok), **1 başarısız**: `LoadMeasurementTests.Yuk_altinda_cok_firmali_isler_tam_bir_kez_islenir_…` → beklenen 202, gelen **503 `ADMISSION_BUSY`** (görünen `DisplayHub.OnConnectedAsync` `TaskCanceledException` satırı ayrı bir sunucu günlük kaydıydı: bağlantı `OnConnectedAsync` sürerken kapanınca `ConnectionAborted` ile iptal; harmanlamayla ilgisi yok). **Kök neden (kanıtlı):** test 6 firma × 3 oturum × 5 = **90 eşzamanlı** üretim isteği gönderir; her firmanın tek şubesine 15 istek düşer ve kabul, şube başına `sp_getapplock` (`AppLocks.StoreAdmission`, **5 sn** zaman aşımı) altında sıralanır. Kilit zamanında alınamazsa API **tasarım gereği** 503 `ADMISSION_BUSY` döner (yalnızca `DbErrors.IsTransientLockFailure` yolu; bir kapasite sayacı değildir; kota aşımı ayrı kodlarla döner). `IdempotencyTests.Kabul_kilidi_alinamazsa_503_doner_hicbir_sey_yazilmaz_ayni_anahtarla_tekrar_tek_is_acar` bu yanıtta **hiçbir şeyin yazılmadığını** ve **aynı Idempotency-Key ile tekrarın tam bir iş** açtığını zaten kanıtlar; frontend de `ADMISSION_BUSY`'yi "birkaç saniye sonra tekrar deneyin" olarak eşler. Yani 503 doğru koruma davranışıdır; yük testi ise 90 isteğin hepsinin ilk denemede 202 alacağını varsayıyordu (hızlı makinede/CI #7'de tutmuş, yavaş runner'da tutmadı). Üretim kodu, kilit süresi ve kabul kuralı **değiştirilmedi**. **Düzeltme (yalnızca test):** istekler istemci sözleşmesine uygun gönderilir — yalnızca 503 `ADMISSION_BUSY` için, **aynı anahtarla**, en fazla 5 deneme (100/200/400/800 ms geri çekilme); başka her yanıt ve tükenme anında başarısız. Mevcut değişmezlerin hepsi korunur (90 iş, hepsi Succeeded, `Attempt == 1`, oturum başına boşluksuz sürüm 1..5, iş başına tek maliyet kaydı) ve **yeni değişmez** eklendi: oturum başına `generation_jobs` sayısı tam 5 (tekrarlar ek iş açmadı). Tekrar sayısı ölçüm raporuna (`AdmissionBusyRetries`, `MaxAdmissionBusyRetriesPerRequest`) yazılır. Doğrulama: derleme 0/0, birim 254/254, test keşfedildi; entegrasyon testi `sanalprova_test`'e yazdığı için yerelde onaysız çalıştırılmadı (CI'da doğrulanacak). **Kalan risk:** aynı dosyadaki kota testi tek şubeye 50/tek oturuma 40 eşzamanlı istekte bilerek "sıfır 5xx" bekler (performans beklentisi); CI #8'de geçti, düşerse aynı sınıf sorundur ve ayrıca değerlendirilecek.
 **Kalan riskler (M4.2):** Data Protection anahtarları birimde ama Production için TLS sonlandıran ters vekil ve gizli yönetimi tasarlanmadı; `.env` düz metin (yerel geliştirme için kabul, üretimde gizli yöneticisi gerekir); `sanalprova_dev` konteynerde yalnızca konteynerin kendi veritabanıdır (Windows `sanalprova_dev` ile ilgisiz); Compose'ta `sa` yalnızca tek seferlik işlerde kullanılır ama konteyner içinde etkindir; imaj etiketleri (`2025-latest`, `10.0`, `3.12-slim`) sabit özet (digest) değildir (tedarik zinciri sertleştirmesi M4.3); migration paketi yalnızca x64; yedekleme/geri yükleme hâlâ M4.3.
 
+## M4.2 sonucu — CI altyapısı tamamlandı (CI #9)
+
+- **CI #9 (commit `670ccf3`, dal `feature/mssql-migration`): 6 işin tamamı yeşil** — backend (Release derleme + birim), frontend (typecheck/lint/test/build), image-worker (pytest), Docker Compose smoke, MSSQL entegrasyon (Linux, Docker SQL Server 2025 Express), Playwright E2E (izole `sanalprova_e2e`). Kullanıcı CI altyapısını tamamlanmış kabul etti. Push'lar yalnızca bu dala yapıldı; `main` (`1b0789b`) dokunulmadı, merge yok.
+- **CI #1–#8'de bulunup düzeltilenler (her biri kanıtla):** eski `mssql-tools` imajı (2017) → `mssql-tools18` araç imajı; ODBC sürücüsünün ilan edilmemiş bağımlılığı `libgssapi-krb5-2` (+ derleme zamanı `verify-odbc.sh`); `run-sql.sh` hazırlık kapısı + yalnızca Msg 1205 için sınırlı yeniden deneme; migration paketinin `ConnectionStrings:Main` bağımlılığı → `AppDbContextFactory` (tasarım zamanı fabrikası); smoke'ta yanlış pozitif port kontrolü (`docker compose port` → gerçek host bağlamaları); konteyner provision'da eksik `AUTO_CLOSE/AUTO_SHRINK OFF`; `MSSQL_COLLATION` ilk açılış yeniden indeksleme çöküşü (kaldırıldı, veritabanı harmanlaması korunuyor); yük testinin `ADMISSION_BUSY` istemci sözleşmesine uyması.
+- **Açık küçük işler (kanıt/karar bekliyor):** `AdmissionBusyRetries` ölçümü CI çıktısında görünmüyor (rapor dosyası runner'da kalıyor; isteğe bağlı artifact adımı önerildi); kota yük testi "sıfır 5xx" bekler (CI'da düşerse aynı sınıf sorun); migration laboratuvarı testleri CI'da atlanır (Windows `SANALPROVA` ister); imaj etiketleri özet (digest) ile sabitlenmedi; `db.ps1`/`e2e-env.ps1`/`gen-migration-script.ps1`'deki artık gereksiz `ConnectionStrings__Main` atamaları.
+
+## Ticari MVP durum analizi ve plan (kod incelemesi, ürün koduna dokunulmadı)
+
+**Tamamlanmış ve korunacak (yeniden yazılmayacak):**
+- **Tenant izolasyonu:** firma (EF global filtre `ITenantOwned`) + şube (`X-Store-Id`, `StoreAccessFilter`, `IStoreOwned`), oturuma bağlı tablolarda yapısal şube kapsamı, SQL Server bileşik FK ile firma/şube tutarlılığı, `TenantArchitectureTests` envanteri, E2E izolasyon senaryoları.
+- **Kimlik ve roller:** HttpOnly çerez + CSRF, giriş hız sınırı, kilitleme; şube rolleri Staff/Manager/Owner; platform yöneticisi bayrağı (yalnızca veritabanında).
+- **Ürün kataloğu:** kategori, ürün, varyant, görsel (AI referans görseli dahil), hazır takım bileşenleri, durum; yönetim ekranları (`/katalog`).
+- **Sanal giydirme akışı:** KVKK onayı (sunucu zorunlu) → fotoğraf (EXIF silme) → seçim → üretim kuyruğu (SQL Server, lease, idempotency, kabul kilidi, kota) → sonuç/sürümler/favori/karşılaştırma → TV; mock ve gerçek sağlayıcı adaptörleri (Seedream/GPT Image/Pruna/FASHN/Gemini; canlı test yapılmadı); saklama/KVKK silme.
+- **Maliyet kontrolü:** atomik bütçe rezervasyonu, belirsiz sonuç (`OutcomeUncertain`), maliyet mutabakatı API'si, kullanım/maliyet ekranı (`/maliyet`), şube günlük kotası ve oturum sınırı.
+
+**Eksik olanlar (kodda yok):**
+1. **İşletme kaydı / onboarding:** kayıt, firma oluşturma, davet, şifre belirleme/sıfırlama, e-posta altyapısı yok. Firma/şube/kullanıcı yalnızca geliştirme tohumu (`DevDataSeeder`) veya doğrudan veritabanı ile oluşuyor.
+2. **Şube ve personel yönetimi:** şube oluşturma/düzenleme/pasifleştirme, personel ekleme/rol atama/devre dışı bırakma API'si ve ekranı yok.
+3. **Platform yönetimi:** platform yöneticisi sağlama komutu/arayüzü ve mutabakat arayüzü yok (API var).
+4. **Kredi sistemi (R5):** müşteri kredisi bakiyesi, kredi defteri, iş başına kredi rezervasyonu/düşümü/iadesi, paket tanımı yok. Bütçe sınırları firma başına değil **global yapılandırmadan** (`Generation:Budget`) uygulanıyor; platform geneli ve şube düzeyi parasal limit yok.
+5. **Ödeme ve faturalama:** ödeme sağlayıcısı, abonelik, fatura/e-fatura yok.
+6. **R5 öncesi zorunlu:** iptal edilmiş iş rezervasyon kapanış kuralı (karar alındı, uygulanmadı — yukarıda).
+
+**Önerilen sıra (her adım ayrı onayla; mevcut çalışanlar korunur, eklenerek ilerlenir):**
+1. **M5.1 Kontrollü işletme kaydı (onboarding):** platform yöneticisi sağlama komutu (CLI, veritabanına yazan tek resmi yol) → platform yöneticisi firma + ilk şube + sahip (Owner) oluşturur → sahibe tek kullanımlık, süreli **şifre belirleme bağlantısı** (e-posta altyapısı gelene kadar bağlantı yöneticiye gösterilir) → ilk girişte KVKK/hizmet sözleşmesi onayı kaydı. Halka açık kendi kendine kayıt MVP dışında (KVKK sözleşmesi ve kötüye kullanım riski).
+2. **M5.2 Şube ve personel yönetimi (Owner/Manager):** şube CRUD (ad, kod, saat dilimi, günlük kota, aktif/pasif), personel davet/rol/devre dışı bırakma, yönetici tarafından şifre sıfırlama bağlantısı; tüm uç noktalar mevcut rol filtreleri ve tenant filtreleriyle, izolasyon testleriyle.
+3. **M5.3 Rezervasyon kapanış kuralı + firma başına parasal limitler:** belgelenen karar (gönderilmemiş → serbest; gönderilmiş/belirsiz → kurtarma süresi sonunda idempotent `OutcomeUncertain` maliyet kaydı); bütçe limitlerini firma ayarına taşıma + platform geneli üst sınır.
+4. **M5.4 Kredi sistemi (ödeme olmadan):** append-only kredi defteri, iş başına **müşteri kredi rezervasyonu** (maliyet rezervasyonundan ayrı kavram), başarıda düşüm, başarısız/iptalde iade kuralı, yetersiz bakiyede açık hata kodu, platform yöneticisinin elle kredi yüklemesi, bakiye/hareket ekranı. Bu adımla ilk pilot mağazalar faturayı elle ödeyerek kullanabilir.
+5. **M5.5 Ödeme altyapısı:** sağlayıcı seçimi (TR için kart/3D Secure, iade, e-fatura uyumu — ayrı karar), paket satın alma → krediye dönüşüm (idempotent webhook), fatura kaydı.
+6. **Canlıya çıkış kapısı (paralel ilerler):** A grubundaki zorunlular (yedek/geri yükleme provası, silinen verinin yedekten dönmemesi, saklama politikası, sağlayıcı DPA, hukuki aydınlatma metni, üretim TLS/gizli yönetimi, sunucu harmanlaması kurulumda seçilir), onaylı canlı AI testi, gerçek mağaza TV denemesi.
 ## Açık riskler (üç grup)
 
 ### A. Ticari kullanımdan önce MUTLAKA çözülmeli
