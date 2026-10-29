@@ -1,5 +1,7 @@
 # 09 — Geliştirme Aşamaları ve Görev Listesi
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 Her aşama küçük, test edilebilir görevlere bölünmüştür. **Her aşama sonunda:** testler çalıştırılır, kısa rapor (yapılan, test sonuçları, açık sorunlar) hazırlanır, onay alınmadan sonraki aşamaya geçilmez.
 
 ---

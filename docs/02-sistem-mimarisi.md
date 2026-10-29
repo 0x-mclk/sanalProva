@@ -1,5 +1,7 @@
 # 02 — Sistem Mimarisi ve Klasör Yapısı
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 ## 1. Mimari yaklaşım: modüler monolit
 
 Ekip küçük, yük düşük (~200 üretim/gün), asıl karmaşıklık AI entegrasyonunda. Bu yüzden:

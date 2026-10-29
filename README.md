@@ -1,5 +1,7 @@
 # Sanal Prova
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şalvar takımı, kaftan, kına ve özel gün kıyafetleri).
 
 Mimari ve planlama: [docs/](docs/README.md) · Tasarım referansı: [docs/design/reference.png](docs/design/reference.png)

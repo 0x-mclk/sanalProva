@@ -43,9 +43,9 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
 - **İşleyici** — `GenerationProcessor`:
   - İşte sabitlenmiş `ModelKey`/`Quality` varsa ilgili sağlayıcıyı ve parametreleri kullanır.
   - Talimatı (prompt) sunucuda üretir: `PromptBuilder.BuildSingleGarment`, sürüm `single-garment.v1`. Pruna'ya serbest metin gönderilmez (`pruna-tryon.v1`).
-  - Bütçe kapısı modelin **en kötü durum** maliyetini kullanır.
+  - Bütçe kapısı modelin **en kötü durum** maliyetini kullanır. Kapı **atomiktir** (M3.6): `BudgetGuard.ReserveAsync` firma başına `sp_getapplock` altında kesinleşmiş harcama + diğer işlerin açık rezervasyonlarını (`generation_jobs.reserved_cost_usd`) toplar ve yeni rezervasyonu aynı transaction'da yazar; paralel işler limiti aşamaz. Kapsam firma başına günlük/aylık + iş başına; platform/şube limiti yok (R5).
   - Kullanım kaydı model ve kaliteyi içerir. Gerçek modda kombin işi reddedilir (ikinci savunma hattı).
-- **Veri** — migration `Phase4bTryOnModels`:
+- **Veri** — başlangıçta `Phase4bTryOnModels` migration'ı (PostgreSQL dönemi). MSSQL geçişinde migration geçmişi `InitialSqlServer` ile sıfırlandı; bu sütunlar artık o şemanın içindedir:
   - `generation_jobs.model_key`, `generation_jobs.quality`, `ai_usage_logs.quality`.
   - Firma ayarları JSON'una `DefaultTryOnModel`, `EnabledTryOnModels`, `AllowedTryOnQualities`, `DefaultTryOnQualities` eklendi.
 - **Tek kaftan** — `CombinationRules.IsSingleTryOnItem`: hazır takım **veya** tüm vücut (`BodyZone.FullBody`) tekil ürün. `GET /products?tryOn=true` seçim listesi.
@@ -93,7 +93,8 @@ Kapsam: yalnızca **tek kaftan** (tüm vücut tekil ürün) ve **hazır takım**
   - İşleyicideki bütçe kapısı ikinci savunma hattıdır.
   - Varsayılan 0,50 $ sınırla altı kalitenin hepsi sığar; günlük/aylık sınırlar ayrıca geçerlidir.
 - **İşlem geçmişi:**
-  - İş ve kullanım kaydında `model_key` ve `quality` saklanır (migration gerekmedi; değerler mevcut sütunlara sığıyor).
+  - İş ve kullanım kaydında `model_key` ve `quality` saklanır.
+  - Aynı kullanıcı eylemi aynı `Idempotency-Key` ile tekrarlanınca ikinci iş, ikinci rezervasyon ve ikinci ücret oluşmaz (M3.7–M3.8); belirsiz sonuçlu gönderim otomatik yeniden gönderilmez (`OutcomeUncertain`, R4).
   - API'de `JobDto.ModelLabel`, `GeneratedImageDto.AiModel` ve `SessionSummary.ResultAiModel` gösterilir (ör. "GPT Image 2.5 · Maksimum"). Bu etiket sonuç, üretim, karşılaştırma ve geçmiş ekranlarında görünür.
   - Demo sonuçta "Demo sonuç · seçilen model: …" yazar.
   - Maliyet raporu kaliteyi Türkçe etiketle gösterir.

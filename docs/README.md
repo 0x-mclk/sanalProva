@@ -1,5 +1,7 @@
 # Sanal Prova — Aşama 0: Analiz ve Planlama
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 > Durum: **Taslak — onay bekliyor** · Tarih: 2026-10-20
 
 Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıktılarıdır. Kod yazılmadı, bağımlılık kurulmadı, ücretli API çağrılmadı.

@@ -1,5 +1,7 @@
 # 03 — PostgreSQL Veri Modeli
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 ## 1. Genel kurallar
 
 - Birincil anahtarlar: `uuid` (UUIDv7 — zamana göre sıralı, indeks dostu). Tahmin edilemez ID'ler dosya/URL güvenliğine de katkı sağlar.

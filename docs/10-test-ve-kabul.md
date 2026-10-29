@@ -1,5 +1,7 @@
 # 10 — MVP Kabul Kriterleri ve Test Planı
 
+> **MSSQL geçiş notu (M3.10):** Veritabanı SQL Server 2025 Express'e taşındı. Bu belgedeki PostgreSQL / Npgsql / `SKIP LOCKED` / Testcontainers anlatımı **tarihseldir**; güncel durum için `CLAUDE.md` ve `docs/DEVAM-NOTU.md`. Kapsamlı yeniden yazım M4'te yapılacak.
+
 ## 1. MVP kapsamı
 
 MVP = Aşama 1–5 tamamlanmış, tek firma / tek pilot mağaza, 1–2 TV.

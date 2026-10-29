@@ -6,7 +6,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 
 - **Aşama sırası ve onay:** Her aşama bittiğinde dur, rapor ver, **kullanıcı onayı almadan sonrakine geçme.** Aşamadan önce alt görev sırasını göster.
 - Ücretli AI API çağrısı yapma. Gerçek müşteri verisi kullanma. Gereksiz bağımlılık ekleme. API anahtarlarını kaynağa yazma.
-- Migration'ı yalnızca bu projenin yerel `sanalprova_dev` veritabanına uygula (önce hedefi doğrula).
+- Migration'ı yalnızca izole lab/test veritabanlarına (`sanalprova_lab_*`, `sanalprova_test`, `sanalprova_e2e`) uygula (önce hedefi doğrula). `sanalprova_dev` M5'e kadar **boş** kalır; kullanıcının açık izni olmadan dokunma. Eski PostgreSQL verilerine, yedeklere ve gerçek storage klasörüne dokunma.
 - `docs/` belgelerini ve `docs/design/reference.png` görselini silme. Tasarım dili yalnızca referanstan gelir; kendi UI dilini icat etme.
 - Mock/demo sonucu asla gerçek AI çıktısı gibi sunma; yapılmamış özelliği (TV, revizyon motoru) bitmiş gibi gösterme.
 - Her modülden sonra build + test çalıştır; hataları gerçek nedenine kadar izle.
@@ -22,6 +22,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | 4 Gerçek AI entegrasyonu (FASHN, Gemini) | ✅ kod tamamlandı (mock/sözleşme testleri geçti); **canlı API testi yapılmadı, ücretli çağrılar kapalı** — canlı test ve Aşama 5 için kullanıcı onayı bekleniyor ([docs/11](docs/11-ai-entegrasyon-plani-ve-test.md)) |
 | 4b Tek kaftan modelleri (Seedream 5 Flash, GPT Image 2.5, Pruna) | ✅ kod tamamlandı, mock/sözleşme testleri geçti; **canlı test onay bekliyor** ([docs/12](docs/12-tek-kaftan-model-entegrasyonu.md)) |
 | 5 Revizyon motoru (Gemini edit, SAM 2 + OpenCV) | bekliyor (onay gerekir) |
+| M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
 Onaylı kararlar: K1 hazır takım = FASHN Try-On Max, serbest kombin = Gemini Nano Banana Pro; K2 revizyon varsayılanı = `gemini-nano-banana-2.1` (Lite/Pro ile karşılaştırma mimarisi korunur, model kimlikleri Aşama 4'te gerçek API'den doğrulanır); K3 katalogda olmayan renk = "Renk önizlemesi — stokta olmayabilir"; K4 saklama 24 saat, onayla en fazla 30 gün (yapılandırılabilir, kodda sabit üst sınır); K5 Firma → Şube (katalog firma, oturum/TV şube seviyesinde); K8 18 yaş altı veli onayı.
@@ -51,17 +52,17 @@ Plan `docs/` altında; ayrıntı orada, burada yinelenmez. Başlangıç: [docs/R
 
 Modüler monolit + ayrı Python servisi. Mikroservis, Redis, mesaj kuyruğu yok.
 
-- `backend/` — ASP.NET Core (**.NET 10**, Minimal API), EF Core + Npgsql, SignalR, Identity (HttpOnly çerez + CSRF). `Domain` (bağımlılıksız) / `Infrastructure` / `Api`. Merkezi paket sürümleri `Directory.Packages.props`, `TreatWarningsAsErrors` açık.
+- `backend/` — ASP.NET Core (**.NET 10**, Minimal API), EF Core + **SQL Server 2025 Express** (örnek `.\SANALPROVA`, snake_case, RCSI açık), SignalR, Identity (HttpOnly çerez + CSRF). `Domain` (bağımlılıksız) / `Infrastructure` / `Api`. Merkezi paket sürümleri `Directory.Packages.props`, `TreatWarningsAsErrors` açık.
 - `frontend/` — React 19 + TS + Vite PWA, Mantine, TanStack Query, openapi-fetch. İki giriş noktası: personel (`index.html`) ve TV (`tv.html`, Mantine'siz, küçük paket).
 - `image-worker/` — Python FastAPI + OpenCV (GPU/PyTorch yok). Renk değişimi ve SAM 2 için sözleşme ve iskelet var, motor Aşama 5'te.
-- `scripts/` — `db.ps1` (taşınabilir PostgreSQL: init/start/stop/status/reseed-demo), `dev-env.ps1`, `image-worker.ps1`, `gen-api-client.ps1`, `generate_icons.py`.
-- `.local/` (taşınabilir PostgreSQL 18, port 5433), `storage/` (yerel dosya deposu) git'e girmez.
+- `scripts/` — `dev-env.ps1`, `e2e-env.ps1` (izole E2E veritabanı up/down), `gen-api-client.ps1`, `gen-migration-script.ps1` (idempotent SQL), `apply-history-hardening.ps1` (dry-run varsayılan), `mssql/` (provision + sertleştirme SQL'leri), `image-worker.ps1`, `generate_icons.py`. **`db.ps1` eski PostgreSQL yöneticisidir (kullanılmıyor; M4'te MSSQL kurulum betiğiyle değiştirilecek).**
+- `.local/` (eski taşınabilir PostgreSQL 18 verisi — **dokunulmaz**, yedekler ve `migrations/` çıktıları da burada), `storage/` (yerel dosya deposu) git'e girmez.
 
 Temel kararlar:
 
 - **Firma izolasyonu:** `ITenantOwned` + EF global query filter. **Şube izolasyonu:** `X-Store-Id` başlığı + `StoreAccessFilter` (rol kontrolü) + `IStoreOwned` filtresi. Filtre değerleri sorgu anında `TenantContext`'ten okunur (ara katman/endpoint filtresi doldurur). Katalog yönetimi: firmadaki herhangi bir şubede Manager+ (`OrganizationRoleFilter`).
 - **Sağlayıcıdan bağımsız üretim:** `GenerationStrategy` (yapılandırmadan) iş tipine göre sağlayıcı/model seçer; adapter'lar `ITryOnProvider`, `IImageGenerationProvider`, `IImageEditProvider`; mock modda bile yapılandırılmış model adı kaydedilir. Kullanıcı prompt yazmaz (`PromptBuilder` sunucuda üretir).
-- **İş kuyruğu PostgreSQL'de:** `generation_jobs`, `FOR UPDATE SKIP LOCKED`, lease/yeniden kuyruğa alma, geçici hata geri çekilmesi, sürüm numarası için oturum başına advisory lock. `GenerationWorker` + `GenerationProcessor` (Infrastructure), bildirim `IJobNotifier` (SignalR uygulaması Api'de).
+- **İş kuyruğu SQL Server'da:** `generation_jobs`, tek deyimde `UPDATE … OUTPUT` + `UPDLOCK, READPAST` ile talep (eski `FOR UPDATE SKIP LOCKED` karşılığı), `attempt` çit belirteci, lease/yeniden kuyruğa alma, geçici hata geri çekilmesi; sürüm numarası, şube kabulü ve firma bütçesi için `sp_getapplock` (`AppLocks`). `GenerationWorker` + `GenerationProcessor` (Infrastructure), bildirim `IJobNotifier` (SignalR uygulaması Api'de).
 - **Sunucu-otoritatif durum:** SignalR yalnızca "değişti" bildirir; istemci REST'ten çeker, yoklama yedeği vardır.
 - **Görseller:** hiçbir zaman public değil; HMAC imzalı 5 dk (müşteri) / 1 saat (katalog) URL. Yükleme SkiaSharp ile yeniden kodlanır (EXIF silinir, magic byte doğrulanır, küçük resim üretilir). Anahtar şeması oturum önekiyle (`SessionPurger` tek seferde siler).
 - **KVKK:** onay olmadan fotoğraf yüklenemez (sunucu zorunlu kılar); `SessionPurger` + `RetentionJob` süresi dolanı kalıcı siler; denetim kaydı kişisel veri içermez.
@@ -91,7 +92,7 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 Ayrıntı: [README.md](README.md). Özet (PowerShell, .NET 10 kullanıcı klasöründe kurulu — her oturumda önce `. ./scripts/dev-env.ps1`):
 
 ```powershell
-./scripts/db.ps1 start                                   # PostgreSQL (ilk kurulum: db.ps1 init)
+# Dev veritabanı (sanalprova_dev) M5'e kadar boş: elle çalıştırma için önce şema kurulumu gerekir (M4). Bugün doğrulama: testler + izole E2E (aşağıda).
 cd backend; dotnet run --project src/SanalProva.Api --launch-profile http   # :5080
 ./scripts/image-worker.ps1                               # :8090 (isteğe bağlı; Aşama 5)
 cd frontend; npm run dev                                 # :5173, /tv → TV girişi
@@ -111,13 +112,13 @@ Testler: `cd backend; dotnet test --solution SanalProva.slnx` (entegrasyon testl
 
 **Idempotency (M3.7):** `POST /sessions/{id}/generations` anahtarı **oturum başına** benzersizdir; yeniden oynatma ilk yanıtın aynısını döner (tamamlanmışsa `resultImageId` dahil; oturum kapalı olsa da). Aynı anahtar farklı gövdeyle (fotoğraf/model/kalite/gerçek modda varyasyon) → **422 `IDEMPOTENCY_KEY_REUSED`**. Başarısız işe bağlı anahtar yeni deneme için kullanılamaz (yeni anahtar veya `/jobs/{id}/retry`). `/retry` **isteğe bağlı** `Idempotency-Key` alır (M3.8): aynı anahtar aynı yeni işi döner (eşzamanlı çift tıklama/ağ yeniden denemesi mock modda da tek iş), özgün işin anahtarı veya farklı istek → 422 `IDEMPOTENCY_KEY_REUSED`; anahtarsız eski istemci çalışır (mock modda dedupe yok, gerçek modda `ux_generation_jobs_active_dedupe` tek iş garanti eder). Frontend: başlatma anahtarı seçim/model değişince yenilenir, ağ hatasında korunur; retry anahtarı başarısız iş başınadır (`GeneratingPage`). Tekrar istekleri iş açmadığı için ikinci bütçe rezervasyonu/gönderim oluşmaz.
 
-Demo hesaplar: `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@lal.local` (Owner); parola `dotnet user-secrets list --project backend/src/SanalProva.Api` içindeki `Seed:DevPassword`. Gizli değerlerin hepsi user-secrets'ta (`db.ps1 init` üretir). Giriş hız sınırı 5/dk/IP; çok girişli otomasyonda `Security__LoginRateLimitPerMinute` yükseltilir.
+Demo hesaplar: `elif@lal.local` (Staff), `yonetici@lal.local` (Manager), `sahip@lal.local` (Owner); parola `dotnet user-secrets list --project backend/src/SanalProva.Api` içindeki `Seed:DevPassword`. Gizli değerlerin hepsi user-secrets'ta (geliştirme ortamı kurulumu M4'te yeniden yazılacak; E2E parolayı kendisi üretir). Giriş hız sınırı 5/dk/IP; çok girişli otomasyonda `Security__LoginRateLimitPerMinute` yükseltilir.
 
 ## Dikkat edilecek tuzaklar (yaşanmış hatalar)
 
 - **Enum'lar DB'de metin:** SQL `MAX/ORDER BY` alfabetik olur; rol/enum karşılaştırmalarını bellekte yap.
 - **Yeni varlığı gezinti özelliğiyle eklemek EF'te "Modified" sanılır** (anahtar önceden üretildiği için): açıkça `db.X.Add(...)` kullan.
-- **Aynı oturumda paralel üretim:** sürüm numarası advisory lock olmadan çakışır.
+- **Aynı oturumda paralel üretim:** sürüm numarası `sp_getapplock` (`AppLocks.SessionVersion`) olmadan çakışır.
 - **`WebApplicationFactory` ana makineyi eşzamanlı ilk erişimlerde birden çok kez kurar:** `ApiFactory.InitializeAsync` içinde `_ = Services` ile tek seferde oluşturulur; aksi halde birden çok worker bildirimleri kaybettirir.
 - **Entegrasyon testleri:** hata enjeksiyonu (`TestFaults`) fotoğraf özetine bağlı; hata testleri benzersiz fotoğraf (`seed`) kullanmalı. SignalR testleri WebSocket taşıması kullanır (long polling TestServer'da güvenilmez).
 - **React:** çocuk efektleri ebeveynden önce çalışır; ilk sorgulardan önce gerekli global durum (`X-Store-Id`) `useLayoutEffect` ile ayarlanır. `QueryClient.clear()` aktif `useMe` gözlemcisini koparır (`removeQueries` + `resetQueries` kullan). `openapi-fetch` gövdeyi tükettiği için hata ayrıntısı `unwrap` içinde `error` nesnesinden okunur.
