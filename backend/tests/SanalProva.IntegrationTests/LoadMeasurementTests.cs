@@ -53,6 +53,44 @@ public sealed class LoadMeasurementTests(ApiFactory factory) : ApiTestBase(facto
         return (tenant, client, list);
     }
 
+    private const int MaxAdmissionTries = 5;
+
+    /// <summary>
+    /// İstemci sözleşmesi (M3.7/M3.8): 503 <c>ADMISSION_BUSY</c> = şubenin kabul kilidi zaman aşımında alınamadı ve HİÇBİR ŞEY yazılmadı; AYNI
+    /// Idempotency-Key ile tekrar göndermek tek iş/tek ücret üretir (<see cref="IdempotencyTests"/>). Yük altında yavaş ortamda (CI) beklenen bir
+    /// koruma yanıtıdır; yalnızca bu yanıt, aynı anahtarla ve sınırlı sayıda yeniden denenir. Başka her yanıt anında başarısızdır.
+    /// </summary>
+    private static async Task<(JobDto Job, int BusyRetries)> StartWithAdmissionRetryAsync(ApiClient client, Guid sessionId, CancellationToken ct)
+    {
+        var key = Guid.NewGuid().ToString("N");
+        for (var attempt = 1; ; attempt++)
+        {
+            using var response = await client.SendAsync(HttpMethod.Post, $"/api/v1/sessions/{sessionId}/generations", new { }, configure: r => r.Headers.Add("Idempotency-Key", key));
+            if (response.StatusCode == HttpStatusCode.Accepted)
+            {
+                return (await ApiClient.ReadAsync<JobDto>(response, HttpStatusCode.Accepted), attempt - 1);
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            Assert.True(response.StatusCode == HttpStatusCode.ServiceUnavailable && ProblemCode(body) == "ADMISSION_BUSY", $"Beklenmeyen yanıt {(int)response.StatusCode}: {body}");
+            Assert.True(attempt < MaxAdmissionTries, $"ADMISSION_BUSY {MaxAdmissionTries} denemede de sürdü (oturum {sessionId}).");
+            await Task.Delay(TimeSpan.FromMilliseconds(100 * (1 << (attempt - 1))), ct); // 100, 200, 400, 800 ms
+        }
+    }
+
+    private static string? ProblemCode(string body)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.TryGetProperty("code", out var code) ? code.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     [Fact]
     public async Task Yuk_altinda_cok_firmali_isler_tam_bir_kez_islenir_surum_ve_maliyet_degismezleri_korunur_kilitlenme_ve_hiz_olculur()
     {
@@ -80,10 +118,14 @@ public sealed class LoadMeasurementTests(ApiFactory factory) : ApiTestBase(facto
         var deadlocksBefore = await DeadlockCounterAsync();
         var watch = Stopwatch.StartNew();
         var jobs = new List<(TestTenant Tenant, SessionDetail Session, JobDto Job)>();
+        int busyRetries = 0, maxBusyRetries = 0;
         try
         {
-            var started = await Task.WhenAll(world.SelectMany(w => w.Sessions.SelectMany(s => Enumerable.Range(0, jobsPerSession).Select(async _ => (w, s, Job: await StartGenerationAsync(w.Client, s.Id))))));
-            var finished = await Task.WhenAll(started.Select(async x => (x.w.Tenant, x.s, Job: await WaitForJobAsync(x.w.Client, x.Job.Id, timeoutSeconds: 120))));
+            // Şube başına 15 eşzamanlı kabul aynı kilitte sıralanır; yavaş ortamda bazıları 503 ADMISSION_BUSY alır ve sözleşmeye uygun tekrar edilir
+            var started = await Task.WhenAll(world.SelectMany(w => w.Sessions.SelectMany(s => Enumerable.Range(0, jobsPerSession).Select(async _ => (w, s, Start: await StartWithAdmissionRetryAsync(w.Client, s.Id, ct))))));
+            busyRetries = started.Sum(x => x.Start.BusyRetries);
+            maxBusyRetries = started.Max(x => x.Start.BusyRetries);
+            var finished = await Task.WhenAll(started.Select(async x => (x.w.Tenant, x.s, Job: await WaitForJobAsync(x.w.Client, x.Start.Job.Id, timeoutSeconds: 120))));
             jobs.AddRange(finished);
         }
         finally
@@ -110,6 +152,7 @@ public sealed class LoadMeasurementTests(ApiFactory factory) : ApiTestBase(facto
                 Assert.Equal(Enumerable.Range(1, jobsPerSession), versions); // benzersiz, boşluksuz sürüm
                 var ids = group.Select(j => j.Job.Id).ToList();
                 Assert.Equal(jobsPerSession, await db.AiUsageLogs.CountAsync(l => l.JobId != null && ids.Contains(l.JobId.Value), ct)); // iş başına tek maliyet kaydı
+                Assert.Equal(jobsPerSession, await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => j.SessionId == group.Key, ct)); // ADMISSION_BUSY tekrarları ek iş açmadı
                 maxAttempts = Math.Max(maxAttempts, group.Max(j => j.Job.Attempt));
             }
         }
@@ -119,6 +162,7 @@ public sealed class LoadMeasurementTests(ApiFactory factory) : ApiTestBase(facto
             Firms = firms, Sessions = firms * sessionsPerFirm, Jobs = jobs.Count, ExtraWorkers = extraWorkers, HostWorkers = 4,
             ElapsedSeconds = Math.Round(watch.Elapsed.TotalSeconds, 2), JobsPerSecond = Math.Round(jobs.Count / watch.Elapsed.TotalSeconds, 1),
             ServerDeadlocksDuringRun = deadlocks, MaxAttemptObserved = maxAttempts, DuplicateJobs = 0, DuplicateCosts = 0, VersionGaps = 0,
+            AdmissionBusyRetries = busyRetries, MaxAdmissionBusyRetriesPerRequest = maxBusyRetries,
         });
     }
 
