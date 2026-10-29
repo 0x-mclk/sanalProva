@@ -129,8 +129,13 @@ docker compose down -v                    # bu projenin birimlerini de SİLER (y
 | `backend` | Release derleme (uyarılar hata) + birim testleri |
 | `frontend` | typecheck, lint, test, build |
 | `image-worker` | pytest |
-| `integration` | Compose yığınını (API imajı dahil) kurar, `/health/ready` doğrular, MSSQL entegrasyon testlerini `sanalprova_test`'te çalıştırır |
-| `e2e` | Compose ile SQL Server + şema, ardından Playwright (izole `sanalprova_e2e`) |
+| `compose-smoke` | Compose yığınını kurar ve doğrular (`scripts/ci/smoke-assert.sh`): tek seferlik işler exit 0, sqlserver/image-worker/api healthy, `/health/ready` Healthy, harmanlama/RCSI/uyumluluk 160, migration'lar uygulanmış, image-worker ana makineye açık değil, portlar yalnızca 127.0.0.1, `sanalprova_app` migration geçmişini/mutabakat tablosunu değiştiremiyor, günlüklerde gizli değer yok |
+| `integration` (needs: `backend`, `compose-smoke`) | Aynı yığında MSSQL entegrasyon testlerini `sanalprova_test`'te çalıştırır |
+| `e2e` (needs: `backend`, `frontend`, `compose-smoke`) | Compose ile SQL Server + şema, ardından Playwright (izole `sanalprova_e2e`) |
+
+Tetikleyiciler: `push` (`main`, `feature/**`), `pull_request`, elle `workflow_dispatch` (Actions sekmesi). Aynı dal/PR'ın eski koşusu iptal edilir (`concurrency`). Smoke düşerse pahalı işler başlamaz.
+
+**Gizli değerler günlüğe/artifact'a yazılmaz:** parolalar her koşuda üretilip maskelenir; hata günlükleri `scripts/ci/compose-diagnostics.sh` ile arındırılır (değer → `***`); artifact klasörleri `scripts/ci/scrub-artifacts.sh` ile taranıp gizli değer içeren dosyalar silinir; Playwright trace'i CI'da kapalıdır (giriş isteğindeki parolayı içerebilir); `docker compose config` yalnızca `--quiet` çalışır.
 
 Kapsam sınırı: migration laboratuvarı testleri (`MigrationValidationTests` vb.) Windows `SANALPROVA` örneği gerektirir (`SANALPROVA_LAB_ADMIN`); Linux konteynerinde **atlanır** ve yerelde çalıştırılır.
 

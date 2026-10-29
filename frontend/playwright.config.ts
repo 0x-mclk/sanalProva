@@ -25,7 +25,8 @@ export default defineConfig({
   reporter: [['list']],
   use: {
     baseURL: 'http://127.0.0.1:5173',
-    trace: 'retain-on-failure',
+    // CI'da trace kapali: giris istegindeki (kosuya ozel rastgele) parolayi icerebilir; yerelde yalnizca basarisizlikta
+    trace: process.env.CI ? 'off' : 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
