@@ -36,7 +36,10 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Express
-      MSSQL_COLLATION: Latin1_General_100_CI_AS_SC
+      # MSSQL_COLLATION BILEREK YOK (CI #7): ilk acilista sunucu harmanlamasini degistirmek sistem veritabanlarini yeniden indeksler; bu ic islem
+      # deadlock (1205) alip 3434 ile sunucuyu kapatabiliyor. Uygulamanin ihtiyaci VERITABANI harmanlamasidir: docker/db/provision.sql her
+      # veritabanini COLLATE Latin1_General_100_CI_AS_SC ile acar ve smoke bunu dogrular. Sunucu/tempdb varsayilani (SQL_Latin1_General_CP1_CI_AS)
+      # yalnizca #temp tablolarini etkiler; metin sutunlu #temp tablosu yazilirsa COLLATE DATABASE_DEFAULT kullanilmalidir.
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?.env eksik - once ./scripts/compose-env.ps1 calistirin}"
     ports:
       - "127.0.0.1:${MSSQL_HOST_PORT:-14331}:1433"

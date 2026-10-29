@@ -121,6 +121,7 @@ docker compose down -v                    # bu projenin birimlerini de SİLER (y
 - **Demo tohumu varsayılan kapalıdır** (`SEED_ENABLED=false`): Compose ortamında veri yoktur. Elle denemek için `.env`'e `SEED_ENABLED=true` ve `SEED_DEV_PASSWORD` ekleyin (yalnızca Development).
 - **Üretim:** `API_ENVIRONMENT=Production` çerezleri `Secure` yapar; TLS sonlandıran bir ters vekil gerekir (M4.3/canlıya çıkış kapsamı). Data Protection anahtarları `api-dpkeys` birimindedir.
 - Migration paketi `linux-x64`tür; ARM ana makinede `db-migrate` derlenmez.
+- **Harmanlama:** uygulama veritabanları `Latin1_General_100_CI_AS_SC` ile oluşturulur (smoke doğrular). Konteynerde sunucu harmanlaması bilerek değiştirilmez (`MSSQL_COLLATION` yok; ilk açılıştaki yeniden indeksleme sunucuyu çökertebiliyordu), sunucu/`tempdb` varsayılanı `SQL_Latin1_General_CP1_CI_AS`'dir.
 
 **CI (GitHub Actions, `.github/workflows/ci.yml`)** — her işte rastgele ve maskelenmiş parolalar; AI çağrısı yok:
 
