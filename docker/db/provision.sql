@@ -22,7 +22,11 @@ BEGIN
     SET @sql = N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET COMPATIBILITY_LEVEL = 160; '
              + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE; '
              + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET RECOVERY SIMPLE; '
-             + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET PAGE_VERIFY CHECKSUM;';
+             + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET PAGE_VERIFY CHECKSUM; '
+             -- Express yeni veritabanlarini AUTO_CLOSE ON acar: bosta kapanir (her baglantida yeniden acilir, kapaliyken sys.databases.collation_name NULL).
+             -- scripts/mssql/provision.sql ile esdegerlik (CI #6 bulgusu).
+             + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET AUTO_CLOSE OFF; '
+             + N'ALTER DATABASE ' + QUOTENAME(@db) + N' SET AUTO_SHRINK OFF;';
     EXEC sys.sp_executesql @sql;
     FETCH NEXT FROM dbs INTO @db;
 END

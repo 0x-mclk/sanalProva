@@ -46,19 +46,23 @@ if echo "$body" | grep -q '"status":"Healthy"'; then ok "api /health/ready Healt
 # 4) Veritabanlari: harmanlama, RCSI, uyumluluk 160; migration'lar uygulanmis
 # Veritabani basina GERCEK degerler okunur ve her alan ayri karsilastirilir: hata mesaji hangi veritabaninda hangi ayarin farkli oldugunu yazar
 # (beklenenler gevsetilmez). Sunucu harmanlamasi ve surumu yalnizca kanit icin yazdirilir.
-exp_coll="Latin1_General_100_CI_AS_SC"; exp_rcsi=1; exp_compat=160
-server_info="$(sql sa MSSQL_SA_PASSWORD master "SELECT CAST(SERVERPROPERTY('Collation') AS nvarchar(128)) + N'|' + CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(64))" | tail -n1 | tr -d '\r')"
-echo "bilgi: sunucu harmanlamasi|surum = $server_info"
-db_rows="$(sql sa MSSQL_SA_PASSWORD master "SELECT v.name + N'|' + ISNULL(d.collation_name, N'YOK') + N'|' + ISNULL(CAST(d.is_read_committed_snapshot_on AS nvarchar(1)), N'YOK') + N'|' + ISNULL(CAST(d.compatibility_level AS nvarchar(5)), N'YOK') FROM (VALUES (N'sanalprova_dev'), (N'sanalprova_test'), (N'sanalprova_e2e')) AS v(name) LEFT JOIN sys.databases AS d ON d.name = v.name")"
+# Her veritabani KENDI baglaminda (-d <db>) okunur: sys.databases.collation_name, veritabani kapaliyken (AUTO_CLOSE ON, Express varsayilani)
+# NULL doner (CI #6); baglanti veritabanini acar. Harmanlama iki kaynaktan (sys.databases ve DATABASEPROPERTYEX) okunur, ikisi de beklenmeli.
+# AUTO_CLOSE kapali olmali (scripts/mssql/provision.sql ile esdeger).
+exp_coll="Latin1_General_100_CI_AS_SC"; exp_rcsi=1; exp_compat=160; exp_autoclose=0
+server_info="$(sql sa MSSQL_SA_PASSWORD master "SELECT CAST(SERVERPROPERTY('Collation') AS nvarchar(128)) + N'|' + CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(64)) + N'|' + CAST(SERVERPROPERTY('Edition') AS nvarchar(64))" | tail -n1 | tr -d '\r')"
+echo "bilgi: sunucu harmanlamasi|surum|surum tipi = $server_info"
 for db in sanalprova_dev sanalprova_test sanalprova_e2e; do
-  row="$(printf '%s\n' "$db_rows" | tr -d '\r' | grep "^$db|" | tail -n1)"
-  if [ -z "$row" ]; then bad "$db: ayarlar okunamadi"; continue; fi
-  IFS='|' read -r _ coll rcsi compat <<<"$row"
+  row="$(sql sa MSSQL_SA_PASSWORD "$db" "SELECT DB_NAME() + N'|' + ISNULL(d.collation_name, N'YOK') + N'|' + ISNULL(CAST(DATABASEPROPERTYEX(DB_NAME(), 'Collation') AS nvarchar(128)), N'YOK') + N'|' + CAST(d.is_read_committed_snapshot_on AS nvarchar(1)) + N'|' + CAST(d.compatibility_level AS nvarchar(5)) + N'|' + CAST(d.is_auto_close_on AS nvarchar(1)) FROM sys.databases AS d WHERE d.database_id = DB_ID()" | tr -d '\r' | grep "^$db|" | tail -n1)"
+  if [ -z "$row" ]; then bad "$db: ayarlar okunamadi (veritabani yok veya baglanilamadi)"; continue; fi
+  IFS='|' read -r _ coll coll_prop rcsi compat autoclose <<<"$row"
   diffs=""
-  [ "$coll" = "$exp_coll" ] || diffs="$diffs harmanlama=$coll (beklenen $exp_coll);"
+  [ "$coll" = "$exp_coll" ] || diffs="$diffs harmanlama(sys.databases)=$coll (beklenen $exp_coll);"
+  [ "$coll_prop" = "$exp_coll" ] || diffs="$diffs harmanlama(DATABASEPROPERTYEX)=$coll_prop (beklenen $exp_coll);"
   [ "$rcsi" = "$exp_rcsi" ] || diffs="$diffs RCSI=$rcsi (beklenen $exp_rcsi);"
   [ "$compat" = "$exp_compat" ] || diffs="$diffs uyumluluk=$compat (beklenen $exp_compat);"
-  if [ -z "$diffs" ]; then ok "$db: harmanlama $coll, RCSI acik, uyumluluk $compat"; else bad "$db ayarlari farkli:$diffs"; fi
+  [ "$autoclose" = "$exp_autoclose" ] || diffs="$diffs AUTO_CLOSE=$autoclose (beklenen $exp_autoclose);"
+  if [ -z "$diffs" ]; then ok "$db: harmanlama $coll, RCSI acik, uyumluluk $compat, AUTO_CLOSE kapali"; else bad "$db ayarlari farkli:$diffs"; fi
 done
 for db in sanalprova_dev sanalprova_test sanalprova_e2e; do
   n="$(sql sa MSSQL_SA_PASSWORD "$db" "SELECT COUNT(*) FROM dbo.__ef_migrations_history" | tail -n1 | tr -d '[:space:]')"
