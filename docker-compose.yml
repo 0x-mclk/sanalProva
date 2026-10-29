@@ -16,7 +16,10 @@
 name: sanalprova
 
 x-sql-tools: &sql-tools
-  image: mcr.microsoft.com/mssql-tools
+  # Modern sqlcmd 18 (Ubuntu 24.04 + mssql-tools18): eski mcr.microsoft.com/mssql-tools imaji 2017'den kalmadir (ODBC 13), SQL Server 2025 ile uyumsuzdur
+  build:
+    context: ./docker/db
+  image: sanalprova-sql-tools:local
   restart: "no"
   volumes:
     - ./docker/db:/docker/db:ro

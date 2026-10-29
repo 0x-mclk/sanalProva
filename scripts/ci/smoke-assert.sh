@@ -19,7 +19,7 @@ summary "### Compose smoke"
 # sqlcmd'yi arac imajinda (db-harden servisi) calistirir; parola komut satirina degil ortam degiskenine (adi gecirilir, degeri degil) verilir
 sql() { # kullanim: sql <giris> <parola-degiskeni-adi> <veritabani> <sorgu>
   local user="$1" pwvar="$2" db="$3" query="$4"
-  SQLCMDPASSWORD="${!pwvar}" docker compose run -T --rm --no-deps -e SQLCMDPASSWORD --entrypoint /opt/mssql-tools/bin/sqlcmd db-harden \
+  SQLCMDPASSWORD="${!pwvar}" docker compose run -T --rm --no-deps -e SQLCMDPASSWORD --entrypoint /opt/mssql-tools18/bin/sqlcmd db-harden \
     -S sqlserver -U "$user" -d "$db" -C -I -h -1 -W -Q "SET NOCOUNT ON; $query" 2>&1
 }
 
