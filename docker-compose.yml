@@ -1,0 +1,145 @@
+# Sanal Prova — geliştirme/test Docker Compose (SQL Server 2025 Express + API + image-worker).
+#
+# İZOLASYON: Windows'taki SANALPROVA / SQLEXPRESS / SQLEXPRESS01 örneklerinden, onların dosyalarından ve portlarından TAMAMEN bağımsızdır.
+#   - SQL Server kendi konteynerinde, kendi adlandırılmış birimiyle (sanalprova_sqlserver-data) çalışır; ana makine dosyası bağlanmaz.
+#   - Ana makineye yalnızca 127.0.0.1 üzerinden iki port açılır (SQL: 14331, API: 8080); image-worker ve diğer her şey yalnızca compose ağındadır.
+#   - Çalıştırmadan önce: ./scripts/compose-env.ps1  (rastgele parolalarla .env üretir; .env git'e girmez, yazdırılmaz).
+#
+# Kullanım:
+#   ./scripts/compose-env.ps1
+#   docker compose up -d --build api      # sqlserver → db-provision → db-migrate → db-harden → api (+ image-worker)
+#   docker compose ps                     # sağlık durumları
+#   docker compose down                   # durdurur (veri kalır);  docker compose down -v  → birimleri de SİLER (yalnızca bu proje)
+#
+# Bu dosya gerçek AI çağrısı yapmaz: mock sağlayıcı açık, API anahtarları boş, ücretli çağrılar kapalı.
+
+name: sanalprova
+
+x-sql-tools: &sql-tools
+  image: mcr.microsoft.com/mssql-tools
+  restart: "no"
+  volumes:
+    - ./docker/db:/docker/db:ro
+    - ./scripts/mssql:/sql:ro
+  entrypoint: ["/bin/bash", "/docker/db/run-sql.sh"]
+  depends_on:
+    sqlserver:
+      condition: service_healthy
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Express
+      MSSQL_COLLATION: Latin1_General_100_CI_AS_SC
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?.env eksik - once ./scripts/compose-env.ps1 calistirin}"
+    ports:
+      - "127.0.0.1:${MSSQL_HOST_PORT:-14331}:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      # İmajda sqlcmd olmayabilir (2025): yalnızca TCP dinleme denetlenir; db-provision girişi kendisi yeniden dener
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1433' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 15s
+
+  db-provision:
+    <<: *sql-tools
+    command: ["provision"]
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?}
+      SP_MIGRATOR_PW: ${SP_MIGRATOR_PW:?}
+      SP_APP_PW: ${SP_APP_PW:?}
+
+  db-migrate:
+    build:
+      context: ./backend
+      target: migrator
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    # Üç veritabanına migrator hesabıyla şema uygulanır (dev, test, e2e). Bağlantı dizeleri ortamdan okunur, yazdırılmaz.
+    command:
+      - |
+        set -e
+        for db in sanalprova_dev sanalprova_test sanalprova_e2e; do
+          /app/efbundle --connection "Server=sqlserver,1433;Database=$$db;User ID=sanalprova_migrator;Password=$$SP_MIGRATOR_PW;Encrypt=True;TrustServerCertificate=True"
+        done
+    environment:
+      SP_MIGRATOR_PW: ${SP_MIGRATOR_PW:?}
+    depends_on:
+      db-provision:
+        condition: service_completed_successfully
+
+  db-harden:
+    <<: *sql-tools
+    command: ["harden"]
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+
+  image-worker:
+    build:
+      context: ./image-worker
+    restart: unless-stopped
+    environment:
+      IMAGE_WORKER_INTERNAL_KEY: ${IMAGE_WORKER_KEY:?}
+      IMAGE_WORKER_SEGMENTATION: mock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  api:
+    build:
+      context: ./backend
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db-harden:
+        condition: service_completed_successfully
+      image-worker:
+        condition: service_healthy
+    environment:
+      # Geliştirme/test: Development (OpenAPI + isteğe bağlı demo tohumu). Üretim için API_ENVIRONMENT=Production ve TLS sonlandıran ters vekil gerekir (çerezler Secure).
+      ASPNETCORE_ENVIRONMENT: ${API_ENVIRONMENT:-Development}
+      ConnectionStrings__Main: Server=sqlserver,1433;Database=sanalprova_dev;User ID=sanalprova_app;Password=${SP_APP_PW:?};Encrypt=True;TrustServerCertificate=True;Application Name=SanalProva.Api
+      Storage__SigningKey: ${STORAGE_SIGNING_KEY:?}
+      ImageWorker__BaseUrl: http://image-worker:8090
+      ImageWorker__InternalKey: ${IMAGE_WORKER_KEY:?}
+      # Gerçek AI çağrısı yok: mock açık, ücretli çağrılar kapalı, anahtarlar boş
+      Generation__UseMockProviders: "true"
+      Generation__Budget__AllowPaidCalls: "false"
+      Ai__Fal__ApiKey: " "
+      Ai__Pruna__ApiKey: " "
+      Ai__Fashn__ApiKey: " "
+      Ai__Gemini__ApiKey: " "
+      # Demo tohumu varsayılan KAPALI (yalnızca Development'ta ve SEED_DEV_PASSWORD verilirse açılır)
+      Seed__Enabled: ${SEED_ENABLED:-false}
+      Seed__DevPassword: ${SEED_DEV_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+    volumes:
+      - api-storage:/data/storage
+      - api-dpkeys:/home/app/.aspnet/DataProtection-Keys
+    healthcheck:
+      # aspnet imajında curl yok: bash /dev/tcp ile HTTP GET
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health/live HTTP/1.0\\r\\n\\r\\n\" >&3 && head -n1 <&3 | grep -q \" 200 \"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  sqlserver-data:
+  api-storage:
+  api-dpkeys:

@@ -97,6 +97,43 @@ Eski `init`, `start`, `stop`, `reseed-demo` komutları (PostgreSQL) kaldırılm�
 
 **Migration politikası:** yalnızca ileri yönlü (`Down` maliyet/mutabakat verisini siler); geri dönüş yedekten yapılır. Üretim/dağıtım için `./scripts/db.ps1 script` ile idempotent betik üretilir ve migrator hesabıyla `sqlcmd -I` ile uygulanır.
 
+## Docker Compose ve CI
+
+`docker-compose.yml` geliştirme/test için **yalıtılmış** bir yığın kurar: kendi SQL Server 2025 Express konteyneri (Windows'taki `SANALPROVA`, `SQLEXPRESS`, `SQLEXPRESS01` örneklerinden, dosyalarından ve portlarından bağımsız; kendi adlandırılmış birimi), API ve image-worker. Gerçek AI çağrısı yoktur (mock, ücretli çağrılar kapalı, anahtarlar boş). Gereksinim: Docker Desktop veya Docker Engine + Compose v2 (x64).
+
+```powershell
+./scripts/compose-env.ps1                 # rastgele parolalarla .env üretir (yazdırılmaz, git'e girmez); varsa ezmez
+docker compose up -d --build api          # sqlserver → db-provision → db-migrate → db-harden → image-worker → api
+docker compose ps                         # sağlık durumları (api: healthy)
+curl http://127.0.0.1:8080/health/ready   # veritabanı + depolama + image-worker
+docker compose down                       # durdurur, veri kalır
+docker compose down -v                    # bu projenin birimlerini de SİLER (yalnızca sanalprova_* birimleri)
+```
+
+| Servis | Rol | Ana makineye açılış |
+|---|---|---|
+| `sqlserver` | SQL Server 2025 Express; birim `sqlserver-data` | yalnızca `127.0.0.1:14331` |
+| `db-provision` → `db-migrate` → `db-harden` | Tek seferlik işler: veritabanları (`sanalprova_dev/test/e2e`) ve en az yetkili girişler → EF migration paketi → `DENY` sertleştirmeleri | yok |
+| `image-worker` | FastAPI + OpenCV (durumsuz) | yok (yalnızca compose ağı) |
+| `api` | ASP.NET Core; birimler `api-storage`, `api-dpkeys` | yalnızca `127.0.0.1:8080` |
+
+- **Gizli değerler:** `.env` (git'e girmez) `scripts/compose-env.ps1` / `scripts/compose-env.sh` ile üretilir; şablon `.env.example`. Kaynakta ve imaj katmanlarında parola/anahtar yoktur; uygulama `sanalprova_app` (en az yetki) ile bağlanır, `sa` yalnızca tek seferlik işlerde kullanılır.
+- **Demo tohumu varsayılan kapalıdır** (`SEED_ENABLED=false`): Compose ortamında veri yoktur. Elle denemek için `.env`'e `SEED_ENABLED=true` ve `SEED_DEV_PASSWORD` ekleyin (yalnızca Development).
+- **Üretim:** `API_ENVIRONMENT=Production` çerezleri `Secure` yapar; TLS sonlandıran bir ters vekil gerekir (M4.3/canlıya çıkış kapsamı). Data Protection anahtarları `api-dpkeys` birimindedir.
+- Migration paketi `linux-x64`tür; ARM ana makinede `db-migrate` derlenmez.
+
+**CI (GitHub Actions, `.github/workflows/ci.yml`)** — her işte rastgele ve maskelenmiş parolalar; AI çağrısı yok:
+
+| İş | İçerik |
+|---|---|
+| `backend` | Release derleme (uyarılar hata) + birim testleri |
+| `frontend` | typecheck, lint, test, build |
+| `image-worker` | pytest |
+| `integration` | Compose yığınını (API imajı dahil) kurar, `/health/ready` doğrular, MSSQL entegrasyon testlerini `sanalprova_test`'te çalıştırır |
+| `e2e` | Compose ile SQL Server + şema, ardından Playwright (izole `sanalprova_e2e`) |
+
+Kapsam sınırı: migration laboratuvarı testleri (`MigrationValidationTests` vb.) Windows `SANALPROVA` örneği gerektirir (`SANALPROVA_LAB_ADMIN`); Linux konteynerinde **atlanır** ve yerelde çalıştırılır.
+
 ## Çalıştırma
 
 API şu an `sanalprova_dev` şemasını bekler; bu makinede o veritabanı M5'e kadar boş olduğundan **elle çalıştırma yeni bir geliştirme veritabanı kurulana kadar kullanılamaz** (bkz. "Yeni makinede ilk kurulum"). Kurulu bir makinede üç terminal:

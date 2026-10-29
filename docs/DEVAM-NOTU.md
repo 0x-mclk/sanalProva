@@ -1,6 +1,6 @@
-﻿# Devam notu (son güncelleme: M4.1 sonu — M3 tamamlandı, M4.2 onay bekliyor)
+﻿# Devam notu (son güncelleme: M4.2 sonu — M4.3 onay bekliyor)
 
-Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **M4.2 için kullanıcı onayı beklenir.**
+Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **M4.3 için kullanıcı onayı beklenir.**
 
 ## Tamamlanan (commit'li)
 
@@ -20,7 +20,8 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 | M3.8 | Frontend/backend sözleşmesi; `/retry` için isteğe bağlı `Idempotency-Key`; eksik Türkçe hata eşlemeleri | `fcd3a15` |
 | M3.9 | Playwright E2E (izole MSSQL), `useDraftItems.flush` yarışı düzeltmesi | `5113ebb` |
 | M3.10 | PostgreSQL kalıntı taraması, belge güncellemeleri, risk sınıflandırması, son regresyon | `d7fc9eb` |
-| M4.1 | `db.ps1` MSSQL'e yeniden yazıldı (status/migrate/reset/script, izin listeli hedefler); README ve docs 02/03/09/10/README güncellendi | bu commit (`git log` ile bakın) |
+| M4.1 | `db.ps1` MSSQL'e yeniden yazıldı (status/migrate/reset/script, izin listeli hedefler); README ve docs 02/03/09/10/README güncellendi | `fc0d8a1` |
+| M4.2 | Docker (API, migration paketi, image-worker, SQL Server 2025 Express konteyneri) + Compose + GitHub Actions CI; **Docker/CI fiilen çalıştırılmadı** (aşağıda) | bu commit (`git log` ile bakın) |
 
 ## Ortamın durumu (önemli)
 
@@ -38,6 +39,26 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 - **Kalan yalnızca açıklayıcı/kozmetik:** `SessionEndpoints.cs` ve `GenerationProcessor.cs` yorumları (PostgreSQL ile karşılaştırma, bilinçli), `DatabaseIntegrityTests`/`MigrationLab` yorumları, `PersistenceTests` test adı (`..._jsonb_ayarlar_...`; sütun artık `nvarchar` JSON), `DevStatusPage.tsx` açıklama yorumu ("PostgreSQL"), `playwright.config.ts` güvenlik yorumu.
 - **Eski araç (M4.1'de çözüldü):** `scripts/db.ps1` MSSQL yöneticisi olarak yeniden yazıldı; PostgreSQL komutları (`init/start/stop/reseed-demo`) kaldırıldı. `.local/pgsql|pgdata|postgres*` ve `.local/backups` dokunulmadan duruyor.
 - **Belgeler (M4.1'de güncellendi):** `README.md` (MSSQL kurulum, veritabanı rolleri, `db.ps1`, test/E2E, gizli anahtarlar), `docs/02`, `docs/03` (tip karşılık tablosu), `docs/09`, `docs/10`, `docs/README.md`, `CLAUDE.md`, `docs/12`. Kalan eski ifadeler yalnızca `docs/03` gövdesindeki PostgreSQL tip gösterimi (üstteki tablo karşılıkları verir) ve `docs/01`/`docs/07`/`docs/08` gibi bağlam belgelerinde tarihsel anlatımdır.
+
+## M4.2: Docker ve CI durumu (ÖNEMLİ — doğrulanan / doğrulanamayan)
+
+**Eklenen dosyalar:** `docker-compose.yml`, `backend/Dockerfile` (hedefler: `build` → `migrations` → `migrator`, `api`), `backend/.dockerignore`, `image-worker/Dockerfile`, `image-worker/.dockerignore`, `docker/db/provision.sql` + `docker/db/run-sql.sh` (konteyner provision/harden), `scripts/compose-env.ps1|sh`, `.env.example`, `.gitattributes` (sh/Dockerfile/docker LF), `.github/workflows/ci.yml`; E2E için `frontend/e2e/sql.ts` (Windows kimliği veya SQL girişi), `playwright.config.ts` platform bağımsız webServer komutu.
+
+**Tasarım:** Compose yığını Windows örneklerinden tamamen yalıtılmıştır (ayrı konteyner, adlandırılmış birimler `sanalprova_*`, ana makineye yalnızca `127.0.0.1:14331` ve `127.0.0.1:8080`; image-worker hiç açılmaz). Sıra: `sqlserver` → `db-provision` (3 DB + en az yetkili girişler) → `db-migrate` (EF bundle, migrator hesabı) → `db-harden` (history/append-only DENY) → `image-worker` → `api`. Parolalar `.env`'den (git dışı, rastgele); AI anahtarları boş, mock açık, ücretli çağrılar kapalı, demo tohumu varsayılan kapalı. CI'da parolalar her koşuda üretilir ve maskelenir.
+
+**Gerçekten çalıştırılıp doğrulananlar (Docker olmadan, yakın vekillerle; yalnızca izole `sanalprova_e2e`/temp):**
+- Dockerfile'ın `dotnet publish -c Release` adımı; yayımlanan DLL **Production** ortamında ortam değişkeniyle yapılandırılıp başlatıldı: `/health/live` 200, `/health/ready` 200 Healthy (veritabanı + depolama + image-worker), OpenAPI 404 (Production'da kapalı), tohum çalışmadı, loglarda anahtar/parola izi yok.
+- image-worker: temiz sanal ortamda Dockerfile'ın `pip install .` akışı + `uvicorn app.main:app`; `/health` ok; `/v1` iç anahtarsız 401.
+- EF migration paketi (`dotnet ef migrations bundle`, tasarım zamanı sahte bağlantı dizesiyle; Windows'ta `win-x64`) üretildi ve **boş** bir veritabanına uygulandı (26 tablo, 6 migration).
+- `docker/db/provision.sql`: `SET PARSEONLY ON` ile sözdizimi doğrulandı (dinamik SQL dizgeleri ayrıştırılamaz; elle gözden geçirildi). Yeni veritabanının varsayılan uyumluluk düzeyi SQL Server 2025'te **170**'tir; provision betiği EF kararı gereği 160'a sabitler.
+- YAML (`docker-compose.yml`, `ci.yml`) ayrıştırıldı (yapı, bağımlılık koşulları, adım sayıları, eylem sürüm sabitlemesi); `bash -n` (shell betikleri, LF); PowerShell betikleri ayrıştırıldı; frontend typecheck/lint; E2E Windows'ta yeniden çalıştırıldı (config/sql yardımcı refaktörü regresyon yaratmadı).
+
+**Ortam nedeniyle ÇALIŞTIRILAMAYANLAR (Docker bu makinede yok; WSL2'de dağıtım yok; kullanıcı yönetici değil; sistem yazılımı kurulmadı):**
+- `docker compose up` ve imaj derlemeleri hiç çalışmadı. **Varsayımlar doğrulanmadı:** `mcr.microsoft.com/mssql/server:2025-latest` etiketi; `mcr.microsoft.com/mssql-tools` imajındaki sqlcmd 17'nin SQL Server 2025'e bağlanması (`-C`, TLS); 2025 imajında `MSSQL_COLLATION`/`MSSQL_PID=Express`; healthcheck'lerin (bash `/dev/tcp`) davranışı; `aspnet`/`runtime-deps` imajlarındaki `app` kullanıcısı, `bash`/`sh` varlığı ve ICU; `efbundle`'ın `linux-x64` self-contained derlemesi (NuGet runtime paketi indirme); `docker compose run --rm db-harden` bağımlılık zinciri; konteynerde `Application Name`/`Encrypt=True` bağlantısı; image-worker `opencv-python-headless`'in `slim` imajda çalışması.
+- GitHub Actions hiç çalışmadı (depo uzak sunucuya itilmedi). CI'ın geçtiği **iddia edilmez**. Özellikle: testler Linux'ta hiç koşulmadı (yol/büyük-küçük harf/kültür farkları çıkabilir); `integration` işi `SANALPROVA_LAB_ADMIN` olmadığından migration laboratuvarı testlerini **atlar** (bu testler Windows `SANALPROVA` örneği ister); `e2e` işinde `mssql-tools18` kurulumu (Microsoft apt deposu) ve Playwright'ın Linux'ta ilk çalışması doğrulanmadı.
+- **İlk Docker/CI koşusunda sorun çıkması olasıdır; başarısızlık gizlenmez** (`continue-on-error` yok). İlk işler: `docker compose up -d --build api` günlüklerini incelemek, hataları sırayla düzeltmek.
+
+**Kalan riskler (M4.2):** Data Protection anahtarları birimde ama Production için TLS sonlandıran ters vekil ve gizli yönetimi tasarlanmadı; `.env` düz metin (yerel geliştirme için kabul, üretimde gizli yöneticisi gerekir); `sanalprova_dev` konteynerde yalnızca konteynerin kendi veritabanıdır (Windows `sanalprova_dev` ile ilgisiz); Compose'ta `sa` yalnızca tek seferlik işlerde kullanılır ama konteyner içinde etkindir; imaj etiketleri (`2025-latest`, `10.0`, `3.12-slim`) sabit özet (digest) değildir (tedarik zinciri sertleştirmesi M4.3); migration paketi yalnızca x64; yedekleme/geri yükleme hâlâ M4.3.
 
 ## Açık riskler (üç grup)
 
@@ -90,7 +111,7 @@ Ayrıca: gerçek mağaza TV denemesi, hukuki onaylı aydınlatma metni, S3 için
 ## Önerilen yol haritası (öneri; her adım onayla)
 
 1. ~~**M4.1 Geliştirici ortamı + belgeler**~~ — **yapıldı** (`db.ps1` MSSQL, README, docs; `.local` PostgreSQL arşiv kararı: dokunulmaz, M4.3'te yedek stratejisiyle birlikte yeniden ele alınır).
-2. **M4.2 Konteyner + CI:** Docker Compose (api, image-worker, SQL Server), CI hattı (derleme, birim, entegrasyon, izole E2E), idempotent migration betiğiyle dağıtım.
+2. ~~**M4.2 Konteyner + CI**~~ — **dosyalar yazıldı, fiilen çalıştırılmadı** (yukarıdaki bölüm). M4.3 başında: Docker kurulu bir makinede/CI'da ilk koşu ve düzeltmeler; imaj özetleri; idempotent migration betiğiyle dağıtım.
 3. **M4.3 Yedek/geri yükleme + üretim sertleştirme:** A-1, A-2, A-5 (prova dahil); dev şema kurulumu ve PostgreSQL kimliklerini koruma kararı.
 4. **M5.1 İşletme kaydı + platform yönetimi:** firma/şube açılışı, platform yöneticisi sağlama ve mutabakat arayüzü.
 5. **M5.2 Bütçe/kredi:** rezervasyon kapanış kuralı, platform/şube limiti, kredi paketleri (aynı rezervasyon modeli), ardından ödeme altyapısı (sağlayıcı seçimi için ayrı karar).

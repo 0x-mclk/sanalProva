@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { runSqlcmd } from './sql';
 import { deflateSync } from 'node:zlib';
 import type { APIRequestContext, APIResponse, Page } from '@playwright/test';
 
@@ -17,12 +18,7 @@ export async function selectStore(page: Page, name: string): Promise<void> {
 
 /** Yalnızca izole `sanalprova_e2e` veritabanında tek değerli sorgu (sayaç doğrulamaları için). */
 export function sqlScalar(query: string): string {
-  const connection = process.env.SANALPROVA_E2E_DB ?? '';
-  const database = /Database=([^;]+)/i.exec(connection)?.[1];
-  const server = /Server=([^;]+)/i.exec(connection)?.[1];
-  if (database !== 'sanalprova_e2e' || !server) throw new Error('E2E veritabanı doğrulanamadı.');
-  const out = execFileSync('sqlcmd', ['-S', server, '-d', database, '-E', '-C', '-I', '-f', '65001', '-h', '-1', '-W', '-b', '-Q', `SET NOCOUNT ON; ${query}`], { encoding: 'utf8' });
-  return out.trim();
+  return runSqlcmd(['-h', '-1', '-W', '-Q', `SET NOCOUNT ON; ${query}`]).trim();
 }
 
 /** Demo hesap parolası: E2E_PASSWORD, yoksa API projesinin user-secrets'ındaki Seed:DevPassword. */

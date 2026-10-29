@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+TestResults/
+tests/
+.vs/
+*.user
+*.md

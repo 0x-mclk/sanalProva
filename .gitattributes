@@ -1,0 +1,5 @@
+# Linux konteynerlerine bağlanan/kopyalanan dosyalar CRLF olmamalı (Windows'ta core.autocrlf=true olsa bile)
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker/** text eol=lf
+.dockerignore text eol=lf

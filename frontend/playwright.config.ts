@@ -31,7 +31,11 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: 'powershell -NoProfile -Command ". ../scripts/dev-env.ps1; dotnet run --project ../backend/src/SanalProva.Api --launch-profile http"',
+      // Windows: kullanıcı klasöründeki .NET 10'u öne alan dev-env.ps1; Linux/CI: dotnet zaten PATH'te
+      command:
+        process.platform === 'win32'
+          ? 'powershell -NoProfile -Command ". ../scripts/dev-env.ps1; dotnet run --project ../backend/src/SanalProva.Api --launch-profile http"'
+          : 'dotnet run --project ../backend/src/SanalProva.Api --launch-profile http',
       url: 'http://127.0.0.1:5080/health/live',
       reuseExistingServer: false,
       timeout: 180_000,
