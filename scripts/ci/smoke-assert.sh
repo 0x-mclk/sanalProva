@@ -44,15 +44,43 @@ body="$(curl -fsS --max-time 15 http://127.0.0.1:8080/health/ready 2>/dev/null |
 if echo "$body" | grep -q '"status":"Healthy"'; then ok "api /health/ready Healthy (veritabani, depolama, image-worker)"; else bad "api /health/ready Healthy degil"; fi
 
 # 4) Veritabanlari: harmanlama, RCSI, uyumluluk 160; migration'lar uygulanmis
-dbs="$(sql sa MSSQL_SA_PASSWORD master "SELECT COUNT(*) FROM sys.databases WHERE name IN (N'sanalprova_dev', N'sanalprova_test', N'sanalprova_e2e') AND collation_name = N'Latin1_General_100_CI_AS_SC' AND is_read_committed_snapshot_on = 1 AND compatibility_level = 160" | tail -n1 | tr -d '[:space:]')"
-if [ "$dbs" = 3 ]; then ok "3 veritabani: harmanlama Latin1_General_100_CI_AS_SC, RCSI acik, uyumluluk 160"; else bad "veritabani ayarlari beklenen gibi degil (eslesen: ${dbs:-?})"; fi
+# Veritabani basina GERCEK degerler okunur ve her alan ayri karsilastirilir: hata mesaji hangi veritabaninda hangi ayarin farkli oldugunu yazar
+# (beklenenler gevsetilmez). Sunucu harmanlamasi ve surumu yalnizca kanit icin yazdirilir.
+exp_coll="Latin1_General_100_CI_AS_SC"; exp_rcsi=1; exp_compat=160
+server_info="$(sql sa MSSQL_SA_PASSWORD master "SELECT CAST(SERVERPROPERTY('Collation') AS nvarchar(128)) + N'|' + CAST(SERVERPROPERTY('ProductVersion') AS nvarchar(64))" | tail -n1 | tr -d '\r')"
+echo "bilgi: sunucu harmanlamasi|surum = $server_info"
+db_rows="$(sql sa MSSQL_SA_PASSWORD master "SELECT v.name + N'|' + ISNULL(d.collation_name, N'YOK') + N'|' + ISNULL(CAST(d.is_read_committed_snapshot_on AS nvarchar(1)), N'YOK') + N'|' + ISNULL(CAST(d.compatibility_level AS nvarchar(5)), N'YOK') FROM (VALUES (N'sanalprova_dev'), (N'sanalprova_test'), (N'sanalprova_e2e')) AS v(name) LEFT JOIN sys.databases AS d ON d.name = v.name")"
+for db in sanalprova_dev sanalprova_test sanalprova_e2e; do
+  row="$(printf '%s\n' "$db_rows" | tr -d '\r' | grep "^$db|" | tail -n1)"
+  if [ -z "$row" ]; then bad "$db: ayarlar okunamadi"; continue; fi
+  IFS='|' read -r _ coll rcsi compat <<<"$row"
+  diffs=""
+  [ "$coll" = "$exp_coll" ] || diffs="$diffs harmanlama=$coll (beklenen $exp_coll);"
+  [ "$rcsi" = "$exp_rcsi" ] || diffs="$diffs RCSI=$rcsi (beklenen $exp_rcsi);"
+  [ "$compat" = "$exp_compat" ] || diffs="$diffs uyumluluk=$compat (beklenen $exp_compat);"
+  if [ -z "$diffs" ]; then ok "$db: harmanlama $coll, RCSI acik, uyumluluk $compat"; else bad "$db ayarlari farkli:$diffs"; fi
+done
 for db in sanalprova_dev sanalprova_test sanalprova_e2e; do
   n="$(sql sa MSSQL_SA_PASSWORD "$db" "SELECT COUNT(*) FROM dbo.__ef_migrations_history" | tail -n1 | tr -d '[:space:]')"
   if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt 0 ]; then ok "$db: $n migration uygulandi"; else bad "$db: migration sayisi okunamadi/0 ($n)"; fi
 done
 
 # 5) Ag yuzeyi: image-worker ana makineye acik degil; yayimlanan portlar yalnizca loopback
-if [ -z "$(docker compose port image-worker 8090 2>/dev/null)" ]; then ok "image-worker ana makineye acik degil"; else bad "image-worker ana makineye acilmis"; fi
+# Gercek yayin = konteynerin HOST port baglamalari (HostConfig.PortBindings / NetworkSettings.Ports icinde HostPort). Imajdaki EXPOSE yalnizca
+# konteyner ici bildirimdir; 'docker compose port' yayimlanmamis EXPOSE portu icin bile ":0" dondurdugu icin yayin kaniti olarak KULLANILMAZ.
+iw="$(docker compose ps -q image-worker 2>/dev/null | head -n1)"
+if [ -z "$iw" ]; then
+  bad "image-worker konteyneri bulunamadi (ag yuzeyi denetlenemedi)"
+else
+  iw_published="$(docker inspect -f '{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{$p}}->{{.HostIp}}:{{.HostPort}} {{end}}{{end}}' "$iw" 2>/dev/null)"
+  iw_configured="$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{$p}} {{end}}' "$iw" 2>/dev/null)"
+  iw_exposed="$(docker inspect -f '{{range $p, $_ := .Config.ExposedPorts}}{{$p}} {{end}}' "$iw" 2>/dev/null)"
+  if [ -z "${iw_published// /}" ] && [ -z "${iw_configured// /}" ]; then
+    ok "image-worker ana makineye acik degil (host baglamasi yok; yalnizca konteyner ici EXPOSE: ${iw_exposed:-yok})"
+  else
+    bad "image-worker ana makineye yayimlaniyor (baglamalar: ${iw_published:-} ${iw_configured:-})"
+  fi
+fi
 for svc in sqlserver api; do
   cid="$(docker compose ps -q "$svc" 2>/dev/null | head -n1)"
   hosts="$(docker inspect -f '{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{.HostIp}} {{end}}{{end}}' "$cid" 2>/dev/null)"
