@@ -120,6 +120,12 @@ builder.Services.AddAppHealthChecks();
 
 var app = builder.Build();
 
+// Operatör komutları (platform bootstrap/paid-ai/...): web sunucusu başlatılmadan çalışır ve süreç biter; HTTP ile tetiklenemez
+if (PlatformCommands.IsCommand(args))
+{
+    return await PlatformCommands.RunAsync(app.Services, args, Console.Out, CancellationToken.None);
+}
+
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseApiSecurityHeaders();
@@ -169,6 +175,7 @@ if (app.Environment.IsDevelopment())
 }
 
 await app.RunAsync();
+return 0;
 
 /// <summary>Entegrasyon testleri (WebApplicationFactory) için.</summary>
 public partial class Program;

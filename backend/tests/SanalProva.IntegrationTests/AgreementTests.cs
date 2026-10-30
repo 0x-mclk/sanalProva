@@ -1,5 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
@@ -149,6 +151,49 @@ public sealed class AgreementTests(ApiFactory factory) : ApiTestBase(factory)
     private sealed class FixedSource(ServiceAgreementDocument document) : IServiceAgreementSource
     {
         public ServiceAgreementDocument Current => document;
+    }
+
+    private sealed class MutableSource(ServiceAgreementDocument initial) : IServiceAgreementSource
+    {
+        public ServiceAgreementDocument Current { get; set; } = initial;
+    }
+
+    private static HubConnection ConnectHub(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host, string authCookie) =>
+        new HubConnectionBuilder()
+            .WithUrl(new Uri(host.Server.BaseAddress, SanalProva.Api.Hubs.StaffHub.Path), options =>
+            {
+                options.HttpMessageHandlerFactory = _ => host.Server.CreateHandler();
+                options.Transports = HttpTransportType.WebSockets;
+                options.Headers["Cookie"] = authCookie;
+                options.WebSocketFactory = async (context, ct) =>
+                {
+                    var socketClient = host.Server.CreateWebSocketClient();
+                    socketClient.ConfigureRequest = request => request.Headers["Cookie"] = authCookie;
+                    return await socketClient.ConnectAsync(context.Uri, ct);
+                };
+            })
+            .Build();
+
+    [Fact]
+    public async Task Acik_hub_baglantisi_surum_degisince_yeni_abonelik_alamaz_yeni_baglanti_kurulamaz()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var tenant = await TestData.CreateTenantAsync(Services, StoreRole.Owner); // v1 kabul edilmiş
+        var source = new MutableSource(ServiceAgreement.Document);
+        using var host = DerivedHost(b => b.ConfigureTestServices(s => s.AddSingleton<IServiceAgreementSource>(source)));
+        var owner = await ApiClient.LoginAsync(host, tenant.Email, tenant.StoreId);
+
+        await using var open = ConnectHub(host, owner.AuthCookie);
+        await open.StartAsync(Ct);
+        Assert.True(await open.InvokeAsync<bool>("JoinStore", tenant.StoreId, Ct)); // v1: abonelik verilir
+
+        // Yeni sürüm yayımlandı: açık bağlantı kopmaz (belgelenmiş sınır) ama YENİ abonelik verilmez ve yeni bağlantı kurulamaz
+        source.Current = new ServiceAgreementDocument("2027-02-v2", "Sanal Prova Hizmet Sözleşmesi (TASLAK)", ServiceAgreement.Document.Text + "\n11. Yeni madde.");
+        Assert.False(await open.InvokeAsync<bool>("JoinStore", tenant.StoreId, Ct));
+        Assert.Equal(HubConnectionState.Connected, open.State);
+
+        await using var fresh = ConnectHub(host, owner.AuthCookie);
+        await Assert.ThrowsAnyAsync<Exception>(() => fresh.StartAsync(Ct));
     }
 
     [Fact]

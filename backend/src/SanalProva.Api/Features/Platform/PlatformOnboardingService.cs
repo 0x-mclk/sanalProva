@@ -52,14 +52,16 @@ public sealed class PlatformOnboardingService(
             return replay.Value;
         }
 
+        // "Zaten alınmış" kararından önce tekrar yeniden değerlendirilir: aynı anahtar + aynı gövdeyle eşzamanlı gelen bir isteğin kazananı commit etmiş olabilir;
+        // o durumda slug/e-posta çakışması başkasına değil BU isteğin kendi önceki sonucuna aittir (409 değil, tekrar = 200).
         if (await db.Organizations.AnyAsync(o => o.Slug == request.Slug, ct))
         {
-            return (CreateOrganizationOutcome.SlugTaken, null);
+            return await TryReplayAsync(adminUserId, idempotencyKey, hash, ct) ?? (CreateOrganizationOutcome.SlugTaken, null);
         }
 
         if (await users.FindByEmailAsync(request.OwnerEmail) is not null)
         {
-            return (CreateOrganizationOutcome.EmailTaken, null);
+            return await TryReplayAsync(adminUserId, idempotencyKey, hash, ct) ?? (CreateOrganizationOutcome.EmailTaken, null);
         }
 
         try
@@ -68,7 +70,8 @@ public sealed class PlatformOnboardingService(
         }
         catch (EmailTakenException)
         {
-            return (CreateOrganizationOutcome.EmailTaken, null);
+            db.ChangeTracker.Clear();
+            return await TryReplayAsync(adminUserId, idempotencyKey, hash, ct) ?? (CreateOrganizationOutcome.EmailTaken, null);
         }
         catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 })
         {

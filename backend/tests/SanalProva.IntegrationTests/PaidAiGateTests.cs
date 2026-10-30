@@ -175,8 +175,8 @@ public sealed class PaidAiGateTests(ApiFactory factory) : ApiTestBase(factory)
     public void Kaynak_kodda_ucretli_AI_yetkisini_yazan_hicbir_yer_yok_yalnizca_okunur()
     {
         var src = Directory.GetParent(Path.GetDirectoryName(MigrationLab.RepoFile("backend/src/SanalProva.Api/SanalProva.Api.csproj"))!)!.FullName;
-        // Operatör komutu (M5.1g) eklendiğinde BU liste gerekçeyle genişletilir; başka hiçbir dosya yazamaz.
-        var allowedWriters = new HashSet<string>(StringComparer.Ordinal);
+        // Yalnızca operatör komutu yazabilir; başka dosya eklemek bu listeyi gerekçeyle genişletmeyi gerektirir.
+        var allowedWriters = new HashSet<string>(StringComparer.Ordinal) { "SanalProva.Api/Features/Platform/PlatformCommands.cs" }; // operatör komutu (paid-ai): denetimli tek yazıcı
         var writes = new Regex(@"PaidAiEnabled\s*(=(?![=>])|\+=)|SetProperty\([^;]*PaidAiEnabled|JSON_MODIFY", RegexOptions.CultureInvariant);
 
         var offenders = new List<string>();

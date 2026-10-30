@@ -223,8 +223,9 @@ public sealed class PlatformOrganizationTests(ApiFactory factory) : ApiTestBase(
             return (response.StatusCode, Text: text);
         }));
 
-        Assert.Equal(1, statuses.Count(s => s.StatusCode == HttpStatusCode.Created));
-        Assert.Equal(7, statuses.Count(s => s.StatusCode == HttpStatusCode.OK));
+        var detail = string.Join(" | ", statuses.Select(s => $"{(int)s.StatusCode}:{(s.Text.Length > 140 ? s.Text[..140] : s.Text)}"));
+        Assert.True(statuses.Count(s => s.StatusCode == HttpStatusCode.Created) == 1, detail);
+        Assert.True(statuses.Count(s => s.StatusCode == HttpStatusCode.OK) == 7, detail);
         var linkCount = statuses.Count(s => s.Text.Contains("#t=", StringComparison.Ordinal));
         Assert.Equal(1, linkCount); // bağlantı yalnızca tek yanıtta
 

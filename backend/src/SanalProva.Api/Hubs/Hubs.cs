@@ -36,7 +36,7 @@ public sealed record DisplayStatusMessage(Guid DisplayId, bool Online, Guid? Cur
 /// (oturum kimliğinin varlığı sızdırılmaz).
 /// </summary>
 [Authorize]
-public sealed class StaffHub(AppDbContext db) : Hub<IStaffClient>
+public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.AgreementGate agreement) : Hub<IStaffClient>
 {
     public const string Path = "/hubs/staff";
 
@@ -50,6 +50,12 @@ public sealed class StaffHub(AppDbContext db) : Hub<IStaffClient>
         var userId = Context.User?.GetUserId();
         var organizationId = Context.User?.GetOrganizationId();
         if (userId is null || organizationId is null)
+        {
+            return false;
+        }
+
+        // Sözleşmenin yeni sürümü yayımlandıysa yeni abonelik verilmez (bağlantı açıkken sürüm değişmiş olabilir; ara katman yalnızca bağlanmayı denetler)
+        if (!await agreement.IsAcceptedAsync(db, organizationId.Value, Context.ConnectionAborted))
         {
             return false;
         }
@@ -78,6 +84,12 @@ public sealed class StaffHub(AppDbContext db) : Hub<IStaffClient>
         var userId = Context.User?.GetUserId();
         var organizationId = Context.User?.GetOrganizationId();
         if (userId is null || organizationId is null)
+        {
+            return false;
+        }
+
+        // Sözleşmenin yeni sürümü yayımlandıysa yeni abonelik verilmez (bağlantı açıkken sürüm değişmiş olabilir; ara katman yalnızca bağlanmayı denetler)
+        if (!await agreement.IsAcceptedAsync(db, organizationId.Value, Context.ConnectionAborted))
         {
             return false;
         }
