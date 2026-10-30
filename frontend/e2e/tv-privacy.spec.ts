@@ -5,6 +5,14 @@ import { DEMO_MANAGER, devPassword, MAIN_STORE, selectStore, sqlScalar, StaffApi
  * KVKK: müşteri verisi silindiğinde veya onay geri alındığında TV'deki görsel temizlenir (sentetik fotoğraf, izole veritabanı).
  * TV gerçek bir ikinci tarayıcıdır; eşleştirme belirteci tarayıcı deposuna yazılır (kod girişi tv.spec.ts'de arayüzden sınanır).
  */
+/**
+ * `SessionPurger` sırası: TV sıfırla → depo dosyaları → veritabanı satırları. TV ekranı temizlendiğinde veritabanı silmesi henüz bitmemiş olabilir
+ * (yavaş diskte dosya silme sürerken). Ürün doğrudur (silme isteği tamamlanınca satırlar gider); yarış yalnızca testin okuma anındadır: sayım bitene kadar yoklanır.
+ */
+async function expectRowCount(query: string, expected: number): Promise<void> {
+  await expect.poll(() => Number(sqlScalar(query)), { timeout: 15_000, intervals: [100, 250, 500, 1000] }).toBe(expected);
+}
+
 test.describe('TV gizlilik temizliği', () => {
   let staffBrowser: Browser;
   let tvBrowser: Browser;
@@ -68,8 +76,8 @@ test.describe('TV gizlilik temizliği', () => {
     await expect(tv.locator('.tv-image')).toHaveCount(0);
     await expect(tv.getByRole('heading', { name: 'Büyük ekranda birlikte karar verin.' })).toBeVisible();
     // Veri sunucuda da gerçekten silindi: onay kaydı ve fotoğraf kalmadı
-    expect(Number(sqlScalar(`SELECT COUNT(*) FROM session_photos WHERE session_id = '${sessionId}'`))).toBe(0);
-    expect(Number(sqlScalar(`SELECT COUNT(*) FROM generated_images WHERE session_id = '${sessionId}'`))).toBe(0);
+    await expectRowCount(`SELECT COUNT(*) FROM session_photos WHERE session_id = '${sessionId}'`, 0);
+    await expectRowCount(`SELECT COUNT(*) FROM generated_images WHERE session_id = '${sessionId}'`, 0);
   });
 
   test('provayı arayüzden silince TV temizlenir ve görsel adresi artık açılmaz', async () => {
@@ -84,8 +92,8 @@ test.describe('TV gizlilik temizliği', () => {
 
     await expect(tv.locator('.tv-image')).toHaveCount(0);
     await expect(tv.getByRole('heading', { name: 'Büyük ekranda birlikte karar verin.' })).toBeVisible();
-    expect(Number(sqlScalar(`SELECT COUNT(*) FROM tryon_sessions WHERE id = '${sessionId}'`))).toBe(0);
-    expect(Number(sqlScalar(`SELECT COUNT(*) FROM generation_jobs WHERE session_id = '${sessionId}'`))).toBe(0);
+    await expectRowCount(`SELECT COUNT(*) FROM tryon_sessions WHERE id = '${sessionId}'`, 0);
+    await expectRowCount(`SELECT COUNT(*) FROM generation_jobs WHERE session_id = '${sessionId}'`, 0);
     // İmzalı adres geçerli olsa bile dosya silinmiştir
     const response = await staffContext.request.get(src!);
     expect(response.status()).toBeGreaterThanOrEqual(400);
