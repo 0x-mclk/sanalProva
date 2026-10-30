@@ -78,3 +78,15 @@ export function RequireManager() {
   const { canManageCatalog } = useAuth();
   return canManageCatalog ? <Outlet /> : <Navigate to="/" replace />;
 }
+
+/** Şube yönetimi: yalnızca firma sahibi (sunucu da Owner rolünü doğrular). */
+export function RequireOwner() {
+  const { isOwner } = useAuth();
+  return isOwner ? <Outlet /> : <Navigate to="/" replace />;
+}
+
+/** Personel yönetimi: Manager ve Owner (kapsam sunucuda hesaplanır). */
+export function RequireStaffManager() {
+  const { canManageStaff } = useAuth();
+  return canManageStaff ? <Outlet /> : <Navigate to="/" replace />;
+}

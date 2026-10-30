@@ -18,7 +18,7 @@ import { PhotoPage } from '../features/session/PhotoPage';
 import { ResumePage } from '../features/session/ResumePage';
 import { DisplaysPage } from '../features/displays/DisplaysPage';
 import { LoadingState } from '../shared/ui';
-import { RequireAuth, RequireManager, RequirePlatformAdmin, RequireSession } from './RequireAuth';
+import { RequireAuth, RequireManager, RequireOwner, RequirePlatformAdmin, RequireSession, RequireStaffManager } from './RequireAuth';
 
 // Yönetim ekranları ve geliştirme ekranı yalnızca gerektiğinde yüklenir (personel ilk açılışı küçük kalır)
 const ProductsPage = lazy(() => import('../features/catalog-admin/ProductsPage').then((m) => ({ default: m.ProductsPage })));
@@ -29,6 +29,8 @@ const PlatformLayout = lazy(() => import('../features/platform/PlatformLayout').
 const OrganizationsPage = lazy(() => import('../features/platform/OrganizationsPage').then((m) => ({ default: m.OrganizationsPage })));
 const CreateOrganizationPage = lazy(() => import('../features/platform/CreateOrganizationPage').then((m) => ({ default: m.CreateOrganizationPage })));
 const OrganizationDetailPage = lazy(() => import('../features/platform/OrganizationDetailPage').then((m) => ({ default: m.OrganizationDetailPage })));
+const StoresPage = lazy(() => import('../features/management/StoresPage').then((m) => ({ default: m.StoresPage })));
+const StaffPage = lazy(() => import('../features/management/StaffPage').then((m) => ({ default: m.StaffPage })));
 const DevStatusPage = lazy(() => import('../features/dev/DevStatusPage').then((m) => ({ default: m.DevStatusPage })));
 
 const lazyPage = (node: React.ReactNode) => (
@@ -105,6 +107,9 @@ export const router = createBrowserRouter([
           { path: '/maliyet', element: lazyPage(<UsagePage />) },
         ],
       },
+      // Şube yönetimi: yalnızca firma sahibi; personel yönetimi: Manager+ (sunucu kapsamı her işlemde yeniden hesaplar)
+      { element: <RequireOwner />, children: [{ path: '/yonetim/subeler', element: lazyPage(<StoresPage />) }] },
+      { element: <RequireStaffManager />, children: [{ path: '/yonetim/personel', element: lazyPage(<StaffPage />) }] },
       { path: '/dev', element: lazyPage(<DevStatusPage />) },
     ],
   },

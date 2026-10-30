@@ -13,6 +13,10 @@ type AuthState = {
   setActiveStore: (id: string) => void;
   /** Katalog yönetimi: firmadaki herhangi bir şubede Manager veya Owner rolü. */
   canManageCatalog: boolean;
+  /** Personel yönetimi: Manager+ (kapsam sunucuda hesaplanır). */
+  canManageStaff: boolean;
+  /** Şube yönetimi ve firma düzeyi işlemler: firmanın Owner'ı (Owner her şubede satır taşır). */
+  isOwner: boolean;
   /** Platform (SaaS işletmecisi) yöneticisi: mağaza ekranlarını değil `/platform` panelini kullanır. */
   isPlatformAdmin: boolean;
   /** Firma güncel hizmet sözleşmesini kabul etmedi: mağaza ekranları sunucuda da kapalıdır; arayüz `/sozlesme`ye yönlendirir. */
@@ -62,6 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       activeStore,
       setActiveStore,
       canManageCatalog: Boolean(me?.stores.some((s) => s.role === 'Manager' || s.role === 'Owner')),
+      canManageStaff: Boolean(me?.stores.some((s) => s.role === 'Manager' || s.role === 'Owner')),
+      isOwner: Boolean(me?.stores.some((s) => s.role === 'Owner')),
       isPlatformAdmin: Boolean(me?.isPlatformAdmin),
       agreementRequired: Boolean(me?.agreementAcceptanceRequired),
       canAcceptAgreement: Boolean(me?.canAcceptAgreement),

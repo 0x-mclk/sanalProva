@@ -37,7 +37,7 @@ function initials(name: string) {
 
 /** Personel ana ekranı (referans: "Personel ana ekranı"). */
 export function HomePage() {
-  const { me, activeStore, setActiveStore, canManageCatalog } = useAuth();
+  const { me, activeStore, setActiveStore, canManageCatalog, canManageStaff, isOwner } = useAuth();
   const navigate = useNavigate();
   const logout = useLogout();
   const sessions = useSessions('open', 5);
@@ -95,6 +95,16 @@ export function HomePage() {
             {canManageCatalog ? (
               <Menu.Item leftSection={<LayersIcon size={16} />} component={Link} to="/katalog">
                 Katalog yönetimi
+              </Menu.Item>
+            ) : null}
+            {canManageStaff ? (
+              <Menu.Item leftSection={<StoreIcon size={16} />} component={Link} to="/yonetim/personel">
+                Personel yönetimi
+              </Menu.Item>
+            ) : null}
+            {isOwner ? (
+              <Menu.Item leftSection={<StoreIcon size={16} />} component={Link} to="/yonetim/subeler">
+                Şube yönetimi
               </Menu.Item>
             ) : null}
             {canManageCatalog ? (
