@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Identity;
+using SanalProva.Api.Features.Account;
 using SanalProva.Api.Features.Admin;
 using SanalProva.Api.Features.Auth;
 using SanalProva.Api.Features.Catalog;
@@ -89,6 +90,7 @@ builder.Services.AddRateLimiter(options =>
     AddIpLimit(DisplayEndpoints.PairingStatusRateLimit, "Security:DisplayPairingStatusRateLimitPerMinute", 60);
     AddIpLimit(DisplayEndpoints.ClaimRateLimit, "Security:DisplayClaimRateLimitPerMinute", 20);
     AddIpLimit(DisplayEndpoints.DeviceStateRateLimit, "Security:DisplayStateRateLimitPerMinute", 300);
+    AddIpLimit(AccountEndpoints.SetupPasswordRateLimit, "Security:SetupPasswordRateLimitPerMinute", 10);
 });
 
 // --- API ---
@@ -134,6 +136,7 @@ app.MapFileEndpoints();
 
 var api = app.MapGroup("/api/v1").AddEndpointFilter<AntiforgeryFilter>();
 api.MapAuthEndpoints();
+api.MapAccountEndpoints();
 api.MapCatalogEndpoints();
 api.MapSessionEndpoints();
 api.MapGenerationEndpoints();

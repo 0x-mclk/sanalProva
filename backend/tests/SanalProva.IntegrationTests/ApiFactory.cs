@@ -119,6 +119,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Storage:LocalRoot", _storageRoot);
         builder.UseSetting("Storage:SigningKey", new string('t', 48));
         builder.UseSetting("Security:SetupTokenKey", new string('s', 48));
+        builder.UseSetting("Security:SetupPasswordRateLimitPerMinute", "100000");
         builder.UseSetting("ImageWorker:BaseUrl", "http://127.0.0.1:1");
         builder.UseSetting("Generation:Mock:DelayMs", "0");
         builder.UseSetting("Generation:PollIntervalMs", "30");

@@ -89,6 +89,28 @@
         }
       }
     },
+    "/api/v1/account/setup-password": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/v1/categories": {
       "get": {
         "tags": [
@@ -4661,6 +4683,25 @@
           }
         }
       },
+      "SetupPasswordRequest": {
+        "required": [
+          "token",
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "minLength": 20,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      },
       "StartGenerationRequest": {
         "required": [
           "photoId"
@@ -5205,6 +5246,9 @@
   "tags": [
     {
       "name": "Auth"
+    },
+    {
+      "name": "Account"
     },
     {
       "name": "Catalog"
