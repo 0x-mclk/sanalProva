@@ -533,6 +533,132 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SanalProva.Domain.Credits.CreditAccount", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<int>("BalanceCredits")
+                        .HasColumnType("int")
+                        .HasColumnName("balance_credits");
+
+                    b.Property<int>("ReservedCredits")
+                        .HasColumnType("int")
+                        .HasColumnName("reserved_credits");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("OrganizationId")
+                        .HasName("pk_credit_accounts");
+
+                    b.ToTable("credit_accounts", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_credit_accounts_balance_non_negative", "[balance_credits] >= 0");
+
+                            t.HasCheckConstraint("ck_credit_accounts_reserved_valid", "[reserved_credits] >= 0 AND [reserved_credits] <= [balance_credits]");
+                        });
+                });
+
+            modelBuilder.Entity("SanalProva.Domain.Credits.CreditLedgerEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("int")
+                        .HasColumnName("amount");
+
+                    b.Property<int>("BalanceAfter")
+                        .HasColumnType("int")
+                        .HasColumnName("balance_after");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EntryType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("entry_type");
+
+                    b.Property<Guid?>("JobId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("job_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("reference");
+
+                    b.Property<int>("ReservedAfter")
+                        .HasColumnType("int")
+                        .HasColumnName("reserved_after");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("source");
+
+                    b.Property<string>("TariffKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("tariff_key");
+
+                    b.HasKey("Id")
+                        .HasName("pk_credit_ledger");
+
+                    b.HasIndex("JobId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_credit_ledger_job_close")
+                        .HasFilter("[entry_type] IN (N'Release', N'Consume') AND [job_id] IS NOT NULL");
+
+                    b.HasIndex("JobId", "EntryType")
+                        .IsUnique()
+                        .HasDatabaseName("ux_credit_ledger_job_reserve")
+                        .HasFilter("[entry_type] = N'Reserve' AND [job_id] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Reference")
+                        .IsUnique()
+                        .HasDatabaseName("ux_credit_ledger_org_reference")
+                        .HasFilter("[reference] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "CreatedAt", "Id")
+                        .HasDatabaseName("ix_credit_ledger_org_created");
+
+                    b.ToTable("credit_ledger", null, t =>
+                        {
+                            t.HasTrigger("tr_credit_ledger_append_only");
+
+                            t.HasCheckConstraint("ck_credit_ledger_after_valid", "[balance_after] >= 0 AND [reserved_after] >= 0 AND [reserved_after] <= [balance_after]");
+
+                            t.HasCheckConstraint("ck_credit_ledger_amount", "([entry_type] = N'Adjustment' AND [amount] <> 0) OR ([entry_type] <> N'Adjustment' AND [amount] > 0)");
+
+                            t.HasCheckConstraint("ck_credit_ledger_entry_type", "[entry_type] IN (N'Grant', N'Adjustment', N'Reserve', N'Release', N'Consume')");
+
+                            t.HasCheckConstraint("ck_credit_ledger_shape", "([entry_type] IN (N'Grant', N'Adjustment') AND [reference] IS NOT NULL AND [job_id] IS NULL) OR ([entry_type] IN (N'Reserve', N'Release', N'Consume') AND [job_id] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_credit_ledger_source", "[source] IN (N'Operator', N'System', N'Payment')");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("SanalProva.Domain.Display.DisplayDevice", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1131,6 +1257,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("created_at");
+
+                    b.Property<int?>("CreditCost")
+                        .HasColumnType("int")
+                        .HasColumnName("credit_cost");
 
                     b.Property<string>("DedupeKey")
                         .HasMaxLength(64)
@@ -2188,6 +2318,26 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_product_variants_products_product_id_organization_id");
                 });
 
+            modelBuilder.Entity("SanalProva.Domain.Credits.CreditAccount", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_credit_accounts_organizations_organization_id");
+                });
+
+            modelBuilder.Entity("SanalProva.Domain.Credits.CreditLedgerEntry", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_credit_ledger_organizations_organization_id");
+                });
+
             modelBuilder.Entity("SanalProva.Domain.Display.DisplayDevice", b =>
                 {
                     b.HasOne("SanalProva.Domain.TryOn.TryOnSession", null)
@@ -2382,6 +2532,8 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                             b1.PrimitiveCollection<string>("AllowedTryOnQualities");
 
+                            b1.Property<decimal?>("DailyBudgetUsd");
+
                             b1.Property<int>("DailyGenerationQuota");
 
                             b1.Property<int>("DefaultRetentionHours");
@@ -2401,6 +2553,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                             b1.Property<bool>("IsDemoCatalog");
 
                             b1.Property<int>("MaxGenerationsPerSession");
+
+                            b1.Property<decimal?>("MaxJobCostUsd");
+
+                            b1.Property<decimal?>("MonthlyBudgetUsd");
 
                             b1.Property<bool>("PaidAiEnabled");
 

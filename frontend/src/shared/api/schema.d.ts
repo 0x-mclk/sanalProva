@@ -2171,6 +2171,79 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/credits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreditSummaryDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credits/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    take?: number;
+                    skip?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreditLedgerItemDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/management/users": {
         parameters: {
             query?: never;
@@ -2913,6 +2986,48 @@ export interface components {
             /** Format: int32 */
             dailyGenerationQuota: null | number;
         };
+        /** @enum {unknown} */
+        CreditEntryType: "Grant" | "Adjustment" | "Reserve" | "Release" | "Consume";
+        CreditLedgerItemDto: {
+            /** Format: uuid */
+            id: string;
+            type: components["schemas"]["CreditEntryType"];
+            /** Format: int32 */
+            amount: number;
+            /** Format: int32 */
+            balanceAfter: number;
+            /** Format: int32 */
+            reservedAfter: number;
+            /** Format: uuid */
+            jobId: null | string;
+            reference: null | string;
+            source: components["schemas"]["CreditSource"];
+            note: null | string;
+            tariffKey: null | string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @enum {unknown} */
+        CreditSource: "Operator" | "System" | "Payment";
+        CreditSummaryDto: {
+            /** Format: int32 */
+            balance: number;
+            /** Format: int32 */
+            reserved: number;
+            /** Format: int32 */
+            available: number;
+            /** Format: int32 */
+            openJobs: number;
+            enforced: boolean;
+            /** Format: int32 */
+            defaultCostPerJob: number;
+            tariff: components["schemas"]["CreditTariffLineDto"][];
+        };
+        CreditTariffLineDto: {
+            key: string;
+            /** Format: int32 */
+            credits: number;
+        };
         CsrfResponse: {
             token: string;
             headerName: string;
@@ -3101,6 +3216,10 @@ export interface components {
             monthlyBudgetUsd: null | number;
             /** Format: double */
             maxJobCostUsd: null | number;
+            /** Format: int32 */
+            creditBalance: number;
+            /** Format: int32 */
+            creditReserved: number;
         };
         OrganizationListItem: {
             /** Format: uuid */

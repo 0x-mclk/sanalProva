@@ -8,6 +8,7 @@ using SanalProva.Domain.Catalog;
 using SanalProva.Domain.Common;
 using SanalProva.Domain.Display;
 using SanalProva.Domain.Files;
+using SanalProva.Domain.Credits;
 using SanalProva.Domain.Generation;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
@@ -51,6 +52,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<GeneratedImage> GeneratedImages => Set<GeneratedImage>();
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<AiCostReconciliation> AiCostReconciliations => Set<AiCostReconciliation>();
+
+    public DbSet<CreditAccount> CreditAccounts => Set<CreditAccount>();
+    public DbSet<CreditLedgerEntry> CreditLedger => Set<CreditLedgerEntry>();
 
     public DbSet<DisplayDevice> DisplayDevices => Set<DisplayDevice>();
     public DbSet<DisplayPairing> DisplayPairings => Set<DisplayPairing>();

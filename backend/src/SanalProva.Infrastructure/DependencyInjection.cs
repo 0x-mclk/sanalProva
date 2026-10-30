@@ -109,6 +109,12 @@ public static class DependencyInjection
         services.AddSingleton<Generation.GenerationProcessor>();
         services.AddSingleton<Generation.CostReconciliationSweep>();
         services.AddSingleton<Generation.CostReconciliationService>();
+
+        // Firma bazlı kredi sistemi (M5.4): tarife yapılandırmadan; defter servisi durumsuzdur (hesap/defter yazımı firma başına uygulama kilidi altında)
+        services.AddOptions<Credits.CreditSettings>().Bind(configuration.GetSection(Credits.CreditSettings.Section)).ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Credits.CreditSettings>, Credits.CreditSettingsValidator>();
+        services.AddSingleton<Credits.CreditTariff>();
+        services.AddSingleton<Credits.CreditLedgerService>();
         services.AddHostedService<Generation.GenerationWorker>();
         services.AddOptions<Retention.RetentionSettings>().Bind(configuration.GetSection(Retention.RetentionSettings.Section));
         services.AddScoped<Retention.SessionPurger>();

@@ -26,6 +26,12 @@ public static class AppLocks
     /// <summary>Firmanın şube/üye/rol değişiklikleri (M5.2): son Owner koruması, Owner satırlarının her şubeye yayılması ve rol değişimleri bu kilit altında, tek transaction'da yapılır.</summary>
     public static string OrganizationMembers(Guid organizationId) => $"sanalprova:org-members:{organizationId:N}";
 
+    /// <summary>
+    /// Firmanın kredi hesabı (M5.4): rezervasyon, kapanış (tüketim/iade) ve yükleme bu kilit altında, tek transaction'da bir defter girdisiyle yapılır.
+    /// Sıra kuralı: kabul kilidi (<see cref="StoreAdmission"/>) varsa ÖNCE o, sonra bu alınır; bu kilidi tutan kod başka kilit istemez (kilitlenme çevrimi yok).
+    /// </summary>
+    public static string OrganizationCredits(Guid organizationId) => $"sanalprova:org-credits:{organizationId:N}";
+
     /// <summary>Açık transaction içinde özel (exclusive) kilit alır; alınamazsa <see cref="NotGrantedError"/> numaralı SqlException fırlatır.</summary>
     public static async Task AcquireExclusiveAsync(AppDbContext db, string resource, TimeSpan timeout, CancellationToken ct)
     {

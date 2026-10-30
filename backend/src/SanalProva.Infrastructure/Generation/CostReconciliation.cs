@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using SanalProva.Domain.Audit;
 using SanalProva.Domain.Generation;
 using SanalProva.Infrastructure.Ai;
+using SanalProva.Infrastructure.Credits;
 using SanalProva.Infrastructure.Persistence;
 
 namespace SanalProva.Infrastructure.Generation;
@@ -26,7 +27,7 @@ public sealed class CostReconciliationSweep(
     /// <param name="StaleOpen">Süresi aşan açık vaka sayısı (yalnızca uyarı; veri değişmez).</param>
     /// <param name="ReleasedReservations">İptal edilmiş ve hiç gönderilmemiş işlerden serbest bırakılan rezervasyon sayısı (M5.3).</param>
     /// <param name="CancelledToUncertain">İptal edilmiş, gönderilmiş ve kurtarma süresi dolmuş işlerden belirsiz maliyet kaydına çevrilen rezervasyon sayısı (M5.3).</param>
-    public sealed record Result(int MissingCostRows, int LegacyKeyed, int StaleOpen, decimal StaleOpenUsd, int ReleasedReservations = 0, int CancelledToUncertain = 0);
+    public sealed record Result(int MissingCostRows, int LegacyKeyed, int StaleOpen, decimal StaleOpenUsd, int ReleasedReservations = 0, int CancelledToUncertain = 0, int CreditsSettled = 0);
 
     public async Task<Result> RunOnceAsync(CancellationToken ct)
     {
@@ -114,7 +115,9 @@ public sealed class CostReconciliationSweep(
         var stale = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking()
             .Where(l => l.ReconciliationState == CostReconciliationState.Open && l.CreatedAt < threshold)
             .Select(l => l.EstimatedCostUsd).ToListAsync(ct);
-        var result = new Result(missing, keyed, stale.Count, stale.Sum(), released, converted);
+        // (f) Kredi (M5.4): işi bitmiş ama kredisi kapanmamış rezervasyonlar kendini onarır (belirsiz iş karar verilene kadar bloke kalır)
+        var creditsSettled = await new CreditLedgerService(clock).SettleOpenAsync(db, 200, ct);
+        var result = new Result(missing, keyed, stale.Count, stale.Sum(), released, converted, creditsSettled);
 
         if (released > 0 || converted > 0)
         {
@@ -268,6 +271,19 @@ public sealed class CostReconciliationService(TimeProvider clock)
             }
 
             return new DecisionResult(DecisionOutcome.SequenceMismatch, null, null, after.Count);
+        }
+
+        // Kredi (M5.4): karar kredinin kaderini belirler (ücretlendi → tüketim; ücretlenmedi/yazıldı-silindi → iade). Karar zaten kalıcı; hata kararı bozmaz (süpürücü onarır).
+        if (uncertain.JobId is { } jobId)
+        {
+            try
+            {
+                await new CreditLedgerService(clock).SettleJobAsync(db, jobId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                db.ChangeTracker.Clear();
+            }
         }
 
         return new DecisionResult(DecisionOutcome.Recorded, decision, StateOf(command.Decision), decision.Sequence);

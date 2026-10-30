@@ -96,6 +96,9 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         ["fk_account_setup_tokens_organizations_organization_id"] = "NO_ACTION",
         ["fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id_organization_id"] = "NO_ACTION",
         ["fk_ai_usage_logs_ai_usage_logs_adjusts_log_id_organization_id"] = "NO_ACTION",
+        // M5.4: kredi hesabı ve defter firmaya bağlıdır; firma silinemez (mali kayıt kalır). Defterde iş bağlantısı bilinçli olarak FK değildir (KVKK silmesi mali kaydı silmez).
+        ["fk_credit_accounts_organizations_organization_id"] = "NO_ACTION",
+        ["fk_credit_ledger_organizations_organization_id"] = "NO_ACTION",
         ["fk_ai_usage_logs_generation_jobs_job_id"] = "SET_NULL",
         ["fk_ai_usage_logs_generation_jobs_job_id_organization_id"] = "NO_ACTION_COMPANION",
         ["fk_ai_usage_logs_stores_store_id_organization_id"] = "NO_ACTION",
@@ -171,12 +174,24 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             //     yalnızca kimlik sütunu değiştirilir ve hata, aynı çocuk tablosundaki, değişen sütunu KULLANAN (ilk sütun olarak veya bileşik anahtarın bir parçası olarak)
             //     FK'lardan biri olmalıdır: SQL Server birden fazla kısıt ihlal edilince hangisini bildireceğini constraint object_id sırasına göre seçer, "ilk sütun"
             //     eşleşmesi tek başına yeterli değildir — ör. account_setup_tokens'ta organization_id hem kendi düz FK'sının hem user_id ile bileşik FK'nın parçasıdır.)
-            var valid = await Rows.CreateAsync(fk.Child, null, Ct);
-            var siblingNames = Rows.ForeignKeys.Where(f => f.Child == fk.Child && f.ChildColumns.Contains(fk.ChildColumns[0])).Select(f => f.Name).ToList();
-            var orphan = await Assert.ThrowsAsync<SqlException>(() => Lab.ExecuteAsync($"UPDATE [{fk.Child}] SET [{fk.ChildColumns[0]}] = '{Guid.NewGuid()}' WHERE {Where(fk.Child, valid)}", ct: Ct));
-            if (orphan.Number != 547 || !siblingNames.Any(n => orphan.Message.Contains(n, StringComparison.Ordinal)))
+            if (fk.Child == "credit_ledger")
             {
-                problems.Add($"{fk.Name}: yetim bağlantı beklenen FK hatasıyla reddedilmedi ({orphan.Number}: {orphan.Message})");
+                // Değiştirilemez defter: satır UPDATE'i tetikleyiciyle reddedilir; yetim bağlantı INSERT ile sınanır (var olmayan firma → FK 547)
+                var inserted = await Assert.ThrowsAsync<SqlException>(() => Rows.CreateAsync(fk.Child, new Dictionary<string, object?> { [fk.ChildColumns[0]] = Guid.NewGuid() }, Ct));
+                if (inserted.Number != 547 || !inserted.Message.Contains(fk.Name, StringComparison.Ordinal))
+                {
+                    problems.Add($"{fk.Name}: yetim ekleme beklenen FK hatasıyla reddedilmedi ({inserted.Number}: {inserted.Message})");
+                }
+            }
+            else
+            {
+                var valid = await Rows.CreateAsync(fk.Child, null, Ct);
+                var siblingNames = Rows.ForeignKeys.Where(f => f.Child == fk.Child && f.ChildColumns.Contains(fk.ChildColumns[0])).Select(f => f.Name).ToList();
+                var orphan = await Assert.ThrowsAsync<SqlException>(() => Lab.ExecuteAsync($"UPDATE [{fk.Child}] SET [{fk.ChildColumns[0]}] = '{Guid.NewGuid()}' WHERE {Where(fk.Child, valid)}", ct: Ct));
+                if (orphan.Number != 547 || !siblingNames.Any(n => orphan.Message.Contains(n, StringComparison.Ordinal)))
+                {
+                    problems.Add($"{fk.Name}: yetim bağlantı beklenen FK hatasıyla reddedilmedi ({orphan.Number}: {orphan.Message})");
+                }
             }
 
             // (2) Ebeveyn silme: gerçek DELETE ile NO ACTION / CASCADE / SET NULL davranışı
@@ -294,6 +309,11 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
 
                 checks++;
                 processed.Add($"{column.PropertyMappings[0].Property.DeclaringType.DisplayName()}.{column.PropertyMappings[0].Property.Name}");
+                if (table.Name == "credit_ledger")
+                {
+                    continue; // değiştirilemez defter: satır UPDATE'i tetikleyiciyle reddedilir; enum CHECK'leri CreditSystemTests'te INSERT ile sınanır
+                }
+
                 var meta = Rows.Columns[table.Name].Single(c => c.Name == column.Name);
                 var row = await Rows.CreateAsync(table.Name, null, Ct);
                 var where = Where(table.Name, row);
@@ -796,7 +816,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             SELECT STRING_AGG(t.name, N',') WITHIN GROUP (ORDER BY t.name)
               FROM sys.tables t WHERE EXISTS (SELECT 1 FROM sys.foreign_keys fk WHERE fk.parent_object_id = t.object_id AND fk.referenced_object_id = OBJECT_ID(N'dbo.organizations'))
             """, ct: Ct);
-        Assert.Equal("account_setup_tokens,audit_logs,categories,organization_agreement_acceptances,products,stored_files,stores,user_store_roles,users", roots);
+        Assert.Equal("account_setup_tokens,audit_logs,categories,credit_accounts,credit_ledger,organization_agreement_acceptances,products,stored_files,stores,user_store_roles,users", roots);
     }
 
     /// <summary>

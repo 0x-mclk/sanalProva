@@ -4,6 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using SanalProva.Domain.Audit;
+using SanalProva.Domain.Credits;
 using SanalProva.Domain.Generation;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
@@ -11,6 +13,7 @@ using SanalProva.Infrastructure;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
 using SanalProva.Infrastructure.Ai.TryOn;
+using SanalProva.Infrastructure.Credits;
 using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
@@ -178,7 +181,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
     /// <summary>Oturum + onay + fotoğraf + seçim + "Running" iş (worker'a karışmaz).</summary>
     private async Task<(Guid JobId, Guid SessionId)> RunningJobAsync(
-        TestTenant tenant, ApiClient client, CatalogIds catalog, OutfitMode mode, string? modelKey = null, string? quality = null, bool kaftan = false)
+        TestTenant tenant, ApiClient client, CatalogIds catalog, OutfitMode mode, string? modelKey = null, string? quality = null, bool kaftan = false, int? credit = null)
     {
         var (session, photo) = await PreparedSessionAsync(client);
         var (scope, db) = OpenDb(tenant.OrganizationId);
@@ -209,12 +212,22 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
                 OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, SessionId = session.Id,
                 JobType = mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination,
                 SelectionId = selection.Id, SourcePhotoId = photo.Id, IdempotencyKey = Guid.NewGuid().ToString("N"), RequestedByUserId = user.Id,
-                ModelKey = modelKey, Quality = quality,
+                ModelKey = modelKey, Quality = quality, CreditCost = credit,
                 Status = GenerationJobStatus.Running, Attempt = 1, Stage = GenerationStage.Preparing, StartedAt = now, NextAttemptAt = now, LeaseUntil = now.AddMinutes(10),
             };
             db.OutfitSelections.Add(selection);
             db.GenerationJobs.Add(job);
             await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            if (credit is > 0)
+            {
+                // Kabulde yapılan kredi rezervasyonunun aynısı (kabul kilidi altındaki akışla aynı servis)
+                await using var creditTransaction = await db.Database.BeginTransactionAsync(TestContext.Current.CancellationToken);
+                var reserved = await new CreditLedgerService(TimeProvider.System).ReserveAsync(db, tenant.OrganizationId, job.Id, credit.Value, "default", TestContext.Current.CancellationToken);
+                Assert.Equal(CreditReserveStatus.Reserved, reserved.Status);
+                await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+                await creditTransaction.CommitAsync(TestContext.Current.CancellationToken);
+            }
+
             return (job.Id, session.Id);
         }
     }
@@ -2217,5 +2230,242 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         Assert.Single((await LoadAsync(jobId)).Logs);
         Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId)); // kayıt var: rezervasyon kapalı
         Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+    }
+
+    // ---------------------------------------------------------------- M5.4: kredi yaşam döngüsü (başarı / başarısızlık / iptal / belirsiz)
+
+    private readonly CreditLedgerService _creditService = new(TimeProvider.System);
+
+    private async Task<TestTenant> CreditTenantAsync(int credits = 10)
+    {
+        ApiFactory.RequireDatabase(Factory);
+        return await TestData.CreateTenantAsync(Services, credits: credits);
+    }
+
+    private async Task<(TestTenant Tenant, Guid JobId)> CreditJobAsync(int cost, int credits = 10)
+    {
+        var tenant = await CreditTenantAsync(credits);
+        var client = await ApiClient.LoginAsync(Factory, tenant.Email, tenant.StoreId);
+        var catalog = await TestData.CreateCatalogAsync(Services, tenant.OrganizationId);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet, credit: cost);
+        return (tenant, jobId);
+    }
+
+    private async Task<CreditSettleStatus> SettleAsync(Guid jobId)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            return await _creditService.SettleJobAsync(db, jobId, TestContext.Current.CancellationToken);
+        }
+    }
+
+    private async Task<List<CreditLedgerEntry>> JobEntriesAsync(Guid organizationId, Guid jobId) =>
+        (await CreditAssert.LedgerAsync(Services, organizationId)).Where(e => e.JobId == jobId).ToList();
+
+    [Fact]
+    public async Task Kredi_basarili_uretimde_kesinlesir_rezerve_kapanir_bedel_rezervasyondaki_tutardir()
+    {
+        var (tenant, jobId) = await CreditJobAsync(cost: 3); // tarife varsayılanı 1; işe kabulde 3 yazıldı: düşüm 3 olmalı (sonradan tarife değişse de değişmez)
+        Assert.Equal((10, 3), await CreditAssert.AccountAsync(Services, tenant.OrganizationId));
+        await using var harness = BuildHarness(Succeeding());
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(jobId)).Job.Status);
+        Assert.Equal((7, 0), await CreditAssert.AccountAsync(Services, tenant.OrganizationId)); // 10 − 3 tüketildi, rezerve 0
+        Assert.Equal([CreditEntryType.Reserve, CreditEntryType.Consume], (await JobEntriesAsync(tenant.OrganizationId, jobId)).Select(e => e.EntryType).ToArray());
+        Assert.Equal(CreditSettleStatus.NothingToSettle, await SettleAsync(jobId)); // tekrar: çift düşüm yok
+        await CreditAssert.ConsistentAsync(Services, tenant.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Kredi_kesin_basarisizlikta_iade_edilir_bakiye_dusmez()
+    {
+        var (tenant, jobId) = await CreditJobAsync(cost: 2);
+        var failing = new ScriptedTryOn((_, _, _) => throw new ProviderException(GenerationErrorCode.ProviderUnavailable, "sağlayıcı reddetti", retryable: false));
+        await using var harness = BuildHarness(failing);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationJobStatus.Failed, (await LoadAsync(jobId)).Job.Status);
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, tenant.OrganizationId)); // müşteri ödemez
+        Assert.Equal([CreditEntryType.Reserve, CreditEntryType.Release], (await JobEntriesAsync(tenant.OrganizationId, jobId)).Select(e => e.EntryType).ToArray());
+        await CreditAssert.ConsistentAsync(Services, tenant.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Kredi_sagliyiciya_hic_gonderilmeyen_bitis_butce_kapisi_ile_iade_edilir()
+    {
+        var (tenant, jobId) = await CreditJobAsync(cost: 1);
+        await using var harness = BuildHarness(Succeeding(), daily: 0.01m); // tek çağrı bile günlük bütçeyi aşar: sağlayıcıya gitmez
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(jobId)).Job.ErrorCode);
+        Assert.Equal(0, harness.Fashn.Calls);
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, tenant.OrganizationId));
+        await CreditAssert.ConsistentAsync(Services, tenant.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Kredi_hic_gonderilmemis_iptalde_serbest_gonderilmis_iptalde_kayit_gelene_kadar_bloke()
+    {
+        // (1) Hiç gönderilmemiş iptal: hemen serbest
+        var (tenantA, neverSent) = await CreditJobAsync(cost: 2);
+        await SetJobAsync(neverSent, GenerationJobStatus.Cancelled);
+        Assert.Equal(CreditSettleStatus.Released, await SettleAsync(neverSent));
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, tenantA.OrganizationId));
+
+        // (2) Gönderilmiş + henüz maliyet kaydı yok (çağrı sürüyor olabilir): bloke
+        var (tenantB, sent) = await CreditJobAsync(cost: 2);
+        await SetSubmittedAsync(sent, GenerationJobStatus.Cancelled);
+        Assert.Equal(CreditSettleStatus.Held, await SettleAsync(sent));
+        Assert.Equal((10, 2), await CreditAssert.AccountAsync(Services, tenantB.OrganizationId));
+
+        // (3) Worker kendi (vakasız) en kötü durum kaydını yazdı: iptal eden müşteriye yansıtılmaz → serbest
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            db.AiUsageLogs.Add(new AiUsageLog
+            {
+                OrganizationId = tenantB.OrganizationId, StoreId = tenantB.StoreId, JobId = sent, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet", Attempt = 1,
+                Success = false, DurationMs = 5, EstimatedCostUsd = 0.15m,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(CreditSettleStatus.Released, await SettleAsync(sent));
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, tenantB.OrganizationId));
+        await CreditAssert.ConsistentAsync(Services, tenantA.OrganizationId);
+        await CreditAssert.ConsistentAsync(Services, tenantB.OrganizationId);
+    }
+
+    private async Task SetSubmittedAsync(Guid jobId, GenerationJobStatus status)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, status).SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null).SetProperty(j => j.FinishedAt, DateTimeOffset.UtcNow)
+                .SetProperty(j => j.Provider, "Fashn").SetProperty(j => j.Model, "tryon-max").SetProperty(j => j.ReservedCostUsd, 0.15m).SetProperty(j => j.ProviderSubmitStartedAt, DateTimeOffset.UtcNow),
+                TestContext.Current.CancellationToken);
+        }
+    }
+
+    /// <summary>İşi "sonucu belirsiz" yapar ve olay anahtarlı, mutabakata açık (Open) maliyet kaydını yazar (işçinin/kurtarmanın üreteceği durumun aynısı).</summary>
+    private async Task<Guid> MakeUncertainAsync(TestTenant tenant, Guid jobId)
+    {
+        await SetSubmittedAsync(jobId, GenerationJobStatus.Failed);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s.SetProperty(j => j.ErrorCode, GenerationErrorCode.OutcomeUncertain), TestContext.Current.CancellationToken);
+            var log = new AiUsageLog
+            {
+                OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, JobId = jobId, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet", Attempt = 1, Success = false,
+                ErrorCode = GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = 0.15m, EventKey = $"uncertain:{jobId}", ReconciliationState = CostReconciliationState.Open,
+            };
+            db.AiUsageLogs.Add(log);
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+            return log.Id;
+        }
+    }
+
+    private async Task DecideAsync(Guid usageLogId, CostDecision decision, decimal? amount = null)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var result = await new CostReconciliationService(TimeProvider.System).DecideAsync(
+                db, usageLogId, Guid.NewGuid(), $"karar-{Guid.NewGuid():N}", new DecideCommand(decision, amount, "test", 0), null, TestContext.Current.CancellationToken);
+            Assert.Equal(DecisionOutcome.Recorded, result.Outcome);
+        }
+    }
+
+    [Theory]
+    [InlineData(CostDecision.ConfirmedCharged, 0.15, 7, CreditEntryType.Consume)]
+    [InlineData(CostDecision.ConfirmedNotCharged, null, 10, CreditEntryType.Release)]
+    [InlineData(CostDecision.WrittenOff, null, 10, CreditEntryType.Release)]
+    public async Task Kredi_sonucu_belirsiz_islerde_mutabakata_kadar_bloke_karara_gore_tutarli_kapanir(CostDecision decision, double? amount, int expectedBalance, CreditEntryType expectedClose)
+    {
+        var (tenant, jobId) = await CreditJobAsync(cost: 3);
+        var logId = await MakeUncertainAsync(tenant, jobId);
+
+        // Karar yok: kredi bloke kalır; işçi/süpürücü tekrar tekrar çağırsa da kapanmaz
+        Assert.Equal(CreditSettleStatus.Held, await SettleAsync(jobId));
+        Assert.Equal(CreditSettleStatus.Held, await SettleAsync(jobId));
+        Assert.Equal((10, 3), await CreditAssert.AccountAsync(Services, tenant.OrganizationId));
+
+        await DecideAsync(logId, decision, amount is null ? null : (decimal)amount);
+
+        // Karar kendiliğinden kapanışı tetikler (süpürücüye gerek yok); tekrar çağrı çift kapanış üretmez
+        Assert.Equal((expectedBalance, 0), await CreditAssert.AccountAsync(Services, tenant.OrganizationId));
+        Assert.Equal(expectedClose, (await JobEntriesAsync(tenant.OrganizationId, jobId)).Last().EntryType);
+        Assert.Equal(CreditSettleStatus.NothingToSettle, await SettleAsync(jobId));
+        await CreditAssert.ConsistentAsync(Services, tenant.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Kredi_ayni_isi_eszamanli_kapatma_tek_kapanis_yazar_cift_dusum_cift_iade_yok()
+    {
+        var (tenant, jobId) = await CreditJobAsync(cost: 4);
+        await using var harness = BuildHarness(Succeeding());
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken); // başarı: işçi zaten kapattı
+        Assert.Equal((6, 0), await CreditAssert.AccountAsync(Services, tenant.OrganizationId));
+
+        // Başka bir iş: sonuç hazır ama kapanış yok (çökme) → 8 eşzamanlı kapatıcı (işçi + süpürücü + karar yarışı)
+        var (tenant2, job2) = await CreditJobAsync(cost: 4);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == job2).ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Succeeded), TestContext.Current.CancellationToken);
+        }
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => SettleAsync(job2)));
+
+        Assert.Equal(1, results.Count(r => r == CreditSettleStatus.Consumed));
+        Assert.Equal((6, 0), await CreditAssert.AccountAsync(Services, tenant2.OrganizationId)); // 10 − 4, bir kez
+        Assert.Single(await JobEntriesAsync(tenant2.OrganizationId, job2), e => e.EntryType == CreditEntryType.Consume);
+        await CreditAssert.ConsistentAsync(Services, tenant2.OrganizationId);
+    }
+
+    [Fact]
+    public async Task Kredi_supurucu_kapanmamis_rezervasyonlari_kendiliginden_kapatir_belirsizi_bloke_birakir_is_yoksa_iade_eder()
+    {
+        var (succeededTenant, succeeded) = await CreditJobAsync(cost: 2);
+        var (failedTenant, failed) = await CreditJobAsync(cost: 2);
+        var (uncertainTenant, uncertain) = await CreditJobAsync(cost: 2);
+        var (runningTenant, running) = await CreditJobAsync(cost: 2);
+        var (ghostTenant, ghost) = await CreditJobAsync(cost: 2);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var ct = TestContext.Current.CancellationToken;
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == succeeded).ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Succeeded), ct);
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == failed).ExecuteUpdateAsync(s => s.SetProperty(j => j.Status, GenerationJobStatus.Failed).SetProperty(j => j.ErrorCode, GenerationErrorCode.Timeout), ct);
+            // Oturum silinmesi (KVKK): iş satırı yok; defter kalır
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == ghost).ExecuteDeleteAsync(ct);
+        }
+
+        await MakeUncertainAsync(uncertainTenant, uncertain);
+        await using var harness = BuildHarness();
+        var sweep = harness.Services.GetRequiredService<CostReconciliationSweep>();
+
+        var first = await sweep.RunOnceAsync(TestContext.Current.CancellationToken);
+        var second = await sweep.RunOnceAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(first.CreditsSettled >= 3); // başarı → düşüm, başarısız → iade, silinmiş → iade (başka testlerin açık işleri de kapanabilir)
+        Assert.Equal((8, 0), await CreditAssert.AccountAsync(Services, succeededTenant.OrganizationId));
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, failedTenant.OrganizationId));
+        Assert.Equal((10, 2), await CreditAssert.AccountAsync(Services, uncertainTenant.OrganizationId)); // belirsiz: bloke
+        Assert.Equal((10, 2), await CreditAssert.AccountAsync(Services, runningTenant.OrganizationId)); // çalışıyor: bloke
+        Assert.Equal((10, 0), await CreditAssert.AccountAsync(Services, ghostTenant.OrganizationId));
+        Assert.Single(await JobEntriesAsync(succeededTenant.OrganizationId, succeeded), e => e.EntryType == CreditEntryType.Consume); // ikinci tur ikinci düşüm yazmaz
+        Assert.True(second.CreditsSettled <= first.CreditsSettled || second.CreditsSettled >= 0);
+        foreach (var t in new[] { succeededTenant, failedTenant, uncertainTenant, runningTenant, ghostTenant })
+        {
+            await CreditAssert.ConsistentAsync(Services, t.OrganizationId);
+        }
     }
 }

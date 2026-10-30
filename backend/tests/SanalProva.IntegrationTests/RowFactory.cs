@@ -16,6 +16,7 @@ internal sealed partial class RowFactory
     {
         ["categories.max_selection"] = 1,
         ["ai_cost_reconciliations.sequence"] = 1,
+        ["credit_ledger.amount"] = 1,
     };
 
     private readonly string _connectionString;
@@ -209,6 +210,12 @@ internal sealed partial class RowFactory
             {
                 values[column.Name] = DefaultFor(table, column);
             }
+        }
+
+        // Tablo bazlı ek varsayılanlar: CHECK'in zorunlu kıldığı NULL olabilen sütunlar (kredi defteri: Grant satırı referans ister)
+        if (table == "credit_ledger")
+        {
+            values.TryAdd("reference", Guid.NewGuid().ToString("N"));
         }
 
         var names = values.Keys.ToList();

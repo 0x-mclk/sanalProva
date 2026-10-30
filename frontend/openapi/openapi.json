@@ -2069,6 +2069,67 @@
         }
       }
     },
+    "/api/v1/credits": {
+      "get": {
+        "tags": [
+          "Kredi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditSummaryDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/credits/ledger": {
+      "get": {
+        "tags": [
+          "Kredi"
+        ],
+        "parameters": [
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CreditLedgerItemDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/management/users": {
       "get": {
         "tags": [
@@ -3425,6 +3486,150 @@
           }
         }
       },
+      "CreditEntryType": {
+        "enum": [
+          "Grant",
+          "Adjustment",
+          "Reserve",
+          "Release",
+          "Consume"
+        ]
+      },
+      "CreditLedgerItemDto": {
+        "required": [
+          "id",
+          "type",
+          "amount",
+          "balanceAfter",
+          "reservedAfter",
+          "jobId",
+          "reference",
+          "source",
+          "note",
+          "tariffKey",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CreditEntryType"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "balanceAfter": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reservedAfter": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "jobId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "reference": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/CreditSource"
+          },
+          "note": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "tariffKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreditSource": {
+        "enum": [
+          "Operator",
+          "System",
+          "Payment"
+        ]
+      },
+      "CreditSummaryDto": {
+        "required": [
+          "balance",
+          "reserved",
+          "available",
+          "openJobs",
+          "enforced",
+          "defaultCostPerJob",
+          "tariff"
+        ],
+        "type": "object",
+        "properties": {
+          "balance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "reserved": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "available": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "openJobs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "enforced": {
+            "type": "boolean"
+          },
+          "defaultCostPerJob": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tariff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreditTariffLineDto"
+            }
+          }
+        }
+      },
+      "CreditTariffLineDto": {
+        "required": [
+          "key",
+          "credits"
+        ],
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "credits": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "CsrfResponse": {
         "required": [
           "token",
@@ -4121,7 +4326,9 @@
           "owners",
           "dailyBudgetUsd",
           "monthlyBudgetUsd",
-          "maxJobCostUsd"
+          "maxJobCostUsd",
+          "creditBalance",
+          "creditReserved"
         ],
         "type": "object",
         "properties": {
@@ -4190,6 +4397,14 @@
               "number"
             ],
             "format": "double"
+          },
+          "creditBalance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "creditReserved": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },
@@ -6112,6 +6327,9 @@
     },
     {
       "name": "Yönetim"
+    },
+    {
+      "name": "Kredi"
     },
     {
       "name": "Dev"

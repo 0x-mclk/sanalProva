@@ -13,6 +13,7 @@ using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.Abstractions;
 using SanalProva.Infrastructure.Ai.TryOn;
+using SanalProva.Infrastructure.Credits;
 using SanalProva.Infrastructure.Displays;
 using SanalProva.Infrastructure.Images;
 using SanalProva.Infrastructure.Persistence;
@@ -110,6 +111,27 @@ public sealed class GenerationProcessor(
         {
             logger.LogWarning("Üretim işinin sahipliği kaybedildi (kilit doldu veya iş kurtarıldı/iptal edildi): {JobId}, bu worker'ın denemesi {Attempt}", job.Id, job.Attempt);
         }
+        finally
+        {
+            await SettleCreditsAsync(job.Id, ct);
+        }
+    }
+
+    /// <summary>
+    /// İş bu worker'dan çıktığında (başarı, kesin başarısızlık, iptal, belirsiz, sahiplik kaybı) kredi rezervasyonunu işin ŞU ANKİ durumuna göre kapatır (M5.4). Başarı → tüketim,
+    /// kesin başarısızlık/iptal → iade, belirsiz/çalışıyor → bloke. Idempotenttir; hata işi bozmaz (süpürücü kendini onarır). Yeni kapsam: işin kendi bağlamı bozulmuş olabilir.
+    /// </summary>
+    private async Task SettleCreditsAsync(Guid jobId, CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            await new CreditLedgerService(clock).SettleJobAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), jobId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Kredi kapanışı başarısız oldu (süpürücü yeniden deneyecek): {JobId}", jobId);
+        }
     }
 
     /// <summary>Kilit yenileme aralığı: kilit süresinin üçte biri (en az 1 sn). Canlı worker uzun sağlayıcı beklemesinde işini kaybetmez.</summary>
@@ -162,11 +184,16 @@ public sealed class GenerationProcessor(
             // Çözüm geçişinde de çökerse: sonuç bilinmiyor (maliyet kaydı yazılamadı, kimlik mutabakat için işte kalır)
             await FailUncertainWithCostAsync(db, now, ct);
 
-            await lastAttempt.Where(j => j.ProviderSubmitStartedAt == null && j.ProviderRequestId == null).ExecuteUpdateAsync(s => s
+            var timedOut = await lastAttempt.Where(j => j.ProviderSubmitStartedAt == null && j.ProviderRequestId == null).ExecuteUpdateAsync(s => s
                 .SetProperty(j => j.Status, GenerationJobStatus.Failed)
                 .SetProperty(j => j.ErrorCode, GenerationErrorCode.Timeout)
                 .SetProperty(j => j.ErrorMessage, "İşlem zaman aşımına uğradı.")
                 .SetProperty(j => j.FinishedAt, now), ct);
+            if (timedOut > 0)
+            {
+                // Hiç gönderilmemiş zaman aşımı: kredi hemen serbest (kalan açık rezervasyonlar süpürücüyle de kapanır)
+                await new CreditLedgerService(clock).SettleOpenAsync(db, 50, ct);
+            }
         }
         catch (Exception ex) when (DbErrors.IsDeadlock(ex))
         {

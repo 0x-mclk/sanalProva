@@ -11,6 +11,7 @@ using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.TryOn;
+using SanalProva.Infrastructure.Credits;
 using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
@@ -41,7 +42,7 @@ public static class GenerationEndpoints
     private static async Task<IResult> StartAsync(
         Guid id, StartGenerationRequest request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, GenerationStrategy strategy, Microsoft.Extensions.Options.IOptionsMonitor<GenerationSettings> generationSettings,
-        AuditTrail audit, TimeProvider clock, CancellationToken ct)
+        CreditTariff tariff, CreditLedgerService credits, AuditTrail audit, TimeProvider clock, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64)
         {
@@ -168,13 +169,30 @@ public static class GenerationEndpoints
             });
         }
 
-        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey);
+        // Kredi bedeli kabulde TARİFEDEN bir kez hesaplanıp işe yazılır (sonradan tarife değişse de bu iş için değişmez). Mock sağlayıcı kredi tüketmez.
+        var credit = CreditFor(tariff, live, jobType, modelKey, quality);
+        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey, credit?.Cost);
         // Sonucu belirsiz (ücretlenmiş olabilir) aynı istek de "etkin" sayılır: tekrar tıklamak yeni ücretli iş açmaz, o iş ve uyarısı döner
-        var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, includeUncertain: true, ct);
+        var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, includeUncertain: true, credits, credit, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
     }
 
     private sealed record Admission(GenerationJob? Job, bool Created, IResult? Problem);
+
+    /// <summary>Kabulde ayrılacak kredi (bedel + uygulanan tarife satırı).</summary>
+    private sealed record CreditRequest(int Cost, string TariffKey);
+
+    /// <summary>Gerçek (mock olmayan) sağlayıcıya gidecek ve bedeli pozitif işler için kredi gerekir; aksi halde null (kredi uygulanmaz).</summary>
+    private static CreditRequest? CreditFor(CreditTariff tariff, bool live, GenerationJobType jobType, string? modelKey, string? quality)
+    {
+        if (!live || !tariff.Enforce)
+        {
+            return null;
+        }
+
+        var quote = tariff.Quote(jobType, modelKey, quality);
+        return quote.Cost > 0 ? new CreditRequest(quote.Cost, quote.Key) : null;
+    }
 
     /// <summary>Kabul kilidini bekleme süresi. Kilit yalnızca birkaç sorgu + ekleme boyunca tutulur.</summary>
     private static readonly TimeSpan AdmissionLockTimeout = TimeSpan.FromSeconds(5);
@@ -188,7 +206,7 @@ public static class GenerationEndpoints
     /// </summary>
     private static async Task<Admission> AdmitAsync(
         AppDbContext db, SessionReader reader, CurrentUser user, TryOnSession session, GenerationJob job, OutfitSelection? selection,
-        string auditAction, AuditTrail audit, TimeProvider clock, bool includeUncertain, CancellationToken ct)
+        string auditAction, AuditTrail audit, TimeProvider clock, bool includeUncertain, CreditLedgerService credits, CreditRequest? credit, CancellationToken ct)
     {
         try
         {
@@ -204,6 +222,19 @@ public static class GenerationEndpoints
             if (await CheckQuotaAsync(db, reader, user, session, clock, ct) is { } quotaProblem)
             {
                 return new Admission(null, Created: false, quotaProblem);
+            }
+
+            // Kredi: kota geçildikten sonra, işle AYNI transaction'da (kabul kilidi altında) ayrılır. Yetersizse iş hiç oluşmaz, hiçbir şey yazılmaz.
+            // Aynı anahtarlı tekrar istek yukarıda mevcut işi döndürdüğü için ikinci rezervasyon oluşmaz; (iş başına tek Reserve) benzersiz indeks ikinci savunma hattıdır.
+            if (credit is not null)
+            {
+                var reserved = await credits.ReserveAsync(db, session.OrganizationId, job.Id, credit.Cost, credit.TariffKey, ct);
+                if (reserved.Status == CreditReserveStatus.Insufficient)
+                {
+                    return new Admission(null, Created: false, ApiProblems.Create(StatusCodes.Status402PaymentRequired, "INSUFFICIENT_CREDITS",
+                        "Yeterli krediniz yok. İşletme sahibi veya yöneticiyle iletişime geçip kredi yükletin.",
+                        new Dictionary<string, object?> { ["required"] = credit.Cost, ["available"] = reserved.Available }));
+                }
             }
 
             if (selection is not null)
@@ -292,8 +323,9 @@ public static class GenerationEndpoints
 
     private static GenerationJob NewJob(
         TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now,
-        string? fingerprint = null, string? modelKey = null, string? quality = null, string? dedupeKey = null) => new()
+        string? fingerprint = null, string? modelKey = null, string? quality = null, string? dedupeKey = null, int? creditCost = null) => new()
     {
+        CreditCost = creditCost,
         RequestFingerprint = fingerprint,
         DedupeKey = dedupeKey,
         ModelKey = modelKey,
@@ -369,7 +401,7 @@ public static class GenerationEndpoints
     }
 
     /// <summary>Kuyruktaki veya çalışan iş iptal edilir (atomik güncelleme yarışı önler). Çalışan işte worker sağlayıcı bekleyişini bırakır; çağrı başlamışsa sağlayıcı yine de ücretlendirebilir ve bu en kötü durum tahminiyle kaydedilir.</summary>
-    private static async Task<IResult> CancelAsync(Guid id, AppDbContext db, SessionReader reader, IJobNotifier notifier, TimeProvider clock, CancellationToken ct)
+    private static async Task<IResult> CancelAsync(Guid id, AppDbContext db, SessionReader reader, IJobNotifier notifier, CreditLedgerService credits, TimeProvider clock, CancellationToken ct)
     {
         var job = await db.GenerationJobs.AsNoTracking().SingleOrDefaultAsync(j => j.Id == id, ct);
         if (job is null)
@@ -386,6 +418,8 @@ public static class GenerationEndpoints
             return ApiProblems.Conflict("JOB_NOT_CANCELLABLE", "İş zaten işleniyor veya tamamlandı; iptal edilemez.");
         }
 
+        // Kredi: hiç gönderilmemiş iptalde hemen serbest; gönderilmişse (çalışan worker iptali işleyene kadar) bloke kalır ve işçi/süpürücü kapatır. Idempotent.
+        await credits.SettleJobAsync(db, id, ct);
         job = await db.GenerationJobs.AsNoTracking().SingleAsync(j => j.Id == id, ct);
         await notifier.NotifyAsync(new JobUpdate(job.Id, job.SessionId, job.StoreId, job.Status, null, null, null), ct);
         return TypedResults.Ok(await reader.ToJobDtoAsync(job, null, ct));
@@ -397,7 +431,7 @@ public static class GenerationEndpoints
     /// </summary>
     private static async Task<IResult> RetryAsync(
         Guid id, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit,
-        GenerationStrategy strategy, TimeProvider clock, CancellationToken ct)
+        GenerationStrategy strategy, CreditTariff tariff, CreditLedgerService credits, TimeProvider clock, CancellationToken ct)
     {
         // Başlık isteğe bağlıdır (eski istemciler anahtarsız çağırır: her çağrı yeni anahtar alır). Verilirse ağ hatasında aynı anahtarla tekrar göndermek tek yeni iş açar.
         if (idempotencyKey is not null && (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64))
@@ -449,9 +483,11 @@ public static class GenerationEndpoints
         }
 
         var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, idempotencyKey ?? Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
-            failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null);
+            failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null,
+            creditCost: CreditFor(tariff, live, failed.JobType, failed.ModelKey, failed.Quality)?.Cost);
+        var credit = CreditFor(tariff, live, failed.JobType, failed.ModelKey, failed.Quality);
         // Bilinçli personel kararı: sonucu belirsiz iş yeniden denenebilir (ikinci ücret olasılığı iletide yazar); etkin aynı iş varsa yine o döner
-        var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, includeUncertain: false, ct);
+        var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, includeUncertain: false, credits, credit, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
     }
 

@@ -98,6 +98,12 @@ public sealed class GenerationJob : Entity, IStoreOwned
     /// </summary>
     public decimal? ReservedCostUsd { get; set; }
 
+    /// <summary>
+    /// Müşteriye satılan kredi bedeli (M5.4): iş kabulünde tarifeden BİR KEZ hesaplanıp işe yazılır; tarife sonradan değişse de bu iş için değişmez.
+    /// <c>null</c> = kredi uygulanmadı (mock sağlayıcı veya kredi öncesi iş). Sağlayıcı maliyetinden (USD) ayrı bir kavramdır.
+    /// </summary>
+    public int? CreditCost { get; init; }
+
     public GenerationStage? Stage { get; set; }
 
     /// <summary>Aynı fotoğraf + aynı seçim + aynı iş tipi için özet. Gerçek sağlayıcıda aynı isteğin ikinci kez ücretlendirilmesini önler.</summary>

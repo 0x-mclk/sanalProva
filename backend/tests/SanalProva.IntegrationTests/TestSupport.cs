@@ -27,7 +27,7 @@ internal static class TestData
 {
     public const string Password = "Test-Parola-12345";
 
-    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff, bool acceptAgreement = true, bool paidAiEnabled = true)
+    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff, bool acceptAgreement = true, bool paidAiEnabled = true, int credits = 1000)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -43,6 +43,14 @@ internal static class TestData
         if (acceptAgreement)
         {
             await AcceptAgreementAsync(services, organization.Id, email);
+        }
+
+        if (credits > 0)
+        {
+            // Fixture varsayılanı: kredi yüklü (gerçek-mod kabul testleri INSUFFICIENT_CREDITS ile karşılaşmasın). Negatif testler credits: 0 verir.
+            var result = await scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Credits.CreditLedgerService>()
+                .ApplyOperatorEntryAsync(db, organization.Id, SanalProva.Domain.Credits.CreditEntryType.Grant, credits, $"fixture-{suffix}", SanalProva.Domain.Credits.CreditSource.Operator, "test", default);
+            Assert.Equal(SanalProva.Infrastructure.Credits.CreditOperatorStatus.Applied, result.Status);
         }
 
         return new TestTenant(organization.Id, store.Id, email, Password);

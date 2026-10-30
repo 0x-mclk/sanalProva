@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -397,6 +398,72 @@ public sealed class PlatformCommandsTests
         // none: firma değerini siler (tavan geçerli olur)
         Assert.Equal(PlatformCommands.ExitOk, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "none", "--monthly", "none", "--job", "none", "--confirm")).Exit);
         Assert.Equal((null, null, null), await LimitsAsync());
+    }
+
+    [Fact]
+    public async Task Kredi_komutu_yukler_duzeltir_referansla_idempotenttir_kuru_calismada_degismez_denetlenir()
+    {
+        await using var env = await Env.CreateAsync();
+        const string email = "yonetici@ornek.test";
+        var token = TokenOf((await env.RunAsync("bootstrap", "--email", email, "--name", "Platform Yöneticisi", "--confirm")).Output);
+        await SetPasswordAsync(env.Host, token, StrongPassword);
+        var admin = await ApiClient.LoginAsync(env.Host, email, null, StrongPassword);
+        var created = await ApiClient.ReadAsync<CreateOrganizationResponse>(await PlatformOrganizationTests.CreateRawAsync(admin, PlatformOrganizationTests.Body(slug: "gul-gelinlik"), PlatformOrganizationTests.NewKey()), HttpStatusCode.Created);
+
+        async Task<(int Balance, int Reserved, int Entries)> StateAsync() => await env.QueryAsync(async db =>
+        {
+            var account = await db.CreditAccounts.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(a => a.OrganizationId == created.OrganizationId, Ct);
+            return (account?.BalanceCredits ?? 0, account?.ReservedCredits ?? 0, await db.CreditLedger.IgnoreQueryFilters().CountAsync(e => e.OrganizationId == created.OrganizationId, Ct));
+        });
+        async Task<int> AuditAsync(string action) => await env.QueryAsync(db => db.AuditLogs.CountAsync(a => a.OrganizationId == created.OrganizationId && a.Action == action, Ct));
+        Assert.Equal((0, 0, 0), await StateAsync()); // yeni firma: hesap yok
+
+        // Göster / kuru çalışma: değişmez
+        var (showExit, showOutput) = await env.RunAsync("credits", "--org", "gul-gelinlik");
+        Assert.Equal(PlatformCommands.ExitOk, showExit);
+        Assert.Contains("bakiye 0", showOutput, StringComparison.Ordinal);
+        var (dryExit, dryOutput) = await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "100", "--ref", "havale-2026-0001");
+        Assert.Equal(PlatformCommands.ExitOk, dryExit);
+        Assert.Contains("KURU ÇALIŞMA", dryOutput, StringComparison.Ordinal);
+        Assert.Equal((0, 0, 0), await StateAsync());
+
+        // Yükleme: uygulanır, denetim yazılır (kişisel veri yok)
+        Assert.Equal(PlatformCommands.ExitOk, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "100", "--ref", "havale-2026-0001", "--note", "Pilot paketi", "--confirm")).Exit);
+        Assert.Equal((100, 0, 1), await StateAsync());
+        Assert.Equal(1, await AuditAsync("Platform.CreditGranted"));
+        Assert.Null(await env.QueryAsync(db => db.AuditLogs.Where(a => a.Action == "Platform.CreditGranted").Select(a => a.UserId).SingleAsync(Ct)));
+
+        // Aynı referans: ikinci kez uygulanmaz, ikinci denetim yok
+        var (sameExit, sameOutput) = await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "100", "--ref", "havale-2026-0001", "--confirm");
+        Assert.Equal(PlatformCommands.ExitOk, sameExit);
+        Assert.Contains("DEĞİŞİKLİK YOK", sameOutput, StringComparison.Ordinal);
+        Assert.Equal((100, 0, 1), await StateAsync());
+        Assert.Equal(1, await AuditAsync("Platform.CreditGranted"));
+
+        // Aynı referans farklı tutarla: reddedilir
+        Assert.Equal(PlatformCommands.ExitRefused, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "250", "--ref", "havale-2026-0001", "--confirm")).Exit);
+        Assert.Equal((100, 0, 1), await StateAsync());
+
+        // Düzeltme: gerekçe zorunlu; bakiye sıfırın altına inemez
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--adjust", "-10", "--ref", "duzeltme-2026-001", "--confirm")).Exit); // --note yok
+        Assert.Equal(PlatformCommands.ExitRefused, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--adjust", "-101", "--ref", "duzeltme-2026-002", "--note", "hatalı yükleme", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitOk, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--adjust", "-40", "--ref", "duzeltme-2026-003", "--note", "hatalı yükleme", "--confirm")).Exit);
+        Assert.Equal((60, 0, 2), await StateAsync());
+        Assert.Equal(1, await AuditAsync("Platform.CreditAdjusted"));
+
+        // Geçersiz kullanım
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "5", "--confirm")).Exit); // --ref yok
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "5", "--ref", "kisa", "--confirm")).Exit); // ref çok kısa
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "-5", "--ref", "geri-alma-0001", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "5", "--adjust", "5", "--ref", "ikisi-birden-1", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--org", "gul-gelinlik", "--grant", "abc", "--ref", "gecersiz-sayi-1", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("credits", "--grant", "5", "--ref", "org-yok-00001", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitNotFound, (await env.RunAsync("credits", "--org", "yok-firma", "--grant", "5", "--ref", "firma-yok-0001", "--confirm")).Exit);
+        Assert.Equal((60, 0, 2), await StateAsync());
+
+        // Platform ayrıntısı bakiyeyi salt okunur gösterir
+        var detail = await admin.GetAsync<JsonElement>($"/api/v1/platform/organizations/{created.OrganizationId}");
+        Assert.Equal(60, detail.GetProperty("creditBalance").GetInt32());
     }
 
     [Fact]

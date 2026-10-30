@@ -206,7 +206,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         {
             var quoted = tables.Select(t => $"[dbo].[{t.Replace("]", "]]", StringComparison.Ordinal)}]").ToList();
             var reset = string.Concat(quoted.Select(t => $"ALTER TABLE {t} NOCHECK CONSTRAINT ALL;\n"))
+                + string.Concat(quoted.Select(t => $"DISABLE TRIGGER ALL ON {t};\n")) // değiştirilemez defter (credit_ledger) DELETE'i tetikleyiciyle reddeder: yalnızca bu atılabilir test veritabanında geçici kapatılır
                 + string.Concat(quoted.Select(t => $"DELETE FROM {t};\n"))
+                + string.Concat(quoted.Select(t => $"ENABLE TRIGGER ALL ON {t};\n"))
                 + string.Concat(quoted.Select(t => $"ALTER TABLE {t} WITH CHECK CHECK CONSTRAINT ALL;\n"));
 #pragma warning disable EF1002 // Tablo adları sistem kataloğundan gelir, kullanıcı girdisi değil
             await db.Database.ExecuteSqlRawAsync(reset);

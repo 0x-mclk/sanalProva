@@ -32,7 +32,7 @@ public sealed record OrganizationOwnerItem(Guid UserId, string DisplayName, stri
 
 public sealed record OrganizationDetail(
     Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, DateTimeOffset CreatedAt, bool AgreementAccepted, DateTimeOffset? AgreementAcceptedAt, string AgreementVersion,
-    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners, decimal? DailyBudgetUsd, decimal? MonthlyBudgetUsd, decimal? MaxJobCostUsd);
+    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners, decimal? DailyBudgetUsd, decimal? MonthlyBudgetUsd, decimal? MaxJobCostUsd, int CreditBalance, int CreditReserved);
 
 public sealed record SetupLinkResponse(Guid OrganizationId, Guid OwnerUserId, string SetupLink, DateTimeOffset SetupLinkExpiresAt);
 
@@ -109,12 +109,13 @@ public static class PlatformOrganizationEndpoints
         var ownerIds = db.UserStoreRoles.IgnoreQueryFilters().Where(r => r.OrganizationId == id && r.Role == StoreRole.Owner).Select(r => r.UserId).Distinct();
         var owners = await db.Users.AsNoTracking().Where(u => u.OrganizationId == id && ownerIds.Contains(u.Id)).OrderBy(u => u.CreatedAt)
             .Select(u => new OrganizationOwnerItem(u.Id, u.DisplayName, u.Email!, u.PasswordHash == null)).ToListAsync(ct);
+        var credit = await db.CreditAccounts.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(a => a.OrganizationId == id, ct);
         var version = gate.Current.Version;
         var acceptedAt = await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.OrganizationId == id && a.AgreementVersion == version).Select(a => (DateTimeOffset?)a.AcceptedAt).SingleOrDefaultAsync(ct);
         return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled, organization.CreatedAt,
             acceptedAt is not null, acceptedAt, version, stores, owners,
-            organization.Settings.DailyBudgetUsd, organization.Settings.MonthlyBudgetUsd, organization.Settings.MaxJobCostUsd));
+            organization.Settings.DailyBudgetUsd, organization.Settings.MonthlyBudgetUsd, organization.Settings.MaxJobCostUsd, credit?.BalanceCredits ?? 0, credit?.ReservedCredits ?? 0));
     }
 
     private static async Task<IResult> ReissueAsync(Guid id, PlatformOnboardingService service, CurrentUser user, HttpContext http, CancellationToken ct)

@@ -18,7 +18,7 @@ namespace SanalProva.Api.Features.Platform;
 /// Her değiştirici komut <c>--confirm</c> ister; olmadan <b>hiçbir veritabanı yazması yapılmaz</b> (yalnızca okuma ve plan çıktısı). Kurulum bağlantıları yalnızca standart çıktıya
 /// <b>bir kez</b> yazılır; günlüğe, dosyaya, denetim kaydına veya veritabanına düz olarak girmez (veritabanında yalnızca HMAC özeti). Denetim kayıtları kişisel veri içermez.
 /// </para>
-/// Komutlar: <c>bootstrap</c>, <c>reissue-link</c>, <c>revoke</c>, <c>reset-access</c>, <c>paid-ai</c>, <c>budget</c>. Ayrıntı: <c>docs/14-platform-operator-komutlari.md</c>.
+/// Komutlar: <c>bootstrap</c>, <c>reissue-link</c>, <c>revoke</c>, <c>reset-access</c>, <c>paid-ai</c>, <c>budget</c>, <c>credits</c>. Ayrıntı: <c>docs/14-platform-operator-komutlari.md</c>.
 /// </summary>
 public static class PlatformCommands
 {
@@ -57,7 +57,8 @@ public static class PlatformCommands
             scope.ServiceProvider.GetRequiredService<AppDbContext>(), scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>(),
             scope.ServiceProvider.GetRequiredService<AccountSetupTokenService>(), scope.ServiceProvider.GetRequiredService<AuditTrail>(),
             scope.ServiceProvider.GetRequiredService<IOptions<SetupTokenOptions>>().Value, options, output,
-            scope.ServiceProvider.GetRequiredService<IOptions<SanalProva.Infrastructure.Ai.GenerationSettings>>().Value.Budget);
+            scope.ServiceProvider.GetRequiredService<IOptions<SanalProva.Infrastructure.Ai.GenerationSettings>>().Value.Budget,
+            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Credits.CreditLedgerService>());
 
         // Anahtar yoksa/zayıfsa token üretilmez (web sunucusundaki ValidateOnStart bu yolda çalışmaz)
         if (!Validator.TryValidateObject(context.TokenOptions, new ValidationContext(context.TokenOptions), null, validateAllProperties: true))
@@ -76,6 +77,7 @@ public static class PlatformCommands
                 "reset-access" => await ResetAccessAsync(context, ct),
                 "paid-ai" => await PaidAiAsync(context, ct),
                 "budget" => await BudgetAsync(context, ct),
+                "credits" => await CreditsAsync(context, ct),
                 _ => await UnknownAsync(output, args[1]),
             };
         }
@@ -101,6 +103,7 @@ public static class PlatformCommands
           revoke        --email <e-posta> [--confirm]                                                 Yöneticinin açık kurulum bağlantılarını iptal eder
           reset-access  --email <e-posta> [--base-url <url>] [--confirm]                              Erişim kurtarma: parolayı siler, güvenlik damgasını yeniler, yeni bağlantı üretir
           paid-ai       --org <slug> (--enable | --disable) [--confirm]                               Firmanın ücretli AI yetkisini değiştirir (denetime yazılır)
+          credits       --org <slug> [(--grant <n> | --adjust <±n> --note <gerekçe>) --ref <benzersiz-referans>] [--confirm]   Firma kredisi: gösterir / yükler / düzeltir (referans = idempotency)
           budget        --org <slug> [--daily <usd|none>] [--monthly <usd|none>] [--job <usd|none>] [--confirm]   Firma AI bütçe sınırları (platform tavanını aşamaz; seçeneksiz: yalnızca gösterir)
         --confirm olmadan hiçbir veritabanı değişikliği yapılmaz (kuru çalışma).
         """;
@@ -385,6 +388,91 @@ public static class PlatformCommands
         return ExitOk;
     }
 
+    // ------------------------------------------------------------------ credits
+
+    private static readonly System.Text.RegularExpressions.Regex ReferencePattern = new("^[A-Za-z0-9][A-Za-z0-9._:-]{7,63}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Firma kredisi (M5.4): bakiye gösterir; <c>--grant N</c> yükler, <c>--adjust ±N</c> düzeltir. Bu komut (ve <c>CreditLedgerService</c>) kredi hesabını değiştiren TEK yerdir.
+    /// <c>--ref</c> zorunlu ve firma içinde benzersiz işlem referansıdır (idempotency): aynı referansla tekrar çalıştırmak ikinci kez yüklemez; farklı değerle reddedilir.
+    /// Düzeltme için <c>--note</c> (gerekçe) zorunludur ve bakiye rezerve tutarın altına inemez. <c>--confirm</c> yoksa hiçbir şey yazılmaz. Gerçek ödeme alma yoktur (M5.5).
+    /// </summary>
+    private static async Task<int> CreditsAsync(Context c, CancellationToken ct)
+    {
+        if (c.Options.Org is null)
+        {
+            return await UsageErrorAsync(c, "--org <slug> zorunludur.");
+        }
+
+        var organization = await c.Db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.Slug == c.Options.Org, ct);
+        if (organization is null)
+        {
+            await c.Out.WriteLineAsync("BULUNAMADI: bu slug ile firma yok.");
+            return ExitNotFound;
+        }
+
+        var account = await c.Db.CreditAccounts.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(a => a.OrganizationId == organization.Id, ct);
+        await c.Out.WriteLineAsync($"MEVCUT '{organization.Slug}': bakiye {account?.BalanceCredits ?? 0}; rezerve {account?.ReservedCredits ?? 0}; kullanılabilir {account?.AvailableCredits ?? 0} kredi.");
+
+        var o = c.Options;
+        if (o.Grant is null && o.Adjust is null)
+        {
+            return ExitOk; // yalnızca okuma
+        }
+
+        if (o.Grant is not null && o.Adjust is not null)
+        {
+            return await UsageErrorAsync(c, "--grant ve --adjust birlikte kullanılamaz.");
+        }
+
+        if (o.Reference is null || !ReferencePattern.IsMatch(o.Reference))
+        {
+            return await UsageErrorAsync(c, "--ref zorunlu: 8–64 karakter (harf, rakam, . _ : -), her işlem için benzersiz (örn. fatura/havale numarası).");
+        }
+
+        if (o.Grant is < 0)
+        {
+            return await UsageErrorAsync(c, "--grant pozitif olmalı (geri alma için --adjust kullanın).");
+        }
+
+        var adjusting = o.Adjust is not null;
+        var amount = o.Grant ?? o.Adjust!.Value;
+        if (adjusting && string.IsNullOrWhiteSpace(o.Note))
+        {
+            return await UsageErrorAsync(c, "--adjust için --note (gerekçe) zorunludur.");
+        }
+
+        await c.Out.WriteLineAsync($"PLAN: '{organization.Slug}' için {(adjusting ? "DÜZELTME" : "YÜKLEME")} {amount:+#;-#;0} kredi; referans {o.Reference}.");
+        if (!o.Confirm)
+        {
+            await c.Out.WriteLineAsync("KURU ÇALIŞMA: --confirm verilmedi, hiçbir değişiklik yapılmadı.");
+            return ExitOk;
+        }
+
+        var result = await c.Credits.ApplyOperatorEntryAsync(
+            c.Db, organization.Id, adjusting ? SanalProva.Domain.Credits.CreditEntryType.Adjustment : SanalProva.Domain.Credits.CreditEntryType.Grant, amount, o.Reference, SanalProva.Domain.Credits.CreditSource.Operator, o.Note, ct);
+        switch (result.Status)
+        {
+            case SanalProva.Infrastructure.Credits.CreditOperatorStatus.Replayed:
+                await c.Out.WriteLineAsync($"DEĞİŞİKLİK YOK: bu referans zaten uygulanmış (bakiye {result.BalanceAfter}; rezerve {result.ReservedAfter}).");
+                return ExitOk;
+            case SanalProva.Infrastructure.Credits.CreditOperatorStatus.ReferenceConflict:
+                await c.Out.WriteLineAsync("REDDEDİLDİ: bu referans farklı bir işlem (tür/tutar) için kullanılmış; her işlem için yeni referans verin.");
+                return ExitRefused;
+            case SanalProva.Infrastructure.Credits.CreditOperatorStatus.WouldGoBelowReserved:
+                await c.Out.WriteLineAsync($"REDDEDİLDİ: düzeltme bakiyeyi rezerve tutarın ({result.ReservedAfter}) veya sıfırın altına indirir.");
+                return ExitRefused;
+            case SanalProva.Infrastructure.Credits.CreditOperatorStatus.Invalid:
+                return await UsageErrorAsync(c, "tutar geçersiz (yükleme pozitif, düzeltme sıfırdan farklı olmalı).");
+        }
+
+        // Denetim kaydı (kişisel veri yok; tutar ve referans defterde de değiştirilemez biçimde durur). Uygulama başarılı olduktan sonra yazılır; yinelenen çalıştırmada yazılmaz.
+        c.Audit.RecordFor(organization.Id, null, adjusting ? "Platform.CreditAdjusted" : "Platform.CreditGranted", nameof(Organization), organization.Id);
+        await c.Db.SaveChangesAsync(ct);
+        await c.Out.WriteLineAsync($"TAMAM: '{organization.Slug}' {(adjusting ? "düzeltme" : "yükleme")} uygulandı; bakiye {result.BalanceAfter}, rezerve {result.ReservedAfter} (denetim kaydı yazıldı).");
+        return ExitOk;
+    }
+
     // ------------------------------------------------------------------ yardımcılar
 
     private static TimeSpan LinkTtl(Context c) => TimeSpan.FromHours(c.TokenOptions.InitialPasswordTtlHours);
@@ -407,20 +495,22 @@ public static class PlatformCommands
 
     private sealed record Context(
         AppDbContext Db, UserManager<AppUser> Users, AccountSetupTokenService Tokens, AuditTrail Audit, SetupTokenOptions TokenOptions, CommandOptions Options, TextWriter Out,
-        SanalProva.Infrastructure.Ai.BudgetSettings Budget);
+        SanalProva.Infrastructure.Ai.BudgetSettings Budget, SanalProva.Infrastructure.Credits.CreditLedgerService Credits);
 
     /// <summary>Sayısal bütçe seçeneği: <c>Set</c> seçenek verildi mi; <c>Value</c> null ise "none" (firma değerini sil).</summary>
     private readonly record struct BudgetArg(bool Set, decimal? Value);
 
     private sealed record CommandOptions(
         string? Error, string? Email, string? Name, string? Org, string? BaseUrl, bool Confirm, bool Additional, bool Enable, bool Disable,
-        BudgetArg Daily = default, BudgetArg Monthly = default, BudgetArg Job = default)
+        BudgetArg Daily = default, BudgetArg Monthly = default, BudgetArg Job = default, int? Grant = null, int? Adjust = null, string? Reference = null, string? Note = null)
     {
         public static CommandOptions Parse(string[] args)
         {
             string? email = null, name = null, org = null, baseUrl = null;
             bool confirm = false, additional = false, enable = false, disable = false;
             BudgetArg daily = default, monthly = default, job = default;
+            int? grant = null, adjust = null;
+            string? reference = null, note = null;
             for (var i = 0; i < args.Length; i++)
             {
                 string Value(string flag) => i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal) ? args[++i] : throw new FormatException($"{flag} bir değer ister.");
@@ -439,6 +529,10 @@ public static class PlatformCommands
                         case "--daily": daily = Money("--daily", Value("--daily")); break;
                         case "--monthly": monthly = Money("--monthly", Value("--monthly")); break;
                         case "--job": job = Money("--job", Value("--job")); break;
+                        case "--grant": grant = Credits("--grant", Value("--grant")); break;
+                        case "--adjust": adjust = Credits("--adjust", Value("--adjust")); break;
+                        case "--ref": reference = Value("--ref").Trim(); break;
+                        case "--note": note = Value("--note").Trim(); break;
                         default: return Fail($"bilinmeyen seçenek '{args[i]}'.");
                     }
                 }
@@ -463,7 +557,12 @@ public static class PlatformCommands
                 return Fail("--base-url mutlak http(s) adresi olmalı.");
             }
 
-            return new CommandOptions(null, email, name, org, baseUrl, confirm, additional, enable, disable, daily, monthly, job);
+            if (note is not null && note.Length > 200)
+            {
+                return Fail("--note en fazla 200 karakter olmalı.");
+            }
+
+            return new CommandOptions(null, email, name, org, baseUrl, confirm, additional, enable, disable, daily, monthly, job, grant, adjust, reference, note);
 
             static CommandOptions Fail(string message) => new(message, null, null, null, null, false, false, false, false);
         }
@@ -482,6 +581,17 @@ public static class PlatformCommands
             }
 
             return new BudgetArg(true, value);
+        }
+
+        /// <summary>Tam sayı kredi: en çok 1.000.000 (mutlak); işaretli olabilir (düzeltme).</summary>
+        private static int Credits(string flag, string text)
+        {
+            if (!int.TryParse(text, System.Globalization.NumberStyles.AllowLeadingSign, System.Globalization.CultureInfo.InvariantCulture, out var value) || value == 0 || Math.Abs(value) > 1_000_000)
+            {
+                throw new FormatException($"{flag} değeri sıfırdan farklı, en çok 1000000 mutlak değerli bir tam sayı olmalı.");
+            }
+
+            return value;
         }
 
         private static bool IsEmail(string value) =>
