@@ -189,6 +189,9 @@ describe('OrganizationDetailPage', () => {
     agreementVersion: '2026-11-v1',
     stores: [{ id: 's1', name: 'Merkez', code: 'MRK', isActive: true }],
     owners: [{ userId: 'u1', displayName: 'Ayşe Sahip', email: 'ayse@ornek.test', setupPending }],
+    dailyBudgetUsd: 2.5,
+    monthlyBudgetUsd: null,
+    maxJobCostUsd: null,
   });
 
   const renderDetail = () => wrap(<OrganizationDetailPage />, new QueryClient(), '/platform/o1');
@@ -200,7 +203,8 @@ describe('OrganizationDetailPage', () => {
     expect(screen.getByText('Kurulum: şifre bekleniyor')).toBeInTheDocument();
     expect(screen.getByText('Sözleşme: bekliyor')).toBeInTheDocument();
     expect(screen.getByText('Ücretli AI: kapalı')).toBeInTheDocument();
-    expect(screen.getByText(/yalnızca sunucudaki operatör komutuyla/)).toBeInTheDocument();
+    expect(screen.getByText(/yalnızca sunucudaki operatör komutlarıyla/)).toBeInTheDocument();
+    expect(screen.getByText(/günlük 2.5 \$ · aylık platform tavanı · iş başı platform tavanı/)).toBeInTheDocument(); // M5.3: firma AI bütçe sınırları (salt okunur)
   });
 
   it('yeniden üretme: onay penceresi, çift tıklamada tek istek, bağlantı yalnızca bir kez', async () => {

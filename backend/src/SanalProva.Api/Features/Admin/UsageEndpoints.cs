@@ -15,8 +15,12 @@ public sealed record UsageByDay(DateOnly Day, int Calls, int Failures, decimal E
 
 public sealed record UsageByModel(string Provider, string Model, string? Quality, int Calls, int Successes, int Failures, int Retries, double AverageDurationMs, decimal Credits, decimal EstimatedCostUsd, decimal ActualCostUsd);
 
+/// <param name="DailyLimitUsd">ETKİN günlük sınır = min(platform tavanı, firma sınırı) (M5.3). Aşağıdaki platform alanları tavandır.</param>
+/// <param name="OpenReservedUsd">Sürmekte olan/belirsiz çağrılar için ayrılmış tutar (harcamaya henüz dönüşmemiş en kötü durum).</param>
 public sealed record BudgetStatus(
-    bool Live, bool AllowPaidCalls, bool Enforce, decimal DailyLimitUsd, decimal MonthlyLimitUsd, decimal MaxJobCostUsd, decimal SpentTodayUsd, decimal SpentMonthUsd);
+    bool Live, bool AllowPaidCalls, bool Enforce, decimal DailyLimitUsd, decimal MonthlyLimitUsd, decimal MaxJobCostUsd, decimal SpentTodayUsd, decimal SpentMonthUsd,
+    decimal PlatformDailyLimitUsd, decimal PlatformMonthlyLimitUsd, decimal PlatformMaxJobCostUsd, bool DailyLimitSetByOrganization, bool MonthlyLimitSetByOrganization, bool MaxJobSetByOrganization,
+    decimal OpenReservedUsd);
 
 public sealed record ConfiguredModel(
     string JobType, string Provider, string Model, string DisplayName, string DocStatus, string DocsVerifiedOn, bool LiveVerified, bool Known, string? Warning);
@@ -71,9 +75,11 @@ public static class UsageEndpoints
 
         var settings = generation.CurrentValue;
         var spend = await budget.GetSpendAsync(db, user.OrganizationId, null, ct);
+        var limits = await BudgetLimits.ForAsync(db, settings.Budget, user.OrganizationId, ct);
+        var open = await BudgetGuard.GetOpenReservedAsync(db, user.OrganizationId, ct);
         var status = new BudgetStatus(
-            !settings.UseMockProviders, settings.Budget.AllowPaidCalls, settings.Budget.Enforce, settings.Budget.DailyLimitUsd, settings.Budget.MonthlyLimitUsd,
-            settings.Budget.MaxJobCostUsd, spend.Today, spend.Month);
+            !settings.UseMockProviders, settings.Budget.AllowPaidCalls, settings.Budget.Enforce, limits.DailyUsd, limits.MonthlyUsd, limits.MaxJobUsd, spend.Today, spend.Month,
+            settings.Budget.DailyLimitUsd, settings.Budget.MonthlyLimitUsd, settings.Budget.MaxJobCostUsd, limits.DailyFromOrganization, limits.MonthlyFromOrganization, limits.MaxJobFromOrganization, open);
 
         var models = settings.Strategies.Select(entry =>
         {

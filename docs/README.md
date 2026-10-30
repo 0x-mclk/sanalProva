@@ -23,6 +23,8 @@ Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıkt
 | 12 | [Tek kaftan giydirme: Seedream, GPT Image 2.5, Pruna](12-tek-kaftan-model-entegrasyonu.md) | **Güncel model seçimi**: doğrulanan API'ler, model/kalite ayarları, KVKK, onay bekleyen canlı test |
 | 13 | [Kontrollü onboarding](13-m5-1-kontrollu-onboarding.md) | **M5.1 tasarımı**: platform yöneticisi, firma oluşturma, kurulum bağlantısı, hizmet sözleşmesi, ücretli AI kapısı
 | 14 | [Platform operatör komutları ve sınırlar](14-platform-operator-komutlari.md) | **M5.1g**: bootstrap/reissue/revoke/reset-access/paid-ai, SignalR ve yarış koşulu sınırları
+| 15 | [Şube ve personel yönetimi](15-m5-2-sube-personel-yonetimi.md) | **M5.2**: şube CRUD, personel daveti, rol/şube ataması, pasife alma, yetki matrisi |
+| 16 | [Firma bazlı bütçe ve mutabakat](16-m5-3-butce-ve-mutabakat.md) | **M5.3**: firma bütçe sınırları (min(tavan, firma)), iptal edilmiş işlerin rezervasyon kapanışı, belirsiz maliyet |
 | 11 | [Aşama 4: AI entegrasyon planı, maliyet sınırları ve kontrollü test planı](11-ai-entegrasyon-plani-ve-test.md) | Doğrulanan API bilgileri, bütçe kapıları, test sonuçları, **onay bekleyen canlı test planı** |
 
 ## Özet: temel mimari kararlar

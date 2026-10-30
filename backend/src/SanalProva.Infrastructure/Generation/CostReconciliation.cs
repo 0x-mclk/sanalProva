@@ -24,7 +24,9 @@ public sealed class CostReconciliationSweep(
     /// <param name="MissingCostRows">İş "belirsiz" ama maliyet satırı yokken eklenen satır sayısı.</param>
     /// <param name="LegacyKeyed">Olay anahtarı/mutabakat durumu olmayan eski belirsiz satırlardan düzeltilenler.</param>
     /// <param name="StaleOpen">Süresi aşan açık vaka sayısı (yalnızca uyarı; veri değişmez).</param>
-    public sealed record Result(int MissingCostRows, int LegacyKeyed, int StaleOpen, decimal StaleOpenUsd);
+    /// <param name="ReleasedReservations">İptal edilmiş ve hiç gönderilmemiş işlerden serbest bırakılan rezervasyon sayısı (M5.3).</param>
+    /// <param name="CancelledToUncertain">İptal edilmiş, gönderilmiş ve kurtarma süresi dolmuş işlerden belirsiz maliyet kaydına çevrilen rezervasyon sayısı (M5.3).</param>
+    public sealed record Result(int MissingCostRows, int LegacyKeyed, int StaleOpen, decimal StaleOpenUsd, int ReleasedReservations = 0, int CancelledToUncertain = 0);
 
     public async Task<Result> RunOnceAsync(CancellationToken ct)
     {
@@ -33,13 +35,29 @@ public sealed class CostReconciliationSweep(
         return await RunOnceAsync(db, ct);
     }
 
+    /// <summary>
+    /// Süpürücü deyimini çalıştırır. Olay anahtarı benzersiz indeksi (<c>ux_ai_usage_logs_event_key</c>) eşzamanlı ikinci süpürücüye karşı koruma hattıdır: aynı işin kaydını başka bir
+    /// süpürücü az önce yazdıysa deyim geri alınır ve bu tur 0 sayılır (ikinci kayıt yok; kaybeden tur sonraki çalıştırmada zaten kayıtlıyı görür).
+    /// </summary>
+    private static async Task<int> TryExecuteAsync(AppDbContext db, FormattableString sql, CancellationToken ct)
+    {
+        try
+        {
+            return await db.Database.ExecuteSqlInterpolatedAsync(sql, ct);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
+        {
+            return 0;
+        }
+    }
+
     internal async Task<Result> RunOnceAsync(AppDbContext db, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var fallback = settings.CurrentValue.Budget.MaxJobCostUsd;
 
         // (a) İş Failed/OutcomeUncertain ama hiçbir belirsiz maliyet satırı yok → en kötü durum satırı ekle (bütçe harcamayı görsün)
-        var missing = await db.Database.ExecuteSqlInterpolatedAsync($"""
+        var missing = await TryExecuteAsync(db, $"""
             INSERT INTO ai_usage_logs (id, created_at, updated_at, organization_id, store_id, job_id, provider, model, operation, quality, attempt, success,
                                        duration_ms, estimated_cost_usd, provider_request_id, error_code, event_key, is_adjustment, reconciliation_state)
             SELECT NEWID(), {now}, {now}, j.organization_id, j.store_id, j.id, COALESCE(j.provider, N'unknown'), COALESCE(j.model, N'unknown'), j.job_type, j.quality,
@@ -52,7 +70,7 @@ public sealed class CostReconciliationSweep(
             """, ct);
 
         // (b) Eski sürümde yazılmış belirsiz satırlar: olay anahtarı ve "Open" durumu eklenir (iş başına en eski satır; başka satırda aynı anahtar yoksa)
-        var keyed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+        var keyed = await TryExecuteAsync(db, $"""
             WITH legacy AS (
                 SELECT id, job_id, ROW_NUMBER() OVER (PARTITION BY job_id ORDER BY created_at, id) AS rn
                   FROM ai_usage_logs
@@ -65,16 +83,43 @@ public sealed class CostReconciliationSweep(
             """, ct);
 
         // (c) İş bağlantısı kopmuş (oturum silinmiş) eski satırlar: anahtarsız kalır ama mutabakata girer
-        keyed += await db.Database.ExecuteSqlInterpolatedAsync($"""
+        keyed += await TryExecuteAsync(db, $"""
             UPDATE ai_usage_logs SET reconciliation_state = N'Open'
              WHERE error_code = N'OutcomeUncertain' AND is_adjustment = 0 AND reconciliation_state IS NULL AND job_id IS NULL;
+            """, ct);
+
+        // (d) İptal edilmiş + HİÇ gönderilmemiş (niyet ve kimlik yok) iş: sağlayıcıya hiçbir şey gitmediği KESİN → rezervasyon serbest (yalnızca ayrılmış sayılmaz).
+        var released = await TryExecuteAsync(db, $"""
+            UPDATE generation_jobs SET reserved_cost_usd = NULL, updated_at = {now}
+             WHERE status = N'Cancelled' AND reserved_cost_usd IS NOT NULL AND provider_submit_started_at IS NULL AND provider_request_id IS NULL;
+            """, ct);
+
+        // (e) İptal edilmiş + GÖNDERİLMİŞ (veya niyet/kimlik var) + maliyet kaydı yok + kurtarma süresi doldu: doğrudan serbest bırakılmaz; en kötü durumla BELİRSİZ maliyet kaydına
+        // çevrilir (mutabakata açık). Olay anahtarı iş başına tektir: ikinci çalıştırma/yarış ikinci kayıt üretmez (filtreli benzersiz indeks).
+        var recoveryCutoff = now.AddSeconds(-Math.Max(60, settings.CurrentValue.CancelledReservationRecoverySeconds));
+        var converted = await TryExecuteAsync(db, $"""
+            INSERT INTO ai_usage_logs (id, created_at, updated_at, organization_id, store_id, job_id, provider, model, operation, quality, attempt, success,
+                                       duration_ms, estimated_cost_usd, provider_request_id, error_code, event_key, is_adjustment, reconciliation_state)
+            SELECT NEWID(), {now}, {now}, j.organization_id, j.store_id, j.id, COALESCE(j.provider, N'unknown'), COALESCE(j.model, N'unknown'), j.job_type, j.quality,
+                   j.attempt, 0, 0, j.reserved_cost_usd, j.provider_request_id, N'OutcomeUncertain',
+                   CONCAT(N'uncertain:', LOWER(CONVERT(nvarchar(36), j.id))), 0, N'Open'
+              FROM generation_jobs AS j
+             WHERE j.status = N'Cancelled' AND j.reserved_cost_usd IS NOT NULL AND (j.provider_submit_started_at IS NOT NULL OR j.provider_request_id IS NOT NULL)
+               AND COALESCE(j.finished_at, j.updated_at) < {recoveryCutoff}
+               AND NOT EXISTS (SELECT 1 FROM ai_usage_logs AS u WHERE u.job_id = j.id AND u.attempt = j.attempt AND u.is_adjustment = 0)
+               AND NOT EXISTS (SELECT 1 FROM ai_usage_logs AS u WHERE u.event_key = CONCAT(N'uncertain:', LOWER(CONVERT(nvarchar(36), j.id))));
             """, ct);
 
         var threshold = now.AddDays(-Math.Max(1, settings.CurrentValue.ReconciliationStaleDays));
         var stale = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking()
             .Where(l => l.ReconciliationState == CostReconciliationState.Open && l.CreatedAt < threshold)
             .Select(l => l.EstimatedCostUsd).ToListAsync(ct);
-        var result = new Result(missing, keyed, stale.Count, stale.Sum());
+        var result = new Result(missing, keyed, stale.Count, stale.Sum(), released, converted);
+
+        if (released > 0 || converted > 0)
+        {
+            logger.LogWarning("İptal edilmiş işlerin rezervasyonları kapatıldı: serbest {Released}, belirsiz maliyete çevrilen {Converted}.", released, converted);
+        }
 
         if (missing > 0 || keyed > 0)
         {

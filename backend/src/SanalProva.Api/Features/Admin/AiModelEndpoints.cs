@@ -4,6 +4,7 @@ using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Ai.TryOn;
+using SanalProva.Infrastructure.Generation;
 using SanalProva.Infrastructure.Persistence;
 
 namespace SanalProva.Api.Features.Admin;
@@ -50,16 +51,16 @@ public static class AiModelEndpoints
         return api;
     }
 
-    private static TryOnQualityDto ToDto(TryOnModel model, TryOnQuality quality, GenerationSettings generation)
+    private static TryOnQualityDto ToDto(TryOnModel model, TryOnQuality quality, GenerationSettings generation, OrganizationSettings organization)
     {
         var (estimated, worst) = TryOnModels.DisplayPrice(model, quality, generation.Pricing);
         return new TryOnQualityDto(quality.Key, quality.Label, estimated, worst, quality.MeasuredUsd, quality.EnabledByDefault, quality.HighCost,
-            ExceedsJobLimit(generation, worst));
+            ExceedsJobLimit(generation, organization, worst));
     }
 
     /// <summary>Gerçek modda bütçe kapısı (iş başı sınır) bu en kötü durumu reddeder mi. Mock modda ücret yoktur.</summary>
-    internal static bool ExceedsJobLimit(GenerationSettings generation, decimal worstCaseUsd) =>
-        !generation.UseMockProviders && generation.Budget.Enforce && worstCaseUsd > generation.Budget.MaxJobCostUsd;
+    internal static bool ExceedsJobLimit(GenerationSettings generation, OrganizationSettings? organization, decimal worstCaseUsd) =>
+        !generation.UseMockProviders && generation.Budget.Enforce && worstCaseUsd > BudgetLimits.Resolve(generation.Budget, organization).MaxJobUsd;
 
     private static async Task<OrganizationSettings> LoadSettingsAsync(AppDbContext db, Guid organizationId, CancellationToken ct) =>
         (await db.Organizations.AsNoTracking().SingleAsync(o => o.Id == organizationId, ct)).Settings;
@@ -73,9 +74,9 @@ public static class AiModelEndpoints
             return new AdminTryOnModelDto(
                 model.Key, model.DisplayName, model.ModelId, model.Note, model.Legacy, model.LiveVerified, model.PriceSource,
                 allowed is not null, allowed?.AllowedQualities ?? [], allowed?.DefaultQuality ?? model.DefaultQuality,
-                model.Qualities.Select(q => ToDto(model, q, generation)).ToList());
+                model.Qualities.Select(q => ToDto(model, q, generation, settings)).ToList());
         }).ToList();
-        return new AiModelSettingsDto(policy.DefaultModel, !generation.UseMockProviders, generation.Budget.Enforce ? generation.Budget.MaxJobCostUsd : null, models);
+        return new AiModelSettingsDto(policy.DefaultModel, !generation.UseMockProviders, generation.Budget.Enforce ? BudgetLimits.Resolve(generation.Budget, settings).MaxJobUsd : null, models);
     }
 
     private static async Task<IResult> GetAsync(AppDbContext db, CurrentUser user, IOptionsMonitor<GenerationSettings> generation, CancellationToken ct) =>
@@ -148,11 +149,12 @@ public static class AiModelEndpoints
     private static async Task<IResult> OptionsAsync(AppDbContext db, CurrentUser user, IOptionsMonitor<GenerationSettings> generation, CancellationToken ct)
     {
         var settings = generation.CurrentValue;
-        var policy = TryOnPolicyResolver.Resolve(await LoadSettingsAsync(db, user.OrganizationId, ct));
+        var organization = await LoadSettingsAsync(db, user.OrganizationId, ct);
+        var policy = TryOnPolicyResolver.Resolve(organization);
         var live = !settings.UseMockProviders;
         var models = policy.Models.Select(p => new TryOnModelOptionDto(
             p.Model.Key, p.Model.DisplayName, p.Model.Note, p.Model.LiveVerified, p.DefaultQuality,
-            p.AllowedQualities.Select(q => ToDto(p.Model, p.Model.Quality(q)!, settings)).ToList())).ToList();
+            p.AllowedQualities.Select(q => ToDto(p.Model, p.Model.Quality(q)!, settings, organization)).ToList())).ToList();
         return TypedResults.Ok(new TryOnOptionsDto(live, !live || settings.LiveFreeCombinationEnabled, policy.DefaultModel, models));
     }
 }

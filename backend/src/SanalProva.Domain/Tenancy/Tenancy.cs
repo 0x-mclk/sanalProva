@@ -62,6 +62,18 @@ public sealed class OrganizationSettings
     /// Gerçek (mock olmayan) modda iş kabulünde ve <c>BudgetGuard</c> sağlayıcı çağrısından önce ikinci kez denetlenir.
     /// </summary>
     public bool PaidAiEnabled { get; set; }
+
+    /// <summary>
+    /// Firma başına günlük (UTC günü) AI harcama sınırı, USD (M5.3). <c>null</c> = yalnızca platform üst sınırı (<c>Generation:Budget</c>) geçerli.
+    /// Değer platform üst sınırını AŞAMAZ: etkin sınır ikisinin küçüğüdür. Yalnızca operatör komutuyla yazılır (<c>platform budget</c>).
+    /// </summary>
+    public decimal? DailyBudgetUsd { get; set; }
+
+    /// <summary>Firma başına takvim ayı (UTC) AI harcama sınırı, USD. <c>null</c> = platform üst sınırı. Etkin sınır = min(platform, firma).</summary>
+    public decimal? MonthlyBudgetUsd { get; set; }
+
+    /// <summary>Tek bir işin (yeniden denemeler dahil) azami maliyeti, USD. <c>null</c> = platform üst sınırı. Etkin sınır = min(platform, firma).</summary>
+    public decimal? MaxJobCostUsd { get; set; }
 }
 
 /// <summary>Şube. Prova oturumları ve TV cihazları şube seviyesindedir.</summary>

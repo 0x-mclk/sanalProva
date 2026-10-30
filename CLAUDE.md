@@ -24,6 +24,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | 5 Revizyon motoru (Gemini edit, SAM 2 + OpenCV) | bekliyor (onay gerekir) |
 | M5.1 Kontrollü onboarding (a–i) | ✅ yerelde tamamlandı ve doğrulandı (birim 266, entegrasyon 324, React 127, Playwright 10/10); **toplu GitHub CI doğrulaması kullanıcıda**; sözleşme metni TASLAK ([docs/13](docs/13-m5-1-kontrollu-onboarding.md), [docs/14](docs/14-platform-operator-komutlari.md)). Sıradaki: M5.2 (aşağıda) |
 | M5.2 Şube ve personel yönetimi (a–e) | ✅ yerelde tamamlandı ve doğrulandı (backend 624 test, React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/15](docs/15-m5-2-sube-personel-yonetimi.md)). Sıradaki: M5.3 (onay bekliyor) |
+| M5.3 Firma bazlı bütçe ve AI mutabakatı | ✅ yerelde tamamlandı ve doğrulandı (backend 639 test (4 beklenen atlama), React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/16](docs/16-m5-3-butce-ve-mutabakat.md)). Sıradaki: M5.4 kredi sistemi (onay bekliyor) |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
@@ -109,6 +110,13 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 - **Oturum güvenliği:** `ActiveUserCookieValidator` her istekte hesabın etkinliği/firması/güvenlik damgasını doğrular (Identity varsayılanı 30 dk'da bir ve pasifliğe bakmaz); pasife alma ve şifre sıfırlama damgayı yeniler ve `StaffConnectionRegistry` ile açık StaffHub bağlantılarını keser; hub pasif hesap/şubeye abonelik vermez.
 - React: `frontend/src/features/management` (şube ve personel ekranları, Ana sayfa menüsünden), bağlantı `SetupLinkReveal` ile bir kez gösterilir (`useMutation` kullanılmaz). Playwright: `management.spec.ts`.
 - **Tuzak:** `TenantArchitectureTests` envanteri (`Hubs.cs` 8 atlama). Yönetim servisleri `IgnoreQueryFilters` kullanmaz (EF filtresi + açık firma koşulu).
+
+## M5.3'te gelenler (firma bazlı bütçe ve mutabakat)
+
+- **Firma sınırları:** `OrganizationSettings.DailyBudgetUsd/MonthlyBudgetUsd/MaxJobCostUsd` (JSON, migration yok, `null` = platform tavanı). Etkin sınır = **min(platform tavanı `Generation:Budget`, firma değeri)** (`BudgetLimits.Resolve`); firma tavanı yükseltemez; negatif = 0 (fail-closed). `BudgetGuard.ReserveAsync` (kilit altında) ve `QUALITY_OVER_BUDGET` ön denetimi bunu kullanır. Platform çapında toplam sınır BİLİNÇLİ olarak yok (firmalar birbirini etkilemez).
+- **Yazma yalnızca operatör komutu:** `platform budget --org SLUG [--daily|--monthly|--job USD|none] [--confirm]` (`Platform.BudgetChanged`); kaynak taraması testi (`BudgetLimitsApiTests`). Görünürlük: `GET /admin/usage` (etkin + tavan + açık rezervasyon), platform ayrıntısı (salt okunur), kullanım ekranı.
+- **Rezervasyon kapanışı:** iptal + hiç gönderilmemiş → hemen serbest (`OpenReservations` saymaz, süpürücü alanı temizler); iptal + gönderilmiş + kayıtsız → `CancelledReservationRecoverySeconds` (900) sonra süpürücü **tek idempotent** `OutcomeUncertain` kaydı yazar (olay anahtarı `uncertain:{jobId}`; eşzamanlı süpürücülerde benzersiz indeks ihlali `TryExecuteAsync` ile yutulur).
+- **Tuzak:** `TenantArchitectureTests` envanteri (`CostReconciliation.cs` 5/1/0: ham SQL tek yardımcıdan geçer). Yeni işi test ederken `PaidProviderPipelineTests.CancelledJobAsync` yardımcısını kullanın.
 
 ## Yerel çalıştırma
 

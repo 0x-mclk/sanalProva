@@ -102,7 +102,7 @@ public sealed class TenantArchitectureTests
     {
         // --- Arka plan işleyicileri: firmalar arası çalışmak zorundadır; her iş için kiracı bağlamı işin firmasına ayarlanır, girdiler (fotoğraf, seçim, ürün, dosya) FİLTRELİ sorgularla yüklenir
         ["SanalProva.Infrastructure/Generation/GenerationProcessor.cs"] = (11, 2, 4, "Kuyruk (iş kimliğiyle, firma bağlamı işten ayarlanır), kilit yenileme/kurtarma ve kurtarmada atomik maliyet kaydı (SQL'de job.organization_id taşınır). Girdi yükleme filtrelidir. İş silinmiş mi denetimi (KVKK silmesiyle yarış) yalnızca iş kimliğiyle."),
-        ["SanalProva.Infrastructure/Generation/CostReconciliation.cs"] = (5, 3, 0, "Süpürücü ve mutabakat servisi: firmalar arası bakım. Yalnızca platform yöneticisi uç noktasından ve süpürücüden çağrılır; kayıtlar kendi firma/şubelerini taşır."),
+        ["SanalProva.Infrastructure/Generation/CostReconciliation.cs"] = (5, 1, 0, "Süpürücü ve mutabakat servisi: firmalar arası bakım (M5.3: tüm ham SQL tek yardımcıdan geçer: eşzamanlı süpürücüde benzersiz indeks ihlali yutulur). Yalnızca platform yöneticisi uç noktasından ve süpürücüden çağrılır; kayıtlar kendi firma/şubelerini taşır."),
         ["SanalProva.Infrastructure/Generation/BudgetGuard.cs"] = (5, 0, 1, "Bütçe toplamı ve açık rezervasyonlar: sorgular açıkça organization_id ile sınırlı; rezervasyon yazımı iş kimliği + deneme numarası + Running koşuluyla."),
         ["SanalProva.Infrastructure/Persistence/AppLocks.cs"] = (0, 1, 0, "sp_getapplock: veri değil kilit; kaynak adı şube/oturum kimliğidir."),
         ["SanalProva.Infrastructure/Persistence/AppDbContext.cs"] = (1, 0, 0, "Yalnızca belge yorumu (\"IgnoreQueryFilters()\" ile aşılır): kod kullanımı değil."),

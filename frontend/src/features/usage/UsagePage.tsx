@@ -53,19 +53,27 @@ function Report({ report }: { report: UsageReport }) {
         <div className={classes.card}>
           <Eyebrow tone="muted">Bugün (UTC)</Eyebrow>
           <strong>{usd(budget.spentTodayUsd)}</strong>
-          <span>sınır {usd(budget.dailyLimitUsd)}</span>
+          <span>sınır {usd(budget.dailyLimitUsd)}{budget.dailyLimitSetByOrganization ? ' (firma sınırı)' : ''}</span>
         </div>
         <div className={classes.card}>
           <Eyebrow tone="muted">Bu ay (UTC)</Eyebrow>
           <strong>{usd(budget.spentMonthUsd)}</strong>
-          <span>sınır {usd(budget.monthlyLimitUsd)}</span>
+          <span>sınır {usd(budget.monthlyLimitUsd)}{budget.monthlyLimitSetByOrganization ? ' (firma sınırı)' : ''}</span>
         </div>
         <div className={classes.card}>
           <Eyebrow tone="muted">İş başı sınır</Eyebrow>
           <strong>{usd(budget.maxJobCostUsd)}</strong>
-          <span>{budget.enforce ? 'uygulanıyor' : 'KAPALI'}</span>
+          <span>
+            {budget.enforce ? 'uygulanıyor' : 'KAPALI'}
+            {budget.maxJobSetByOrganization ? ' (firma sınırı)' : ''}
+          </span>
         </div>
       </section>
+      {budget.openReservedUsd > 0 ? (
+        <Notice tone="info">
+          Devam eden veya sonucu belirsiz çağrılar için {usd(budget.openReservedUsd)} ayrıldı; bu tutar limit hesabına dahildir ve çağrı sonuçlanınca kesin harcamaya dönüşür veya serbest kalır.
+        </Notice>
+      ) : null}
 
       <h2 className={classes.heading}>
         Son 30 gün <small>{report.from} – {report.to}</small>

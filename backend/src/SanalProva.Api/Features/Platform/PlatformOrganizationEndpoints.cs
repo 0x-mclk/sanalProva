@@ -32,7 +32,7 @@ public sealed record OrganizationOwnerItem(Guid UserId, string DisplayName, stri
 
 public sealed record OrganizationDetail(
     Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, DateTimeOffset CreatedAt, bool AgreementAccepted, DateTimeOffset? AgreementAcceptedAt, string AgreementVersion,
-    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners);
+    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners, decimal? DailyBudgetUsd, decimal? MonthlyBudgetUsd, decimal? MaxJobCostUsd);
 
 public sealed record SetupLinkResponse(Guid OrganizationId, Guid OwnerUserId, string SetupLink, DateTimeOffset SetupLinkExpiresAt);
 
@@ -113,7 +113,8 @@ public static class PlatformOrganizationEndpoints
         var acceptedAt = await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.OrganizationId == id && a.AgreementVersion == version).Select(a => (DateTimeOffset?)a.AcceptedAt).SingleOrDefaultAsync(ct);
         return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled, organization.CreatedAt,
-            acceptedAt is not null, acceptedAt, version, stores, owners));
+            acceptedAt is not null, acceptedAt, version, stores, owners,
+            organization.Settings.DailyBudgetUsd, organization.Settings.MonthlyBudgetUsd, organization.Settings.MaxJobCostUsd));
     }
 
     private static async Task<IResult> ReissueAsync(Guid id, PlatformOnboardingService service, CurrentUser user, HttpContext http, CancellationToken ct)

@@ -346,6 +346,60 @@ public sealed class PlatformCommandsTests
     }
 
     [Fact]
+    public async Task Butce_komutu_firma_sinirlarini_yazar_tavani_asamaz_kuru_calismada_ve_seceneksiz_degismez_denetlenir()
+    {
+        await using var env = await Env.CreateAsync();
+        const string email = "yonetici@ornek.test";
+        var token = TokenOf((await env.RunAsync("bootstrap", "--email", email, "--name", "Platform Yöneticisi", "--confirm")).Output);
+        await SetPasswordAsync(env.Host, token, StrongPassword);
+        var admin = await ApiClient.LoginAsync(env.Host, email, null, StrongPassword);
+        var created = await ApiClient.ReadAsync<CreateOrganizationResponse>(await PlatformOrganizationTests.CreateRawAsync(admin, PlatformOrganizationTests.Body(slug: "gul-gelinlik"), PlatformOrganizationTests.NewKey()), HttpStatusCode.Created);
+
+        async Task<(decimal? Daily, decimal? Monthly, decimal? Job)> LimitsAsync() => await env.QueryAsync(async db =>
+        {
+            var s = (await db.Organizations.AsNoTracking().SingleAsync(o => o.Id == created.OrganizationId, Ct)).Settings;
+            return (s.DailyBudgetUsd, s.MonthlyBudgetUsd, s.MaxJobCostUsd);
+        });
+        Assert.Equal((null, null, null), await LimitsAsync()); // yeni firma: yalnızca platform tavanı
+
+        // Seçeneksiz: yalnızca gösterir; kuru çalışma: değişmez
+        var (showExit, showOutput) = await env.RunAsync("budget", "--org", "gul-gelinlik");
+        Assert.Equal(PlatformCommands.ExitOk, showExit);
+        Assert.Contains("platform tavanı", showOutput, StringComparison.Ordinal);
+        var (dryExit, dryOutput) = await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "2.5");
+        Assert.Equal(PlatformCommands.ExitOk, dryExit);
+        Assert.Contains("KURU ÇALIŞMA", dryOutput, StringComparison.Ordinal);
+        Assert.Equal((null, null, null), await LimitsAsync());
+
+        // Yazma: değişir, denetim yazılır (kişisel veri yok)
+        Assert.Equal(PlatformCommands.ExitOk, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "2.5", "--monthly", "40", "--job", "0.2", "--confirm")).Exit);
+        Assert.Equal((2.5m, 40m, 0.2m), await LimitsAsync());
+        Assert.Equal(1, await env.QueryAsync(db => db.AuditLogs.CountAsync(a => a.OrganizationId == created.OrganizationId && a.Action == "Platform.BudgetChanged", Ct)));
+
+        // Aynı değer: değişiklik yok, ikinci denetim kaydı yok
+        var (sameExit, sameOutput) = await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "2.5", "--confirm");
+        Assert.Equal(PlatformCommands.ExitOk, sameExit);
+        Assert.Contains("DEĞİŞİKLİK YOK", sameOutput, StringComparison.Ordinal);
+        Assert.Equal(1, await env.QueryAsync(db => db.AuditLogs.CountAsync(a => a.Action == "Platform.BudgetChanged", Ct)));
+
+        // Tavanı aşan değer reddedilir (platform tavanı varsayılan: günlük 10, aylık 150, iş başı 0,5)
+        Assert.Equal(PlatformCommands.ExitRefused, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "10000", "--confirm")).Exit);
+        Assert.Equal(PlatformCommands.ExitRefused, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--job", "0.51", "--confirm")).Exit);
+        Assert.Equal((2.5m, 40m, 0.2m), await LimitsAsync());
+
+        // Geçersiz kullanım
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("budget", "--daily", "1")).Exit); // --org yok
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "abc")).Exit);
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "-1")).Exit);
+        Assert.Equal(PlatformCommands.ExitUsage, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "1.23456")).Exit);
+        Assert.Equal(PlatformCommands.ExitNotFound, (await env.RunAsync("budget", "--org", "yok-firma", "--daily", "1", "--confirm")).Exit);
+
+        // none: firma değerini siler (tavan geçerli olur)
+        Assert.Equal(PlatformCommands.ExitOk, (await env.RunAsync("budget", "--org", "gul-gelinlik", "--daily", "none", "--monthly", "none", "--job", "none", "--confirm")).Exit);
+        Assert.Equal((null, null, null), await LimitsAsync());
+    }
+
+    [Fact]
     public async Task Platform_yoneticisi_musteri_katalog_fotograf_ve_oturum_verisine_erisemez()
     {
         await using var env = await Env.CreateAsync();

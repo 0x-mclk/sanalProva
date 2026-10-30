@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using SanalProva.Domain.Generation;
+using SanalProva.Domain.Tenancy;
 using SanalProva.Domain.TryOn;
 using SanalProva.Infrastructure;
 using SanalProva.Infrastructure.Ai;
@@ -1997,5 +1998,224 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         bitmap.Erase(new SkiaSharp.SKColor(0, 0, 0));
         using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
         return image.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 90).ToArray();
+    }
+
+    // ---------------------------------------------------------------- M5.3: firma bazlı sınırlar ve iptal edilmiş işlerin rezervasyon kapanışı
+
+    private async Task SetOrganizationBudgetAsync(Guid organizationId, decimal? daily = null, decimal? monthly = null, decimal? maxJob = null)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var organization = await db.Organizations.SingleAsync(o => o.Id == organizationId, TestContext.Current.CancellationToken);
+            organization.Settings.DailyBudgetUsd = daily;
+            organization.Settings.MonthlyBudgetUsd = monthly;
+            organization.Settings.MaxJobCostUsd = maxJob;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Firma_gunluk_siniri_platform_tavanindan_dusukse_gecerlidir_baska_firma_etkilenmez()
+    {
+        var (tenantA, clientA, catalogA) = await TenantAsync();
+        var (tenantB, clientB, catalogB) = await TenantAsync();
+        await SetOrganizationBudgetAsync(tenantA.OrganizationId, daily: 0.10m); // platform tavanı 10 $, A'nın sınırı 0,10 $ < tek çağrı (0,15 $)
+        await using var harness = BuildHarness(Succeeding());
+        var (jobA, _) = await RunningJobAsync(tenantA, clientA, catalogA, OutfitMode.OutfitSet);
+        var (jobB, _) = await RunningJobAsync(tenantB, clientB, catalogB, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobA, TestContext.Current.CancellationToken);
+        await harness.Processor.ProcessClaimedAsync(jobB, TestContext.Current.CancellationToken);
+
+        var (a, aLogs, _) = await LoadAsync(jobA);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, a.ErrorCode); // firma sınırı: sağlayıcı çağrılmadı
+        Assert.All(aLogs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(jobB)).Job.Status); // B'nin sınırı platform tavanı: A'dan etkilenmez
+        Assert.Equal(1, harness.Fashn.Calls);
+        Assert.Equal(0m, await SettledAsync(tenantA.OrganizationId));
+        Assert.Equal(0.15m, await SettledAsync(tenantB.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Firma_sinirlari_platform_tavanini_yukseltemez_en_kucuk_gecerlidir()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await SetOrganizationBudgetAsync(tenant.OrganizationId, daily: 100m, monthly: 100m, maxJob: 100m); // firma "yüksek" der; tavan 0,10 / 0,10 / 0,10
+        await using var harness = BuildHarness(Succeeding(), daily: 0.10m, monthly: 0.10m, maxJob: 0.10m);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(jobId)).Job.ErrorCode);
+        Assert.Equal(0, harness.Fashn.Calls);
+        var limits = BudgetLimits.Resolve(new SanalProva.Infrastructure.Ai.BudgetSettings { DailyLimitUsd = 0.10m, MonthlyLimitUsd = 0.10m, MaxJobCostUsd = 0.10m },
+            new OrganizationSettings { DailyBudgetUsd = 100m, MonthlyBudgetUsd = 100m, MaxJobCostUsd = 100m });
+        Assert.Equal((0.10m, 0.10m, 0.10m), (limits.DailyUsd, limits.MonthlyUsd, limits.MaxJobUsd));
+    }
+
+    [Fact]
+    public async Task Firma_aylik_ve_is_basi_sinirlari_ayri_ayri_uygulanir()
+    {
+        var (monthlyTenant, monthlyClient, monthlyCatalog) = await TenantAsync();
+        var (jobTenant, jobClient, jobCatalog) = await TenantAsync();
+        await SetOrganizationBudgetAsync(monthlyTenant.OrganizationId, monthly: 0.10m);
+        await SetOrganizationBudgetAsync(jobTenant.OrganizationId, maxJob: 0.10m);
+        await using var harness = BuildHarness(Succeeding());
+        var (monthlyJob, _) = await RunningJobAsync(monthlyTenant, monthlyClient, monthlyCatalog, OutfitMode.OutfitSet);
+        var (jobJob, _) = await RunningJobAsync(jobTenant, jobClient, jobCatalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(monthlyJob, TestContext.Current.CancellationToken);
+        await harness.Processor.ProcessClaimedAsync(jobJob, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(monthlyJob)).Job.ErrorCode);
+        Assert.Equal(GenerationErrorCode.BudgetExceeded, (await LoadAsync(jobJob)).Job.ErrorCode);
+        Assert.Equal(0, harness.Fashn.Calls);
+    }
+
+    [Fact]
+    public async Task Baska_firmanin_acik_rezervasyonu_bu_firmanin_butcesini_tuketmez()
+    {
+        var (tenantA, clientA, catalogA) = await TenantAsync();
+        var (tenantB, clientB, catalogB) = await TenantAsync();
+        await SetOrganizationBudgetAsync(tenantB.OrganizationId, daily: 0.20m);
+        await using var harness = BuildHarness(Succeeding());
+        var (openA, _) = await RunningJobAsync(tenantA, clientA, catalogA, OutfitMode.OutfitSet);
+        var (jobB, _) = await RunningJobAsync(tenantB, clientB, catalogB, OutfitMode.OutfitSet);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == openA).ExecuteUpdateAsync(s => s.SetProperty(j => j.ReservedCostUsd, 5m), TestContext.Current.CancellationToken);
+        }
+
+        await harness.Processor.ProcessClaimedAsync(jobB, TestContext.Current.CancellationToken);
+
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(jobB)).Job.Status);
+        Assert.Equal(5m, await OpenReservedAsync(tenantA.OrganizationId));
+        Assert.Equal(0m, await OpenReservedAsync(tenantB.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Firma_sinirinda_paralel_isler_siniri_asamaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await SetOrganizationBudgetAsync(tenant.OrganizationId, daily: 0.40m); // 0,15 $'lık çağrıdan tam 2 tane (0,30); üçüncüsü 0,45 > 0,40
+        await using var harness = BuildHarness(Succeeding(delayMs: 50));
+        var jobIds = new List<Guid>();
+        for (var i = 0; i < 8; i++)
+        {
+            jobIds.Add((await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet)).JobId);
+        }
+
+        await Task.WhenAll(jobIds.Select(id => harness.Processor.ProcessClaimedAsync(id, TestContext.Current.CancellationToken)));
+
+        Assert.Equal(2, harness.Fashn.Calls);
+        Assert.Equal(0.30m, await SettledAsync(tenant.OrganizationId));
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var blocked = await db.GenerationJobs.IgnoreQueryFilters().CountAsync(j => jobIds.Contains(j.Id) && j.ErrorCode == GenerationErrorCode.BudgetExceeded, TestContext.Current.CancellationToken);
+            Assert.Equal(6, blocked);
+        }
+    }
+
+    private async Task<Guid> CancelledJobAsync(TestTenant tenant, ApiClient client, CatalogIds catalog, bool submitted, TimeSpan? finishedAgo = null)
+    {
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var finished = DateTimeOffset.UtcNow - (finishedAgo ?? TimeSpan.Zero);
+            await db.GenerationJobs.IgnoreQueryFilters().Where(j => j.Id == jobId).ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, GenerationJobStatus.Cancelled).SetProperty(j => j.LeaseUntil, (DateTimeOffset?)null).SetProperty(j => j.FinishedAt, finished)
+                .SetProperty(j => j.Provider, "Fashn").SetProperty(j => j.Model, "tryon-max").SetProperty(j => j.ReservedCostUsd, 0.15m)
+                .SetProperty(j => j.ProviderSubmitStartedAt, submitted ? finished : (DateTimeOffset?)null), TestContext.Current.CancellationToken);
+        }
+
+        return jobId;
+    }
+
+    [Fact]
+    public async Task Hic_gonderilmemis_iptal_edilen_isin_rezervasyonu_hemen_serbesttir_sweep_alani_temizler()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var jobId = await CancelledJobAsync(tenant, client, catalog, submitted: false);
+
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId)); // gönderim kanıtı yok: bütçeyi tüketmez
+        await harness.Services.GetRequiredService<CostReconciliationSweep>().RunOnceAsync(TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Null(job.ReservedCostUsd);
+        Assert.Empty(logs); // maliyet kaydı yok: sağlayıcıya hiçbir şey gitmedi
+    }
+
+    [Fact]
+    public async Task Gonderilmis_iptal_edilen_is_kurtarma_suresine_kadar_acik_sonra_tek_belirsiz_maliyete_donusur_iki_kez_sweep_ikinci_kayit_uretmez()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var sweep = harness.Services.GetRequiredService<CostReconciliationSweep>();
+        var recent = await CancelledJobAsync(tenant, client, catalog, submitted: true, finishedAgo: TimeSpan.FromSeconds(10));
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId)); // gönderilmiş: doğrudan serbest bırakılmaz
+
+        await sweep.RunOnceAsync(TestContext.Current.CancellationToken);
+        var (job, logs, _) = await LoadAsync(recent);
+        Assert.Equal(0.15m, job.ReservedCostUsd); // kurtarma süresi dolmadı: canlı worker kendi kaydını yazabilir
+        Assert.Empty(logs);
+
+        // Kurtarma süresi doldu → tek belirsiz maliyet kaydı (en kötü durum), mutabakata açık
+        var old = await CancelledJobAsync(tenant, client, catalog, submitted: true, finishedAgo: TimeSpan.FromHours(2));
+        var first = await sweep.RunOnceAsync(TestContext.Current.CancellationToken);
+        Assert.True(first.CancelledToUncertain >= 1);
+        var second = await sweep.RunOnceAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, second.CancelledToUncertain);
+
+        var (_, oldLogs, _) = await LoadAsync(old);
+        var log = Assert.Single(oldLogs);
+        Assert.Equal((GenerationErrorCode.OutcomeUncertain, 0.15m, CostReconciliationState.Open, false), (log.ErrorCode, log.EstimatedCostUsd, log.ReconciliationState, log.IsAdjustment));
+        Assert.Equal($"uncertain:{old}", log.EventKey);
+        Assert.Equal(0.15m, await OpenReservedAsync(tenant.OrganizationId)); // yalnızca "recent" hâlâ açık; "old" artık harcama (çift sayım yok)
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Eszamanli_iki_sweep_ayni_iptal_edilen_is_icin_tek_belirsiz_kayit_yazar()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var sweep = harness.Services.GetRequiredService<CostReconciliationSweep>();
+        var jobId = await CancelledJobAsync(tenant, client, catalog, submitted: true, finishedAgo: TimeSpan.FromHours(2));
+
+        await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => sweep.RunOnceAsync(TestContext.Current.CancellationToken)));
+
+        Assert.Single((await LoadAsync(jobId)).Logs);
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId));
+    }
+
+    [Fact]
+    public async Task Iptal_edilmis_isin_worker_kaydi_varsa_sweep_ikinci_kayit_yazmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync();
+        await using var harness = BuildHarness();
+        var jobId = await CancelledJobAsync(tenant, client, catalog, submitted: true, finishedAgo: TimeSpan.FromHours(2));
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            // Canlı worker iptali gördü ve en kötü durum kaydını kendisi yazdı (olay anahtarı yok)
+            db.AiUsageLogs.Add(new AiUsageLog
+            {
+                OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, JobId = jobId, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet", Attempt = 1,
+                Success = false, DurationMs = 10, EstimatedCostUsd = 0.15m,
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        await harness.Services.GetRequiredService<CostReconciliationSweep>().RunOnceAsync(TestContext.Current.CancellationToken);
+
+        Assert.Single((await LoadAsync(jobId)).Logs);
+        Assert.Equal(0m, await OpenReservedAsync(tenant.OrganizationId)); // kayıt var: rezervasyon kapalı
+        Assert.Equal(0.15m, await SettledAsync(tenant.OrganizationId));
     }
 }

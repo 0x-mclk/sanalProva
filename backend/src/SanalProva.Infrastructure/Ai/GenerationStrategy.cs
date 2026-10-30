@@ -26,6 +26,13 @@ public sealed class GenerationSettings
     /// <summary>Belirsiz maliyet süpürücüsünün çalışma aralığı (dakika). 0 = kapalı (testler elle çalıştırır).</summary>
     public int ReconciliationSweepMinutes { get; set; } = 10;
 
+    /// <summary>
+    /// İptal edilmiş, sağlayıcıya gönderilmiş (veya gönderim niyeti kayıtlı) ama maliyet kaydı yazılmamış işin kurtarma süresi (sn; M5.3). Bu süre dolunca süpürücü rezervasyonu
+    /// en kötü durum tutarıyla belirsiz maliyet kaydına çevirir (aynı iş için tek kayıt). Süre; kilit süresi + sağlayıcı azami beklemesinden uzun olmalıdır: canlı worker iptali
+    /// bu sürede kendi maliyet kaydını yazar.
+    /// </summary>
+    public int CancelledReservationRecoverySeconds { get; set; } = 900;
+
     /// <summary>Mutabakat bekleyen vaka bu kadar günü aşarsa süpürücü uyarı yazar (veri değişmez).</summary>
     public int ReconciliationStaleDays { get; set; } = 7;
 

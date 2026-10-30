@@ -23,6 +23,7 @@ Ortak: `--confirm` (yazmak için), `--base-url https://panel.ornek.com` (bağlan
 | `platform revoke --email E [--confirm]` | Yöneticinin açık kurulum bağlantılarını iptal eder (sızıntı şüphesi). |
 | `platform reset-access --email E [--confirm]` | **Erişim kurtarma**: parolayı siler, güvenlik damgasını yeniler, yeni 72 saatlik bağlantı üretir. Yeni HTTP yüzeyi açmaz (mevcut `setup-password` ucunu kullanır). Açık oturum çerezleri sonraki damga denetiminde (varsayılan ≤ 30 dk) düşer. |
 | `platform paid-ai --org SLUG (--enable \| --disable) [--confirm]` | Firmanın **ücretli AI yetkisini** değiştirir; `Platform.PaidAiEnabled` / `Platform.PaidAiDisabled` denetim kaydı yazar. Zaten o durumdaysa değişiklik/denetim yok. Global kapılar (gerçek mod, `AllowPaidCalls`, API anahtarı, bütçe) bundan bağımsız aynen geçerlidir. |
+| `platform budget --org SLUG [--daily USD\|none] [--monthly USD\|none] [--job USD\|none] [--confirm]` | **Firma AI bütçe sınırları** (M5.3): günlük/aylık/iş başı. Değer platform tavanını (`Generation:Budget`) aşamaz (çıkış 3); `none` firma değerini siler; seçeneksiz yalnızca gösterir; `Platform.BudgetChanged` denetim kaydı. Etkin sınır = min(tavan, firma). Ayrıntı: [docs/16](16-m5-3-butce-ve-mutabakat.md). |
 
 Çıkış kodları: 0 başarılı/kuru çalışma, 1 başarısız (yapılandırma/DB), 2 kullanım hatası, 3 reddedildi (iş kuralı), 4 bulunamadı.
 

@@ -1,4 +1,4 @@
-﻿# Devam notu (son güncelleme: M5.2a–e tamamlandı, yerelde doğrulandı; push/CI kullanıcıda — sıradaki aşama M5.3 onay bekliyor)
+﻿# Devam notu (son güncelleme: M5.3 tamamlandı, yerelde doğrulandı; push/CI kullanıcıda — sıradaki aşama M5.4 onay bekliyor)
 
 Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **Sıradaki geliştirme aşaması için kullanıcı onayı beklenir (aşağıda \
 
@@ -106,7 +106,7 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 **Önerilen sıra (her adım ayrı onayla; mevcut çalışanlar korunur, eklenerek ilerlenir):**
 1. **M5.1 Kontrollü işletme kaydı (onboarding):** platform yöneticisi sağlama komutu (CLI, veritabanına yazan tek resmi yol) → platform yöneticisi firma + ilk şube + sahip (Owner) oluşturur → sahibe tek kullanımlık, süreli **şifre belirleme bağlantısı** (e-posta altyapısı gelene kadar bağlantı yöneticiye gösterilir) → ilk girişte KVKK/hizmet sözleşmesi onayı kaydı. Halka açık kendi kendine kayıt MVP dışında (KVKK sözleşmesi ve kötüye kullanım riski).
 2. **M5.2 Şube ve personel yönetimi (Owner/Manager):** şube CRUD (ad, kod, saat dilimi, günlük kota, aktif/pasif), personel davet/rol/devre dışı bırakma, yönetici tarafından şifre sıfırlama bağlantısı; tüm uç noktalar mevcut rol filtreleri ve tenant filtreleriyle, izolasyon testleriyle.
-3. **M5.3 Rezervasyon kapanış kuralı + firma başına parasal limitler:** belgelenen karar (gönderilmemiş → serbest; gönderilmiş/belirsiz → kurtarma süresi sonunda idempotent `OutcomeUncertain` maliyet kaydı); bütçe limitlerini firma ayarına taşıma + platform geneli üst sınır.
+3. ~~**M5.3 Rezervasyon kapanış kuralı + firma başına parasal limitler:**~~ **(yapıldı: yukarıdaki M5.3 sonucu)** belgelenen karar (gönderilmemiş → serbest; gönderilmiş/belirsiz → kurtarma süresi sonunda idempotent `OutcomeUncertain` maliyet kaydı); bütçe limitlerini firma ayarına taşıma + platform geneli üst sınır.
 4. **M5.4 Kredi sistemi (ödeme olmadan):** append-only kredi defteri, iş başına **müşteri kredi rezervasyonu** (maliyet rezervasyonundan ayrı kavram), başarıda düşüm, başarısız/iptalde iade kuralı, yetersiz bakiyede açık hata kodu, platform yöneticisinin elle kredi yüklemesi, bakiye/hareket ekranı. Bu adımla ilk pilot mağazalar faturayı elle ödeyerek kullanabilir.
 5. **M5.5 Ödeme altyapısı:** sağlayıcı seçimi (TR için kart/3D Secure, iade, e-fatura uyumu — ayrı karar), paket satın alma → krediye dönüşüm (idempotent webhook), fatura kaydı.
 6. **Canlıya çıkış kapısı (paralel ilerler):** A grubundaki zorunlular (yedek/geri yükleme provası, silinen verinin yedekten dönmemesi, saklama politikası, sağlayıcı DPA, hukuki aydınlatma metni, üretim TLS/gizli yönetimi, sunucu harmanlaması kurulumda seçilir), onaylı canlı AI testi, gerçek mağaza TV denemesi.
@@ -140,6 +140,12 @@ CI'de lab veritabanı gerektiren testler (`PlatformCommandsTests` lab senaryolar
 Ayrıntı: [docs/15](15-m5-2-sube-personel-yonetimi.md). Yerelde: backend 624 test (4 beklenen atlama), React 140, Playwright 12/12 (izole `sanalprova_e2e`). CI/push yapılmadı. Commit'ler: a4fce8e (a), d846c2e (b/c), eb7d34a (d), d8d5076 + 1b022c6 (SignalR kesme, belge), 2d60f90 (e).
 **Kalan riskler/eksikler:** e-posta gönderimi yok (bağlantı yönetici aracılığıyla iletilir); davet/yeniden üretimde sunucu idempotency yok; SignalR kesme tek sunucu belleğinde; açık hub grup üyelikleri rol değişikliğinde yeniden bağlanana kadar sürebilir; firma pasifleştirme yok; operatör kimliği denetimde (MFA yok) M5.1 riskleri geçerli. Not: çalışma sırasında iki ayrı Claude oturumu aynı ağaçta çalıştı ve üç dosya kendiliğinden kayboldu (yeniden yazıldı); ortak ağaçta `git checkout/clean/stash` kullanılmamalı.
 
+## M5.3 sonucu — firma bazlı bütçe ve AI mutabakatı
+
+Ayrıntı: [docs/16](16-m5-3-butce-ve-mutabakat.md). Özet: firma başına günlük/aylık/iş başı sınır (etkin = min(platform tavanı, firma), yalnızca operatör komutu `platform budget`); iptal edilmiş işlerin rezervasyonları doğru kapanır (hiç gönderilmemiş → hemen serbest; gönderilmiş → kurtarma süresi sonunda tek idempotent `OutcomeUncertain`); firmalar birbirinin bütçesini etkilemez (kilit ve sorgu firma başına; platform toplam sınırı bilinçli yok). **"R5 öncesi" risk #1 (iptal edilmiş + kayıtsız rezervasyon süresiz açık kalması) kapandı.** Doğrulama: backend 639 test (4 beklenen atlama), React 140, Playwright 12/12.
+
+Açık: platform toplam (tüm firmalar) sınırı yok (karar); günlük pencere UTC; fal/Pruna maliyeti tahmin; firma sahibi kendi sınırını arayüzden değiştiremez (yalnızca operatör); gönderilmiş işi iptal edip aynı isteği yeniden vermek bilinçli ikinci ücretli iş açar (bütçe kapısından geçer).
+
 ## Açık riskler (üç grup)
 
 ### A. Ticari kullanımdan önce MUTLAKA çözülmeli
@@ -167,7 +173,7 @@ Ayrıntı: [docs/15](15-m5-2-sube-personel-yonetimi.md). Yerelde: backend 624 te
 
 Bugünkü model: `BudgetGuard.ReserveAsync` firma applock'u altında (kesinleşmiş harcama + diğer işlerin açık rezervasyonları + bu çağrının en kötü durumu) sınırlara karşı denetler ve rezervasyonu (`reserved_cost_usd`) aynı transaction'da yazar. Açık rezervasyon = Running; Queued + sağlayıcı kimliği/gönderim niyeti; maliyet kaydı olmayan Cancelled. Hata yönü **güvenli taraftadır** (fazla sayar, aşım olmaz; 0,50 $ / 0,15 $ / 16 paralel testte tam 3 çağrı, 0 aşım).
 
-1. **İptal edilmiş + maliyet kaydı yazılmamış iş** (worker çökmesi): rezervasyon süresiz açık kalabilir → firma bütçesini haksız yere tüketir (yanlış `BudgetExceeded`; aşım değil). **KARAR (kullanıcı, M4.1; R5 öncesi ZORUNLU iş, henüz UYGULANMADI):**
+1. **İptal edilmiş + maliyet kaydı yazılmamış iş** (worker çökmesi): rezervasyon süresiz açık kalabilir → firma bütçesini haksız yere tüketir (yanlış `BudgetExceeded`; aşım değil). **KARAR (kullanıcı, M4.1; **M5.3'te UYGULANDI**):**
    - Sağlayıcıya gönderilmediği **kesin** olan işin rezervasyonu serbest bırakılabilir (ör. gönderim niyeti/`provider_submit_started_at` ve sağlayıcı kimliği yok).
    - Sağlayıcıya gönderilmiş **veya gönderim sonucu belirsiz** işin rezervasyonu **doğrudan serbest bırakılmaz**.
    - Belirlenen **kurtarma süresi** (lease + sağlayıcı azami bekleme + pay) sonunda bu işler **idempotent** biçimde `OutcomeUncertain` maliyet kaydına dönüştürülür (tek sorgu/transaction; olay anahtarı `event_key` filtreli benzersiz indeksi ve `attempt` çiti ile aynı iş için ikinci maliyet kaydı veya çift ücret oluşmaz; süpürücü yeniden çalıştırılabilir).

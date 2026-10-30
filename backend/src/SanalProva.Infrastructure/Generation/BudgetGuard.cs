@@ -40,7 +40,7 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
     /// <list type="bullet">
     /// <item><b>Running</b>: çağrı sürüyor (veya gönderilmek üzere).</item>
     /// <item><b>Queued + (kimlik veya gönderim niyeti var)</b>: yoklamada geçici hata ya da worker çökmesi; istek sağlayıcıda sürüyor/ücretlenmiş olabilir.</item>
-    /// <item><b>Cancelled + o deneme için maliyet kaydı yok</b>: iptal edildi ama worker henüz en kötü durum kaydını yazmadı.</item>
+    /// <item><b>Cancelled + gönderim kanıtı + o deneme için maliyet kaydı yok</b>: iptal edildi ama worker henüz en kötü durum kaydını yazmadı (kurtarma süresi sonunda süpürücü bunu belirsiz maliyet kaydına çevirir, <see cref="CostReconciliationSweep"/>). Hiç gönderilmemiş iptal işin rezervasyonu açık sayılmaz.</item>
     /// </list>
     /// Succeeded/Failed işler sayılmaz: maliyetleri (kesin, belirsiz veya 0) maliyet kaydındadır; böylece aynı tutar iki kez sayılmaz.
     /// </summary>
@@ -48,7 +48,12 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
         db.GenerationJobs.IgnoreQueryFilters().AsNoTracking().Where(j => j.OrganizationId == organizationId && j.ReservedCostUsd != null
             && (j.Status == GenerationJobStatus.Running
                 || (j.Status == GenerationJobStatus.Queued && (j.ProviderRequestId != null || j.ProviderSubmitStartedAt != null))
-                || (j.Status == GenerationJobStatus.Cancelled && !db.AiUsageLogs.IgnoreQueryFilters().Any(l => l.JobId == j.Id && l.Attempt == j.Attempt && !l.IsAdjustment))));
+                // İptal: yalnızca gönderim kanıtı (niyet veya kimlik) varsa ve maliyet kaydı yoksa açık sayılır; hiç gönderilmemiş iptal işin rezervasyonu hemen serbesttir (M5.3)
+                || (j.Status == GenerationJobStatus.Cancelled && (j.ProviderRequestId != null || j.ProviderSubmitStartedAt != null) && !db.AiUsageLogs.IgnoreQueryFilters().Any(l => l.JobId == j.Id && l.Attempt == j.Attempt && !l.IsAdjustment))));
+
+    /// <summary>Firmanın şu an açık (ayrılmış) rezervasyon toplamı; yalnızca raporlama içindir (karar kilit altında <see cref="ReserveAsync"/>'tedir).</summary>
+    public static async Task<decimal> GetOpenReservedAsync(AppDbContext db, Guid organizationId, CancellationToken ct) =>
+        await OpenReservations(db, organizationId).SumAsync(j => (decimal?)j.ReservedCostUsd, ct) ?? 0m;
 
     /// <summary>
     /// Ücretli çağrıdan önce <b>atomik</b> bütçe kapısı + rezervasyon. Tek transaction ve firma başına uygulama kilidi (<c>sp_getapplock</c>): kilit altında (1) kesinleşmiş harcama
@@ -81,21 +86,23 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
 
             if (budget.Enforce)
             {
+                // Etkin sınırlar: platform tavanı ile firma sınırının küçüğü (M5.3); firma ayarı kilit altında okunur
+                var limits = await BudgetLimits.ForAsync(db, budget, job.OrganizationId, ct);
                 // SIRA ÖNEMLİ: önce açık rezervasyonlar, sonra kesinleşmiş harcama. READ_COMMITTED_SNAPSHOT her deyimde yeni bir anlık görüntü okur; bu iki sorgu arasında bir iş
                 // biterse (maliyet kaydı yazılır, rezervasyon kapanır) ters sırada okumak onu hiç saymazdı (eksik sayım → bütçe aşımı). Bu sırayla en kötü ihtimal çift sayımdır (güvenli taraf).
                 var open = await OpenReservations(db, job.OrganizationId).Where(j => j.Id != job.Id).SumAsync(j => (decimal?)j.ReservedCostUsd, ct) ?? 0m;
                 var spend = await GetSpendAsync(db, job.OrganizationId, job.Id, ct);
-                if (spend.Job + worstCasePerCallUsd > budget.MaxJobCostUsd)
+                if (spend.Job + worstCasePerCallUsd > limits.MaxJobUsd)
                 {
                     throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Bu işin AI maliyet sınırı aşılacaktı; sağlayıcı çağrılmadı.", retryable: false);
                 }
 
-                if (spend.Today + open + worstCasePerCallUsd > budget.DailyLimitUsd)
+                if (spend.Today + open + worstCasePerCallUsd > limits.DailyUsd)
                 {
                     throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Günlük AI bütçesi doldu (devam eden işlemlerin ayrılmış tutarı dahil); sağlayıcı çağrılmadı.", retryable: false);
                 }
 
-                if (spend.Month + open + worstCasePerCallUsd > budget.MonthlyLimitUsd)
+                if (spend.Month + open + worstCasePerCallUsd > limits.MonthlyUsd)
                 {
                     throw new ProviderException(GenerationErrorCode.BudgetExceeded, "Aylık AI bütçesi doldu (devam eden işlemlerin ayrılmış tutarı dahil); sağlayıcı çağrılmadı.", retryable: false);
                 }

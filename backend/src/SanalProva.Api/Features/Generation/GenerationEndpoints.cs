@@ -145,7 +145,7 @@ public static class GenerationEndpoints
 
             // Yüksek maliyetli kalite iş başı bütçe sınırını aşıyorsa iş kuyruğa hiç alınmaz (işleyicideki bütçe kapısı ikinci savunma hattıdır)
             var (_, worst) = TryOnModels.DisplayPrice(choice.Model, choice.Model.Quality(quality!)!, generationSettings.CurrentValue.Pricing);
-            if (live && AiModelEndpoints.ExceedsJobLimit(generationSettings.CurrentValue, worst))
+            if (live && AiModelEndpoints.ExceedsJobLimit(generationSettings.CurrentValue, await reader.GetSettingsAsync(user.OrganizationId, ct), worst))
             {
                 return ApiProblems.Conflict("QUALITY_OVER_BUDGET", "Seçilen kalitenin en kötü durum maliyeti iş başı bütçe sınırını aşıyor.");
             }

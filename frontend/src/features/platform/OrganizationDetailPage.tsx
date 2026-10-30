@@ -10,6 +10,7 @@ import { useRef } from 'react';
 import classes from './platform.module.css';
 import { SetupLinkReveal } from './SetupLinkReveal';
 
+const limitText = (value: number | null | undefined) => (value == null ? 'platform tavanı' : `${value} $`);
 const dateText = (iso: string) => new Intl.DateTimeFormat('tr-TR', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso));
 
 /**
@@ -78,6 +79,10 @@ export function OrganizationDetailPage() {
           {organization.agreementVersion}
           {organization.agreementAcceptedAt ? ` · kabul: ${dateText(organization.agreementAcceptedAt)}` : ''}
         </dd>
+        <dt>AI bütçe sınırı</dt>
+        <dd>
+          günlük {limitText(organization.dailyBudgetUsd)} · aylık {limitText(organization.monthlyBudgetUsd)} · iş başı {limitText(organization.maxJobCostUsd)}
+        </dd>
         <dt>Şubeler</dt>
         <dd>{organization.stores.map((store) => `${store.name} (${store.code})`).join(', ')}</dd>
         <dt>Firma sahibi</dt>
@@ -85,7 +90,7 @@ export function OrganizationDetailPage() {
       </dl>
 
       <Notice tone="info">
-        Ücretli yapay zekâ yetkisi bu ekrandan değiştirilemez; yalnızca sunucudaki operatör komutuyla (denetime yazılır) değişir. Müşteri fotoğraf, oturum ve katalog verisi bu panelde görünmez.
+        Ücretli yapay zekâ yetkisi bu ekrandan değiştirilemez; yalnızca sunucudaki operatör komutlarıyla (paid-ai, budget; denetime yazılır) değişir; AI bütçe sınırları da öyle. Müşteri fotoğraf, oturum ve katalog verisi bu panelde görünmez.
       </Notice>
 
       {link ? (

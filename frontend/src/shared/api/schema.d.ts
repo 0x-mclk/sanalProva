@@ -2742,6 +2742,17 @@ export interface components {
             spentTodayUsd: number;
             /** Format: double */
             spentMonthUsd: number;
+            /** Format: double */
+            platformDailyLimitUsd: number;
+            /** Format: double */
+            platformMonthlyLimitUsd: number;
+            /** Format: double */
+            platformMaxJobCostUsd: number;
+            dailyLimitSetByOrganization: boolean;
+            monthlyLimitSetByOrganization: boolean;
+            maxJobSetByOrganization: boolean;
+            /** Format: double */
+            openReservedUsd: number;
         };
         CategoryDto: {
             /** Format: uuid */
@@ -3084,6 +3095,12 @@ export interface components {
             agreementVersion: string;
             stores: components["schemas"]["OrganizationStoreItem"][];
             owners: components["schemas"]["OrganizationOwnerItem"][];
+            /** Format: double */
+            dailyBudgetUsd: null | number;
+            /** Format: double */
+            monthlyBudgetUsd: null | number;
+            /** Format: double */
+            maxJobCostUsd: null | number;
         };
         OrganizationListItem: {
             /** Format: uuid */
