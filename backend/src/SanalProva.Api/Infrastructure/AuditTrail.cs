@@ -28,6 +28,24 @@ public sealed class AuditTrail(AppDbContext db, CurrentUser user, IHttpContextAc
         });
     }
 
+    /// <summary>
+    /// Başka bir firma adına denetim kaydı (platform yöneticisi işlemleri; M5.1) veya henüz oturumu olmayan anonim işlemler (şifre belirleme).
+    /// Kayıt <paramref name="organizationId"/> firmasına yazılır; <paramref name="userId"/> bilgi amaçlıdır (FK yok). Kişisel veri/token yazılmaz.
+    /// </summary>
+    public void RecordFor(Guid organizationId, Guid? userId, string action, string entityType, Guid? entityId)
+    {
+        db.AuditLogs.Add(new AuditLog
+        {
+            OrganizationId = organizationId,
+            UserId = userId,
+            Action = action,
+            EntityType = entityType,
+            EntityId = entityId,
+            IpHash = HashIp(http.HttpContext?.Connection.RemoteIpAddress?.ToString()),
+            CreatedAt = clock.GetUtcNow(),
+        });
+    }
+
     /// <summary>İsteğin IP özeti (ham IP asla yazılmaz). Başka bir bağlamda denetim kaydı yazan servisler için.</summary>
     public string? RequestIpHash() => HashIp(http.HttpContext?.Connection.RemoteIpAddress?.ToString());
 

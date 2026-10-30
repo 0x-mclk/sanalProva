@@ -118,6 +118,8 @@ public sealed class TenantArchitectureTests
         ["SanalProva.Api/Infrastructure/Tenancy.cs"] = (3, 0, 0, "Şube/firma rol filtreleri: kullanıcı, şube ve firma kimliğiyle açıkça sorgular (bağlam bu filtrelerle kurulur)."),
         ["SanalProva.Api/Features/Auth/AuthEndpoints.cs"] = (2, 0, 0, "Giriş sonrası kullanıcının şube listesi: kullanıcı kimliği ve firmasıyla."),
         // --- Platform yöneticisi (yalnızca PlatformAdminFilter arkasında; her karar denetim kaydı bırakır)
+        ["SanalProva.Api/Features/Platform/PlatformOnboardingService.cs"] = (4, 0, 0, "M5.1c: platform yöneticisi başka firma adına firma/şube/Owner oluşturur ve idempotency tekrarında yeni firmanın şube/rolünü okur: hedef firma çağıranın bağlamı değildir. Yalnızca PlatformAdminFilter arkasından çağrılır; okumalar firma kimliğiyle açıkça sınırlı, her işlem hedef firmaya denetim kaydı bırakır."),
+        ["SanalProva.Api/Features/Platform/PlatformOrganizationEndpoints.cs"] = (3, 0, 0, "M5.1c: platform yöneticisi okuma uçları (liste/ayrıntı): firma kimliğiyle sınırlı, yalnızca özet bilgi (oturum/fotoğraf/katalog verisi dönmez); PlatformAdminFilter arkasında."),
         ["SanalProva.Api/Features/Admin/PlatformCostEndpoints.cs"] = (7, 0, 0, "Platform yöneticisi: bilerek firmalar arası okuma; yetki her istekte veritabanından doğrulanır."),
         // --- Sıradan uç noktalar: filtre atlamaz; toplu yazma FİLTRELİ DbSet üzerindendir (EF filtresi ExecuteUpdate/ExecuteDelete'e de uygulanır)
         ["SanalProva.Api/Features/Generation/GenerationEndpoints.cs"] = (0, 0, 1, "İş iptali: filtreli DbSet (firma+şube) üzerinde koşullu UPDATE."),

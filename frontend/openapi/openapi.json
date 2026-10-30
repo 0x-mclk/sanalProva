@@ -1721,6 +1721,145 @@
         }
       }
     },
+    "/api/v1/platform/organizations": {
+      "post": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrganizationResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOrganizationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "take",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationListItem"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/organizations/{id}": {
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/organizations/{id}/owner/setup-link": {
+      "post": {
+        "tags": [
+          "Platform"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupLinkResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/ai-quality": {
       "get": {
         "tags": [
@@ -2666,6 +2805,92 @@
           "WrittenOff"
         ]
       },
+      "CreateOrganizationRequest": {
+        "required": [
+          "name",
+          "slug",
+          "storeName",
+          "storeCode",
+          "ownerEmail",
+          "ownerDisplayName"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 60,
+            "minLength": 3,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "storeName": {
+            "maxLength": 120,
+            "minLength": 2,
+            "type": "string"
+          },
+          "storeCode": {
+            "maxLength": 30,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$",
+            "type": "string"
+          },
+          "ownerEmail": {
+            "maxLength": 254,
+            "minLength": 0,
+            "type": "string"
+          },
+          "ownerDisplayName": {
+            "maxLength": 80,
+            "minLength": 2,
+            "type": "string"
+          }
+        }
+      },
+      "CreateOrganizationResponse": {
+        "required": [
+          "organizationId",
+          "storeId",
+          "ownerUserId",
+          "setupLink",
+          "setupLinkExpiresAt",
+          "setupLinkShown"
+        ],
+        "type": "object",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "setupLink": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "setupLinkExpiresAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "setupLinkShown": {
+            "type": "boolean"
+          }
+        }
+      },
       "CreateSessionRequest": {
         "required": [
           "customerLabel"
@@ -3300,6 +3525,138 @@
         "properties": {
           "jobType": {
             "$ref": "#/components/schemas/GenerationJobType"
+          }
+        }
+      },
+      "OrganizationDetail": {
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "isActive",
+          "paidAiEnabled",
+          "createdAt",
+          "stores",
+          "owners"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "paidAiEnabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationStoreItem"
+            }
+          },
+          "owners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationOwnerItem"
+            }
+          }
+        }
+      },
+      "OrganizationListItem": {
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "isActive",
+          "paidAiEnabled",
+          "ownerSetupPending",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "paidAiEnabled": {
+            "type": "boolean"
+          },
+          "ownerSetupPending": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationOwnerItem": {
+        "required": [
+          "userId",
+          "displayName",
+          "email",
+          "setupPending"
+        ],
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "setupPending": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OrganizationStoreItem": {
+        "required": [
+          "id",
+          "name",
+          "code",
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
           }
         }
       },
@@ -4275,6 +4632,32 @@
               "integer"
             ],
             "format": "int64"
+          }
+        }
+      },
+      "SetupLinkResponse": {
+        "required": [
+          "organizationId",
+          "ownerUserId",
+          "setupLink",
+          "setupLinkExpiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "setupLink": {
+            "type": "string"
+          },
+          "setupLinkExpiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

@@ -77,7 +77,7 @@ public sealed class AccountSetupTokenServiceTests
 
         await using (var consumeDb = MigrationLab.OpenDb(lab.AppCs))
         {
-            var result = await Service(consumeDb, clock).ConsumeAsync(plainToken, Ct);
+            var result = await Service(consumeDb, clock).ConsumeAsync(plainToken, AccountSetupTokenPurpose.InitialPassword, Ct);
             Assert.Equal(SetupTokenConsumeStatus.Success, result.Status);
             Assert.Equal(userId, result.UserId);
             Assert.Equal(orgId, result.OrganizationId);
@@ -85,7 +85,7 @@ public sealed class AccountSetupTokenServiceTests
 
         await using (var secondDb = MigrationLab.OpenDb(lab.AppCs))
         {
-            var second = await Service(secondDb, clock).ConsumeAsync(plainToken, Ct);
+            var second = await Service(secondDb, clock).ConsumeAsync(plainToken, AccountSetupTokenPurpose.InitialPassword, Ct);
             Assert.Equal(SetupTokenConsumeStatus.Invalid, second.Status);
             Assert.Equal(SetupTokenValidity.Used, await Service(secondDb, clock).ValidateAsync(plainToken, Ct));
         }
@@ -109,7 +109,7 @@ public sealed class AccountSetupTokenServiceTests
         var attempts = await Task.WhenAll(Enumerable.Range(0, 12).Select(async _ =>
         {
             await using var db = MigrationLab.OpenDb(lab.AppCs);
-            return await Service(db, clock).ConsumeAsync(plainToken, Ct);
+            return await Service(db, clock).ConsumeAsync(plainToken, AccountSetupTokenPurpose.InitialPassword, Ct);
         }));
 
         Assert.Single(attempts, a => a.Status == SetupTokenConsumeStatus.Success);
@@ -137,7 +137,7 @@ public sealed class AccountSetupTokenServiceTests
         await using var db = MigrationLab.OpenDb(lab.AppCs);
         var service = Service(db, clock);
         Assert.Equal(SetupTokenValidity.Expired, await service.ValidateAsync(plainToken, Ct));
-        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await service.ConsumeAsync(plainToken, Ct)).Status);
+        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await service.ConsumeAsync(plainToken, AccountSetupTokenPurpose.InitialPassword, Ct)).Status);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class AccountSetupTokenServiceTests
         Assert.Equal(SetupTokenValidity.Revoked, await verifyService.ValidateAsync(firstToken, Ct));
         Assert.Equal(SetupTokenValidity.Valid, await verifyService.ValidateAsync(secondToken, Ct));
         Assert.Equal(SetupTokenValidity.Valid, await verifyService.ValidateAsync(resetToken, Ct)); // farklı amaç: etkilenmedi
-        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await verifyService.ConsumeAsync(firstToken, Ct)).Status);
+        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await verifyService.ConsumeAsync(firstToken, AccountSetupTokenPurpose.InitialPassword, Ct)).Status);
     }
 
     [Fact]
@@ -200,7 +200,7 @@ public sealed class AccountSetupTokenServiceTests
         await using var db = MigrationLab.OpenDb(lab.AppCs);
         var service = Service(db, new ManualClock(DateTimeOffset.UtcNow));
         Assert.Equal(SetupTokenValidity.NotFound, await service.ValidateAsync(AccountSetupTokenCredentials.NewToken(), Ct));
-        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await service.ConsumeAsync(AccountSetupTokenCredentials.NewToken(), Ct)).Status);
+        Assert.Equal(SetupTokenConsumeStatus.Invalid, (await service.ConsumeAsync(AccountSetupTokenCredentials.NewToken(), AccountSetupTokenPurpose.InitialPassword, Ct)).Status);
     }
 
     [Theory]

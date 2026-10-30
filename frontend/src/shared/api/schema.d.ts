@@ -1766,6 +1766,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    take?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OrganizationListItem"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    "Idempotency-Key"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateOrganizationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreateOrganizationResponse"];
+                    };
+                };
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreateOrganizationResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/organizations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OrganizationDetail"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/organizations/{id}/owner/setup-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SetupLinkResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/ai-quality": {
         parameters: {
             query?: never;
@@ -2257,6 +2402,26 @@ export interface components {
         };
         /** @enum {unknown} */
         CostReconciliationState: "Open" | "ConfirmedCharged" | "ConfirmedNotCharged" | "WrittenOff";
+        CreateOrganizationRequest: {
+            name: string;
+            slug: string;
+            storeName: string;
+            storeCode: string;
+            ownerEmail: string;
+            ownerDisplayName: string;
+        };
+        CreateOrganizationResponse: {
+            /** Format: uuid */
+            organizationId: string;
+            /** Format: uuid */
+            storeId: string;
+            /** Format: uuid */
+            ownerUserId: string;
+            setupLink: null | string;
+            /** Format: date-time */
+            setupLinkExpiresAt: null | string;
+            setupLinkShown: boolean;
+        };
         CreateSessionRequest: {
             customerLabel: null | string;
         };
@@ -2412,6 +2577,43 @@ export interface components {
         };
         MockGenerationRequest: {
             jobType: components["schemas"]["GenerationJobType"];
+        };
+        OrganizationDetail: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            isActive: boolean;
+            paidAiEnabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            stores: components["schemas"]["OrganizationStoreItem"][];
+            owners: components["schemas"]["OrganizationOwnerItem"][];
+        };
+        OrganizationListItem: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            isActive: boolean;
+            paidAiEnabled: boolean;
+            ownerSetupPending: boolean;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        OrganizationOwnerItem: {
+            /** Format: uuid */
+            userId: string;
+            displayName: string;
+            email: string;
+            setupPending: boolean;
+        };
+        OrganizationStoreItem: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            code: string;
+            isActive: boolean;
         };
         /** @enum {unknown} */
         OutfitMode: "OutfitSet" | "FreeCombination";
@@ -2646,6 +2848,15 @@ export interface components {
             imageIds: string[];
             /** Format: int64 */
             expectedVersion: null | number;
+        };
+        SetupLinkResponse: {
+            /** Format: uuid */
+            organizationId: string;
+            /** Format: uuid */
+            ownerUserId: string;
+            setupLink: string;
+            /** Format: date-time */
+            setupLinkExpiresAt: string;
         };
         StartGenerationRequest: {
             /** Format: uuid */

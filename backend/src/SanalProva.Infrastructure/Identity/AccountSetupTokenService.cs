@@ -13,6 +13,10 @@ public sealed class SetupTokenOptions
     [Required]
     [MinLength(32)]
     public string SetupTokenKey { get; set; } = string.Empty;
+
+    /// <summary>İlk şifre bağlantısının geçerlilik süresi (saat). D1: varsayılan ve üst sınır 72.</summary>
+    [Range(1, AccountSetupTokenService.MaxTtlHours)]
+    public int InitialPasswordTtlHours { get; set; } = AccountSetupTokenService.MaxTtlHours;
 }
 
 /// <summary>Salt okunur durum (<see cref="AccountSetupTokenService.ValidateAsync"/>). Dış API'ye tek bir "geçersiz" olarak yansıtılmalıdır (M5.1 §2.2): hangi dal olduğu yalnızca iç kullanım/testler içindir.</summary>
@@ -121,12 +125,13 @@ public sealed class AccountSetupTokenService(AppDbContext db, IOptions<SetupToke
     /// Eşzamanlı iki istekten EN FAZLA biri <see cref="SetupTokenConsumeStatus.Success"/> döner. Şifre yazma ile aynı transaction'da
     /// çalıştırma (rollback güvencesi) M5.1d'nin işidir; bu metot kendi başına tek bir atomik adımdır ve ambient transaction içinde de doğru çalışır.
     /// </summary>
-    public async Task<SetupTokenConsumeResult> ConsumeAsync(string plainToken, CancellationToken ct)
+    public async Task<SetupTokenConsumeResult> ConsumeAsync(string plainToken, AccountSetupTokenPurpose purpose, CancellationToken ct)
     {
         var hash = AccountSetupTokenCredentials.HashToken(plainToken, _key);
         var now = clock.GetUtcNow();
+        var purposeText = purpose.ToString();
         var affected = await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE dbo.account_setup_tokens SET used_at = {now} WHERE token_hash = {hash} AND used_at IS NULL AND revoked_at IS NULL AND expires_at > {now}", ct);
+            $"UPDATE dbo.account_setup_tokens SET used_at = {now} WHERE token_hash = {hash} AND purpose = {purposeText} AND used_at IS NULL AND revoked_at IS NULL AND expires_at > {now}", ct);
         if (affected != 1)
         {
             return SetupTokenConsumeResult.Invalid;
