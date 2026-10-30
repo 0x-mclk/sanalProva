@@ -166,9 +166,11 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         return new Harness(services.BuildServiceProvider(), fashn, gemini, tryOn);
     }
 
-    private async Task<(TestTenant Tenant, ApiClient Client, CatalogIds Catalog)> TenantAsync()
+    private async Task<(TestTenant Tenant, ApiClient Client, CatalogIds Catalog)> TenantAsync(bool paidAi = true)
     {
-        var (tenant, client) = await StaffAsync();
+        ApiFactory.RequireDatabase(Factory);
+        var tenant = await TestData.CreateTenantAsync(Services, paidAiEnabled: paidAi);
+        var client = await ApiClient.LoginAsync(Factory, tenant.Email, tenant.StoreId);
         var catalog = await TestData.CreateCatalogAsync(Services, tenant.OrganizationId);
         return (tenant, client, catalog);
     }
@@ -333,6 +335,160 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         var (job, _, _) = await LoadAsync(jobId);
         Assert.Equal(GenerationErrorCode.BudgetExceeded, job.ErrorCode);
         Assert.Equal(0, harness.Fashn.Calls);
+    }
+
+    // ---------------------------------------------------------------- M5.1f: firma düzeyinde ücretli AI kapısı (ikinci kapı: sağlayıcı çağrısından hemen önce)
+
+    private async Task SetPaidAiAsync(Guid organizationId, bool enabled)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var organization = await db.Organizations.SingleAsync(o => o.Id == organizationId, TestContext.Current.CancellationToken);
+            organization.Settings.PaidAiEnabled = enabled;
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+    }
+
+    private async Task AssertPaidAiDeniedAsync(Guid jobId, Guid organizationId, Harness harness)
+    {
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Failed, job.Status);
+        Assert.Equal(GenerationErrorCode.PaidAiNotEnabled, job.ErrorCode);
+        Assert.Equal(1, job.Attempt); // yeniden denenmez (kalıcı karar)
+        Assert.Null(job.ReservedCostUsd); // rezervasyon yazılmadı
+        Assert.Empty(images);
+        Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd)); // ücret yok
+        Assert.Equal(0m, await OpenReservedAsync(organizationId));
+        Assert.Equal(0, harness.Fashn.Calls + harness.TryOn.Calls + harness.Gemini.Calls); // hiçbir sağlayıcıya gidilmedi
+    }
+
+    [Fact]
+    public async Task Firma_ucretli_AI_yetkisi_yokken_saglayici_cagrilmaz_rezervasyon_ve_ucret_olusmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync(paidAi: false);
+        await using var harness = BuildHarness(); // global kapılar AÇIK (AllowPaidCalls, geniş bütçe): engel yalnızca firma kapısıdır
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        await AssertPaidAiDeniedAsync(jobId, tenant.OrganizationId, harness);
+    }
+
+    [Fact]
+    public async Task Global_ucretli_cagri_kapisi_firma_kapisindan_once_gelir_ikisi_de_kapaliyken_sonuc_degismez()
+    {
+        var (tenant, client, catalog) = await TenantAsync(paidAi: false);
+        await using var harness = BuildHarness(allowPaid: false);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, _) = await LoadAsync(jobId);
+        Assert.Equal(GenerationErrorCode.ProviderNotConfigured, job.ErrorCode); // mevcut global kapı korunur
+        Assert.Equal(0, harness.Fashn.Calls);
+        Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+    }
+
+    [Fact]
+    public async Task Kabulden_sonra_yetki_kapatilirsa_ikinci_kapi_durdurur_yeniden_acilinca_is_gecer()
+    {
+        var (tenant, client, catalog) = await TenantAsync(paidAi: true);
+        await using var harness = BuildHarness();
+        var (queuedWhileEnabled, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet); // kabul anında yetkiliydi
+
+        await SetPaidAiAsync(tenant.OrganizationId, false); // iş kuyruktayken yetki geri alındı
+        await harness.Processor.ProcessClaimedAsync(queuedWhileEnabled, TestContext.Current.CancellationToken);
+        await AssertPaidAiDeniedAsync(queuedWhileEnabled, tenant.OrganizationId, harness);
+
+        await SetPaidAiAsync(tenant.OrganizationId, true);
+        var (next, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+        await harness.Processor.ProcessClaimedAsync(next, TestContext.Current.CancellationToken);
+        Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(next)).Job.Status);
+        Assert.Equal(1, harness.Fashn.Calls);
+    }
+
+    [Theory]
+    [InlineData("{}")] // alan hiç yok (eski/eksik ayar) → varsayılan kapalı
+    [InlineData("{\"PaidAiEnabled\":\"evet\"}")] // geçersiz tür
+    [InlineData("{\"PaidAiEnabled\":null}")]
+    [InlineData("{bozuk json")] // okunamayan ayar
+    public async Task Eksik_veya_gecersiz_ayarda_kapi_kapali_kalir_fail_closed(string settingsJson)
+    {
+        var (tenant, client, catalog) = await TenantAsync(paidAi: true);
+        // Serbest kombin (Gemini) yolu firma ayarını başka yerde okumaz: reddeden gerçekten firma kapısıdır
+        await using var harness = BuildHarness(liveCombination: true);
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.FreeCombination);
+
+        await CorruptSettingsAsync(tenant.OrganizationId, settingsJson);
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Failed, job.Status);
+        Assert.Equal(GenerationErrorCode.PaidAiNotEnabled, job.ErrorCode); // bozuk/eksik ayar asla "açık" sayılmaz
+        Assert.Empty(images);
+        Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+        Assert.Equal(0, harness.Fashn.Calls + harness.TryOn.Calls + harness.Gemini.Calls);
+        Assert.Null(job.ReservedCostUsd);
+    }
+
+    [Fact]
+    public async Task Bozuk_firma_ayari_hazir_takim_yolunda_da_hicbir_saglayici_cagrisi_yapilmaz()
+    {
+        var (tenant, client, catalog) = await TenantAsync(paidAi: true);
+        await using var harness = BuildHarness();
+        var (jobId, _) = await RunningJobAsync(tenant, client, catalog, OutfitMode.OutfitSet);
+
+        await CorruptSettingsAsync(tenant.OrganizationId, "{bozuk json"); // bu yolda ayar daha erken okunur ve patlar: yine hiçbir çağrı/ücret yok
+        await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
+
+        var (job, logs, images) = await LoadAsync(jobId);
+        Assert.Equal(GenerationJobStatus.Failed, job.Status);
+        Assert.Empty(images);
+        Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+        Assert.Equal(0, harness.Fashn.Calls + harness.TryOn.Calls + harness.Gemini.Calls);
+    }
+
+    private async Task CorruptSettingsAsync(Guid organizationId, string settingsJson)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE organizations SET settings = {settingsJson} WHERE id = {organizationId}", TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Paralel_islerde_yetkisiz_firma_hicbir_cagri_yapamaz_yetkili_firma_etkilenmez()
+    {
+        var (deniedTenant, deniedClient, deniedCatalog) = await TenantAsync(paidAi: false);
+        var (allowedTenant, allowedClient, allowedCatalog) = await TenantAsync(paidAi: true);
+        await using var harness = BuildHarness();
+        var denied = new List<Guid>();
+        var allowed = new List<Guid>();
+        for (var i = 0; i < 6; i++)
+        {
+            denied.Add((await RunningJobAsync(deniedTenant, deniedClient, deniedCatalog, OutfitMode.OutfitSet)).JobId);
+            allowed.Add((await RunningJobAsync(allowedTenant, allowedClient, allowedCatalog, OutfitMode.OutfitSet)).JobId);
+        }
+
+        await Task.WhenAll(denied.Concat(allowed).Select(id => harness.Processor.ProcessClaimedAsync(id, TestContext.Current.CancellationToken)));
+
+        foreach (var id in denied)
+        {
+            var (job, logs, _) = await LoadAsync(id);
+            Assert.Equal(GenerationErrorCode.PaidAiNotEnabled, job.ErrorCode);
+            Assert.Null(job.ReservedCostUsd);
+            Assert.All(logs, l => Assert.Equal(0m, l.EstimatedCostUsd));
+        }
+
+        foreach (var id in allowed)
+        {
+            Assert.Equal(GenerationJobStatus.Succeeded, (await LoadAsync(id)).Job.Status);
+        }
+
+        Assert.Equal(6, harness.Fashn.Calls); // yalnızca yetkili firmanın 6 işi sağlayıcıya gitti
+        Assert.Equal(0m, await OpenReservedAsync(deniedTenant.OrganizationId));
     }
 
     [Fact]

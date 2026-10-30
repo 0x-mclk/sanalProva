@@ -35,6 +35,9 @@ public static class GenerationEndpoints
         return api;
     }
 
+    private static IResult PaidAiNotEnabled() =>
+        ApiProblems.Forbidden("PAID_AI_NOT_ENABLED", "Bu işletme için gerçek (ücretli) AI henüz etkinleştirilmedi. Yöneticiyle iletişime geçin.");
+
     private static async Task<IResult> StartAsync(
         Guid id, StartGenerationRequest request, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
         AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, GenerationStrategy strategy, Microsoft.Extensions.Options.IOptionsMonitor<GenerationSettings> generationSettings,
@@ -112,6 +115,12 @@ public static class GenerationEndpoints
 
         var jobType = draft.Mode == OutfitMode.OutfitSet ? GenerationJobType.OutfitSet : GenerationJobType.FreeCombination;
         var live = strategy.Resolve(jobType).Provider != GenerationStrategy.MockProvider;
+        if (live && !await PaidAiPolicy.IsEnabledForAsync(db, user.OrganizationId, ct))
+        {
+            // Birinci kapı (kabul): ücretli sağlayıcıya gidecek iş, firma yetkisi yoksa kuyruğa hiç girmez. Mock modda uygulanmaz.
+            return PaidAiNotEnabled();
+        }
+
         if (jobType == GenerationJobType.FreeCombination && live && !generationSettings.CurrentValue.LiveFreeCombinationEnabled)
         {
             // Beş parçalı kombin gerçek modelle doğrulanmadı: gerçek modda çalışıyormuş gibi sunulmaz
@@ -434,6 +443,11 @@ public static class GenerationEndpoints
         }
 
         var live = strategy.Resolve(failed.JobType).Provider != GenerationStrategy.MockProvider;
+        if (live && !await PaidAiPolicy.IsEnabledForAsync(db, user.OrganizationId, ct))
+        {
+            return PaidAiNotEnabled();
+        }
+
         var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, idempotencyKey ?? Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
             failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null);
         // Bilinçli personel kararı: sonucu belirsiz iş yeniden denenebilir (ikinci ücret olasılığı iletide yazar); etkin aynı iş varsa yine o döner

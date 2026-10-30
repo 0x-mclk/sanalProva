@@ -27,13 +27,14 @@ internal static class TestData
 {
     public const string Password = "Test-Parola-12345";
 
-    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff, bool acceptAgreement = true)
+    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff, bool acceptAgreement = true, bool paidAiEnabled = true)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var suffix = Guid.NewGuid().ToString("N")[..10];
-        var organization = new Organization { Name = $"Test Firma {suffix}", Slug = $"test-{suffix}" };
+        // Fixture varsayılanı: ücretli AI AÇIK (gerçek-mod sağlayıcı testleri firma kapısını geçsin). Üretimde yeni firmalar KAPALI başlar; negatif testler paidAiEnabled: false verir.
+        var organization = new Organization { Name = $"Test Firma {suffix}", Slug = $"test-{suffix}", Settings = new OrganizationSettings { PaidAiEnabled = paidAiEnabled } };
         var store = new Store { OrganizationId = organization.Id, Name = "Test Şube", Code = "TST" };
         db.AddRange(organization, store);
         await db.SaveChangesAsync();

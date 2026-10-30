@@ -68,6 +68,12 @@ public sealed class BudgetGuard(IOptionsMonitor<GenerationSettings> settings, Ti
             throw new ProviderException(GenerationErrorCode.ProviderNotConfigured, "Gerçek AI çağrıları kapalı (ücretli çağrılar için yönetici onayı ve yapılandırma gerekir).", retryable: false);
         }
 
+        // İkinci (firma) kapı, HİÇBİR yazmadan/kilitten önce: yetkisiz firma için rezervasyon, bütçe kilidi veya sağlayıcı çağrısı olmaz. Fail-closed.
+        if (!await PaidAiPolicy.IsEnabledForAsync(db, job.OrganizationId, ct))
+        {
+            throw new ProviderException(GenerationErrorCode.PaidAiNotEnabled, "Bu işletme için ücretli AI etkin değil; sağlayıcı çağrılmadı.", retryable: false);
+        }
+
         try
         {
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
