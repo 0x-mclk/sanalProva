@@ -1,3 +1,4 @@
+import { slugify } from '../../shared/text/slugify';
 import { Button, Modal, MultiSelect, NumberInput, Select, Stack, Switch, Textarea, TextInput } from '@mantine/core';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -20,16 +21,7 @@ type Draft = Omit<CategoryDto, 'id' | 'aiHint'> & { id?: string; aiHint: string 
 
 const blank = (order: number): Draft => ({ name: '', slug: '', sortOrder: order, bodyZone: 'Upper', layerOrder: 10, maxSelection: 1, conflictsWith: [], aiHint: '', isActive: true });
 
-/** Türkçe karakterleri sadeleştirip kısa ad (slug) üretir: "Şalvar Takımı" → "salvar-takimi". */
-export function slugify(text: string): string {
-  return text
-    .toLocaleLowerCase('tr-TR')
-    .replace(/ı/g, 'i')
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+export { slugify };
 
 /** Kategori yönetimi: sıra, giyiliş katmanı, seçim kuralı (kategori başına en fazla kaç ürün) ve çakışan kategoriler. */
 export function CategoriesPage() {

@@ -317,9 +317,12 @@ public sealed class PlatformOrganizationTests(ApiFactory factory) : ApiTestBase(
         var item = Assert.Single(list, o => o.Slug == slug);
         Assert.True(item.OwnerSetupPending);
         Assert.False(item.PaidAiEnabled);
+        Assert.False(item.AgreementAccepted); // yeni firma sözleşmeyi henüz kabul etmedi
 
         var detail = await admin.GetAsync<OrganizationDetail>($"{Orgs}/{created.OrganizationId}");
         Assert.Equal(created.OrganizationId, detail.Id);
+        Assert.False(detail.AgreementAccepted);
+        Assert.Null(detail.AgreementAcceptedAt);
         Assert.Single(detail.Stores);
         var owner = Assert.Single(detail.Owners);
         Assert.True(owner.SetupPending);

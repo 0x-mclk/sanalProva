@@ -117,6 +117,7 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
         Assert.Equal(StoreRole.Owner, me.Stores[0].Role);
 
         // Yeni firma sözleşmeyi henüz kabul etmedi: mağaza işlemleri kapalı, oturum bilgisi ve sözleşme açık; Owner kabul edince açılır
+        Assert.False(me.IsPlatformAdmin);
         Assert.True(me.AgreementAcceptanceRequired);
         Assert.True(me.CanAcceptAgreement);
         await ApiClient.AssertProblemAsync(await owner.GetAsync("/api/v1/products"), HttpStatusCode.Forbidden, "AGREEMENT_ACCEPTANCE_REQUIRED");

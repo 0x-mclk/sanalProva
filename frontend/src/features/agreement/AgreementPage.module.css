@@ -1,0 +1,25 @@
+.text {
+  max-height: min(52dvh, 520px);
+  overflow-y: auto;
+  padding: var(--sp-space-md);
+  border: 1px solid var(--sp-color-border);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  font-size: var(--sp-font-size-sm);
+  line-height: 1.6;
+}
+
+.text h3 {
+  margin: var(--sp-space-md) 0 var(--sp-space-xs);
+  font-size: var(--sp-font-size-md);
+}
+
+.text p {
+  margin: 0 0 var(--sp-space-xs);
+}
+
+.meta {
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-subtle);
+  word-break: break-all;
+}

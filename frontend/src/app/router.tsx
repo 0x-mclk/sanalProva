@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { createBrowserRouter, Navigate, Link } from 'react-router';
 import { Button, Stack, Text, Title } from '@mantine/core';
+import { SetupPasswordPage } from '../features/account/SetupPasswordPage';
+import { AgreementPage } from '../features/agreement/AgreementPage';
 import { LoginPage } from '../features/auth/LoginPage';
 import { FreeCombinationPage } from '../features/catalog-picker/FreeCombinationPage';
 import { OutfitSetPage } from '../features/catalog-picker/OutfitSetPage';
@@ -16,13 +18,17 @@ import { PhotoPage } from '../features/session/PhotoPage';
 import { ResumePage } from '../features/session/ResumePage';
 import { DisplaysPage } from '../features/displays/DisplaysPage';
 import { LoadingState } from '../shared/ui';
-import { RequireAuth, RequireManager } from './RequireAuth';
+import { RequireAuth, RequireManager, RequirePlatformAdmin, RequireSession } from './RequireAuth';
 
 // Yönetim ekranları ve geliştirme ekranı yalnızca gerektiğinde yüklenir (personel ilk açılışı küçük kalır)
 const ProductsPage = lazy(() => import('../features/catalog-admin/ProductsPage').then((m) => ({ default: m.ProductsPage })));
 const ProductEditPage = lazy(() => import('../features/catalog-admin/ProductEditPage').then((m) => ({ default: m.ProductEditPage })));
 const CategoriesPage = lazy(() => import('../features/catalog-admin/CategoriesPage').then((m) => ({ default: m.CategoriesPage })));
 const UsagePage = lazy(() => import('../features/usage/UsagePage').then((m) => ({ default: m.UsagePage })));
+const PlatformLayout = lazy(() => import('../features/platform/PlatformLayout').then((m) => ({ default: m.PlatformLayout })));
+const OrganizationsPage = lazy(() => import('../features/platform/OrganizationsPage').then((m) => ({ default: m.OrganizationsPage })));
+const CreateOrganizationPage = lazy(() => import('../features/platform/CreateOrganizationPage').then((m) => ({ default: m.CreateOrganizationPage })));
+const OrganizationDetailPage = lazy(() => import('../features/platform/OrganizationDetailPage').then((m) => ({ default: m.OrganizationDetailPage })));
 const DevStatusPage = lazy(() => import('../features/dev/DevStatusPage').then((m) => ({ default: m.DevStatusPage })));
 
 const lazyPage = (node: React.ReactNode) => (
@@ -54,6 +60,24 @@ function NotFound() {
 /** Rotalar: docs/05-frontend-ekranlar.md §3. Oturum adımları `/prova/:id/...` altındadır; `/prova/:id` sunucudaki duruma göre doğru adıma yönlendirir. */
 export const router = createBrowserRouter([
   { path: '/giris', element: <LoginPage /> },
+  // Anonim: tek kullanımlık bağlantıyla şifre belirleme (token URL fragment'ındadır, okunur okunmaz adres çubuğundan silinir)
+  { path: '/hesap/sifre-belirle', element: <SetupPasswordPage /> },
+  // Mağaza kapısının ÖNÜNDEKİ sayfa: sözleşmeyi görüntüleme/kabul (yalnızca giriş gerekir)
+  { element: <RequireSession />, children: [{ path: '/sozlesme', element: <AgreementPage /> }] },
+  // Platform paneli: yalnızca platform yöneticisi (sunucu da PlatformAdminFilter ile doğrular)
+  {
+    element: <RequirePlatformAdmin />,
+    children: [
+      {
+        element: lazyPage(<PlatformLayout />),
+        children: [
+          { path: '/platform', element: lazyPage(<OrganizationsPage />) },
+          { path: '/platform/yeni', element: lazyPage(<CreateOrganizationPage />) },
+          { path: '/platform/:id', element: lazyPage(<OrganizationDetailPage />) },
+        ],
+      },
+    ],
+  },
   {
     element: <RequireAuth />,
     children: [

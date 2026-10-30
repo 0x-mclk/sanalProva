@@ -1,0 +1,100 @@
+.layout {
+  min-height: 100dvh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-space-sm);
+  padding-top: calc(var(--sp-space-md) + env(safe-area-inset-top));
+  padding-bottom: var(--sp-space-sm);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-sm);
+}
+
+.logo {
+  font-family: var(--sp-font-heading);
+  font-size: 30px;
+  line-height: 1;
+  color: var(--sp-color-primary);
+}
+
+.list {
+  display: grid;
+  gap: var(--sp-space-sm);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.card {
+  display: block;
+  padding: var(--sp-space-md);
+  border: 1px solid var(--sp-color-border);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  color: inherit;
+  text-decoration: none;
+
+  &:hover,
+  &:focus-visible {
+    border-color: var(--sp-color-primary);
+  }
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--sp-font-size-md);
+  font-weight: 600;
+}
+
+.cardMeta {
+  margin: 2px 0 var(--sp-space-xs);
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-muted);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-space-xs);
+}
+
+.linkBox {
+  padding: var(--sp-space-md);
+  border: 1px dashed var(--sp-color-primary);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+}
+
+.linkText {
+  margin: var(--sp-space-xs) 0;
+  padding: var(--sp-space-sm);
+  border-radius: var(--sp-radius-md);
+  background: var(--sp-color-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--sp-font-size-xs);
+  word-break: break-all;
+  user-select: all;
+}
+
+.definition {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-space-xs) var(--sp-space-md);
+  margin: 0;
+  font-size: var(--sp-font-size-sm);
+
+  & dt {
+    color: var(--sp-color-text-muted);
+  }
+
+  & dd {
+    margin: 0;
+  }
+}

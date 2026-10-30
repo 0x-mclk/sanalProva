@@ -2710,6 +2710,7 @@ export interface components {
             stores: components["schemas"]["StoreAccessDto"][];
             agreementAcceptanceRequired: boolean;
             canAcceptAgreement: boolean;
+            isPlatformAdmin: boolean;
         };
         MockGenerationRequest: {
             jobType: components["schemas"]["GenerationJobType"];
@@ -2723,6 +2724,10 @@ export interface components {
             paidAiEnabled: boolean;
             /** Format: date-time */
             createdAt: string;
+            agreementAccepted: boolean;
+            /** Format: date-time */
+            agreementAcceptedAt: null | string;
+            agreementVersion: string;
             stores: components["schemas"]["OrganizationStoreItem"][];
             owners: components["schemas"]["OrganizationOwnerItem"][];
         };
@@ -2734,6 +2739,7 @@ export interface components {
             isActive: boolean;
             paidAiEnabled: boolean;
             ownerSetupPending: boolean;
+            agreementAccepted: boolean;
             /** Format: date-time */
             createdAt: string;
         };

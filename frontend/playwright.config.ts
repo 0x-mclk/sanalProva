@@ -52,7 +52,7 @@ export default defineConfig({
         Ai__Pruna__ApiKey: ' ',
         Ai__Fashn__ApiKey: ' ',
         Ai__Gemini__ApiKey: ' ',
-        Security__LoginRateLimitPerMinute: '1000', Security__DisplayPairingRateLimitPerMinute: '1000', Security__DisplayClaimRateLimitPerMinute: '1000', Security__DisplayPairingStatusRateLimitPerMinute: '100000', Security__DisplayStateRateLimitPerMinute: '100000', Generation__Mock__DelayMs: '300',
+        Security__SetupPasswordRateLimitPerMinute: '1000', Security__LoginRateLimitPerMinute: '1000', Security__DisplayPairingRateLimitPerMinute: '1000', Security__DisplayClaimRateLimitPerMinute: '1000', Security__DisplayPairingStatusRateLimitPerMinute: '100000', Security__DisplayStateRateLimitPerMinute: '100000', Generation__Mock__DelayMs: '300',
       },
     },
     {

@@ -84,6 +84,17 @@ export const tr = {
     QUALITY_OVER_BUDGET: 'Seçilen kalitenin en kötü durum maliyeti iş başı bütçe sınırını aşıyor. Daha düşük bir kalite seçin.',
     FREE_COMBINATION_DISABLED: 'Çok parçalı kombin henüz etkin değil. Tek kaftan veya hazır takım deneyin.',
     INVALID_AI_MODELS: 'Model ayarları geçersiz. Varsayılan model etkin olmalı ve her etkin modelde en az bir kalite seçilmeli.',
+    // M5.1: işletme onboarding, hizmet sözleşmesi, ücretli AI
+    AGREEMENT_ACCEPTANCE_REQUIRED: 'Hizmet sözleşmesi kabul edilene kadar bu işlem yapılamaz. Firma sahibi sözleşmeyi kabul etmelidir.',
+    AGREEMENT_VERSION_MISMATCH: 'Sözleşme metni güncellendi. Güncel metni okuyup tekrar kabul edin.',
+    PAID_AI_NOT_ENABLED: 'Bu işletme için gerçek (ücretli) yapay zekâ henüz etkinleştirilmedi. Yöneticiyle iletişime geçin.',
+    SETUP_LINK_INVALID: 'Bağlantı geçersiz veya süresi dolmuş. Yöneticinizden yeni bir bağlantı isteyin.',
+    PASSWORD_POLICY: 'Şifre kurallara uymuyor.',
+    PLATFORM_ADMIN_REQUIRED: 'Bu ekran yalnızca platform yöneticileri içindir.',
+    SLUG_TAKEN: 'Bu firma adresi (kısa ad) zaten kullanılıyor. Başka bir tane deneyin.',
+    EMAIL_TAKEN: 'Bu e-posta adresiyle zaten bir hesap var.',
+    STORE_CODE_TAKEN: 'Bu şube kodu zaten kullanılıyor.',
+    OWNER_ALREADY_ACTIVATED: 'Firma sahibi şifresini zaten belirlemiş; yeni kurulum bağlantısı üretilemez.',
     NOT_FOUND: 'Kayıt bulunamadı.',
     BAD_REQUEST: 'İstek geçersiz.',
     PAYLOAD_TOO_LARGE: 'Gönderilen dosya çok büyük.',
@@ -95,6 +106,20 @@ export const tr = {
     UNKNOWN: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
   },
 } as const;
+
+/** Identity şifre politikası hata kodları → Türkçe (sunucu yalnızca kodları döner). */
+const passwordPolicyMessages: Record<string, string> = {
+  PasswordTooShort: 'En az 10 karakter olmalı.',
+  PasswordRequiresDigit: 'En az bir rakam içermeli.',
+  PasswordRequiresLower: 'En az bir küçük harf içermeli.',
+  PasswordRequiresUpper: 'En az bir büyük harf içermeli.',
+  PasswordRequiresNonAlphanumeric: 'En az bir özel karakter içermeli.',
+  PasswordRequiresUniqueChars: 'Daha çeşitli karakterler kullanın.',
+};
+
+export function passwordPolicyTexts(codes: readonly string[]): string[] {
+  return codes.map((code) => passwordPolicyMessages[code] ?? 'Şifre kurallara uymuyor.');
+}
 
 export function errorMessage(code: string | undefined): string {
   return (code && (tr.errors as Record<string, string>)[code]) || tr.errors.UNKNOWN;

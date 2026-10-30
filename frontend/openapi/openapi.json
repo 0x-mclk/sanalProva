@@ -3625,7 +3625,8 @@
           "demoCatalog",
           "stores",
           "agreementAcceptanceRequired",
-          "canAcceptAgreement"
+          "canAcceptAgreement",
+          "isPlatformAdmin"
         ],
         "type": "object",
         "properties": {
@@ -3660,6 +3661,9 @@
           },
           "canAcceptAgreement": {
             "type": "boolean"
+          },
+          "isPlatformAdmin": {
+            "type": "boolean"
           }
         }
       },
@@ -3682,6 +3686,9 @@
           "isActive",
           "paidAiEnabled",
           "createdAt",
+          "agreementAccepted",
+          "agreementAcceptedAt",
+          "agreementVersion",
           "stores",
           "owners"
         ],
@@ -3707,6 +3714,19 @@
             "type": "string",
             "format": "date-time"
           },
+          "agreementAccepted": {
+            "type": "boolean"
+          },
+          "agreementAcceptedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "agreementVersion": {
+            "type": "string"
+          },
           "stores": {
             "type": "array",
             "items": {
@@ -3729,6 +3749,7 @@
           "isActive",
           "paidAiEnabled",
           "ownerSetupPending",
+          "agreementAccepted",
           "createdAt"
         ],
         "type": "object",
@@ -3750,6 +3771,9 @@
             "type": "boolean"
           },
           "ownerSetupPending": {
+            "type": "boolean"
+          },
+          "agreementAccepted": {
             "type": "boolean"
           },
           "createdAt": {

@@ -13,7 +13,7 @@ public sealed record LoginRequest(string Email, string Password, bool RememberMe
 
 public sealed record StoreAccessDto(Guid Id, string Name, string Code, StoreRole Role);
 
-public sealed record MeResponse(Guid Id, string DisplayName, string Email, Guid OrganizationId, string OrganizationName, bool DemoCatalog, IReadOnlyList<StoreAccessDto> Stores, bool AgreementAcceptanceRequired, bool CanAcceptAgreement);
+public sealed record MeResponse(Guid Id, string DisplayName, string Email, Guid OrganizationId, string OrganizationName, bool DemoCatalog, IReadOnlyList<StoreAccessDto> Stores, bool AgreementAcceptanceRequired, bool CanAcceptAgreement, bool IsPlatformAdmin);
 
 public sealed record CsrfResponse(string Token, string HeaderName);
 
@@ -99,6 +99,6 @@ public static class AuthEndpoints
             .ToListAsync(ct);
 
         return new MeResponse(user.Id, user.DisplayName, user.Email!, organization.Id, organization.Name, organization.Settings.IsDemoCatalog, stores,
-            AgreementAcceptanceRequired: !await gate.IsAcceptedAsync(db, user.OrganizationId, ct), CanAcceptAgreement: await AgreementEndpoints.IsOwnerAsync(db, user.Id, user.OrganizationId, ct));
+            AgreementAcceptanceRequired: !await gate.IsAcceptedAsync(db, user.OrganizationId, ct), CanAcceptAgreement: await AgreementEndpoints.IsOwnerAsync(db, user.Id, user.OrganizationId, ct), IsPlatformAdmin: user.IsPlatformAdmin);
     }
 }

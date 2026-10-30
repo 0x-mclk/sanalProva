@@ -30,12 +30,14 @@ export const qk = {
 
 // ---------------------------------------------------------------- kimlik
 
-export function useMe() {
+/** `refetchInterval`: sözleşme bekleme ekranı gibi başkasının işlemini beklerken oturum bilgisi sık yenilenir. */
+export function useMe(options: { refetchInterval?: number } = {}) {
   return useQuery({
     queryKey: qk.me,
     queryFn: () => unwrap(api.GET('/api/v1/auth/me')),
     retry: false,
     staleTime: 5 * 60_000,
+    refetchInterval: options.refetchInterval,
   });
 }
 

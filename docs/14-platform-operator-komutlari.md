@@ -63,3 +63,30 @@ Bilinen sınırlar:
 5. **Etkinleştirme** anında geçerlidir; kuyrukta kalıcı olarak reddedilmiş işler otomatik yeniden denenmez (personel "yeniden dene" kullanır).
 6. Bayrak firma yetkisidir, harcama sınırı değildir: bütçe kapıları (`Enforce`, günlük/aylık/iş) ayrıca zorunludur. M5.4'te kredi bakiyesi bu bayrağın yanına/yerine geçecektir.
 7. Bozuk/eksik ayar JSON'u: serbest kombin yolunda kapı kapalı sayar (`PaidAiNotEnabled`); hazır takım (Fashn) yolunda ayar daha erken okunup patlar ve iş yine hiçbir çağrı/ücret olmadan başarısız olur.
+
+## 6. Arayüz (M5.1h): platform paneli, şifre belirleme, sözleşme ekranı
+
+| Rota | Kim | Ne yapar |
+|---|---|---|
+| `/platform` | yalnızca platform yöneticisi | İşletme listesi; kurulum (şifre bekleniyor/tamamlandı), sözleşme (kabul edildi/bekliyor) ve ücretli AI (açık/kapalı) durumu. |
+| `/platform/yeni` | platform yöneticisi | Firma + ilk şube + Owner formu. **Kurulum bağlantısı yalnızca ilk yanıtta** bu sayfanın yerel durumunda gösterilir; kapatılınca/sayfadan çıkılınca/yenilenince bir daha gösterilmez. |
+| `/platform/:id` | platform yöneticisi | İşletme özeti (müşteri verisi yok) ve Owner kurulum bağlantısını yeniden üretme. Ücretli AI **bu ekrandan değiştirilemez** (yalnızca operatör komutu). |
+| `/hesap/sifre-belirle` | anonim | 72 saatlik tek kullanımlık bağlantıyla şifre belirleme. Token URL fragment'ından (`#t=`) alınır ve **hemen adres çubuğundan silinir**. |
+| `/sozlesme` | giriş yapmış herkes | Hizmet sözleşmesi: **yalnızca Owner** kabul eder; diğer personel Owner onayını bekler (ekran kendiliğinden ilerler). |
+
+Yönlendirme (sunucudaki kapıların arayüz yansımasıdır; karar sunucudadır): girişsiz → `/giris`; platform yöneticisi → `/platform` (mağaza ekranlarına gidemez); sözleşme kabul edilmemiş → `/sozlesme`;
+yetkisiz kullanıcı `/platform*` açarsa ana sayfaya döner. Sunucu herhangi bir istekte `403 AGREEMENT_ACCEPTANCE_REQUIRED` verirse (ör. yeni sürüm) oturum bilgisi yenilenir ve kullanıcı `/sozlesme`ye yönlenir.
+Hizmet sözleşmesi ile müşteri fotoğraf (KVKK) onayı ekranda da ayrı tutulur: sözleşme ekranı açıkça "müşteri onayı ayrıdır ve her provada ayrıca alınır" der; müşteri onayı akışına dokunulmadı.
+
+### Token ve bağlantı güvenliği (istemci)
+
+- Token yalnızca **bellekte** tutulur (`setupToken.ts` modül değişkeni + bileşen durumu): `localStorage`, `sessionStorage`, TanStack Query/Mutation önbelleği, çerez veya günlük **yoktur**. Başarıdan/geçersizlikten sonra bellekten de silinir.
+- Token taşıyan çağrılar (oluşturma, yeniden üretme, şifre belirleme) bilerek `useMutation` kullanmaz (mutation önbelleği değişkenleri/sonucu bir süre tutar); doğrudan `apiFetch` ile yapılır. Token yalnızca istek gövdesindedir; URL'de, sorgu dizesinde veya Referer'da bulunmaz.
+- Geçersiz/kullanılmış/iptal/süresi dolmuş/bilinmeyen bağlantı **tek ve aynı mesajı** gösterir; neden açıklanmaz.
+- Tarayıcı geçmişi/ekran görüntüsü ve panodaki bağlantı yönetici sorumluluğundadır: bağlantı ekranda düz metin görünür (operatör iletmek zorundadır). Sızıntıda `revoke`/yeniden üretme ile iptal edin.
+
+### Bağlantı yeniden üretmede çift tıklama — sunucu idempotency'sinin YERİNE GEÇMEZ
+
+`POST /platform/organizations/{id}/owner/setup-link` için sunucuda `Idempotency-Key` yoktur (docs/13 §2.1'deki gereksinim, şema değiştirmemek için bu aşamaya bırakıldı). Arayüzdeki koruma (onay penceresi + istek sürerken `ref` kilidi + devre dışı düğme)
+yalnızca **istemci tarafı** çift tıklamayı engeller. Şunlara karşı koruma **yoktur**: ağ hatasından sonra isteğin kendiliğinden/elle yeniden denenmesi, iki sekme/iki yönetici, tarayıcı eklentileri. Sonuç: her başarılı çağrı yeni bağlantı üretir ve öncekini iptal eder;
+yanıt kaybolursa yönetici yeniden üretir. Firma oluşturma ise sunucu tarafında idempotent'tir (`Idempotency-Key`; arayüz form açılışında üretir, belirsiz sonuçta aynı anahtarla yeniden gönderir).

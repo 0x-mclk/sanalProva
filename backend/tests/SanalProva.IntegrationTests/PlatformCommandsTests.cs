@@ -195,6 +195,7 @@ public sealed class PlatformCommandsTests
         Assert.Equal(HttpStatusCode.BadRequest, (await SetPasswordAsync(env.Host, token, StrongPassword)).StatusCode); // tek kullanım
         var admin = await ApiClient.LoginAsync(env.Host, email, null, StrongPassword);
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/api/v1/platform/organizations")).StatusCode);
+        Assert.True((await admin.GetAsync<SanalProva.Api.Features.Auth.MeResponse>("/api/v1/auth/me")).IsPlatformAdmin); // arayüz yönlendirmesi için
     }
 
     [Fact]

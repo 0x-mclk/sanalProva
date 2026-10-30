@@ -25,4 +25,7 @@ BEGIN
     SELECT @u3, @o2, N'Yabancı Yönetici', NULL, 1, @now, @now, N'baska@firma.local', N'BASKA@FIRMA.LOCAL', N'baska@firma.local', N'BASKA@FIRMA.LOCAL',
            1, password_hash, CONVERT(nvarchar(50), NEWID()), CONVERT(nvarchar(50), NEWID()), NULL, 0, 0, NULL, lockout_enabled, 0, 0 FROM users WHERE id = @mgr;
     INSERT INTO user_store_roles (user_id, store_id, organization_id, role) VALUES (@u3, @s3, @o2, N'Manager');
+    -- Hizmet sözleşmesi kapısı (M5.1e): ikinci firma da güncel sözleşmeyi kabul etmiş sayılır (sürüm ve metin özeti ServiceAgreement.Document ile aynı; birim testle sabit).
+    INSERT INTO organization_agreement_acceptances (id, organization_id, user_id, agreement_version, text_sha256, accepted_at, ip_hash)
+    VALUES (NEWID(), @o2, @u3, N'2026-11-v1', 0x5816914adf826385eed54c0064de502148919943ffe6ee5a1b90e9cb21cb30d7, @now, NULL);
 END

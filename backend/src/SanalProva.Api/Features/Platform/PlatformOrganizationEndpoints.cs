@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using SanalProva.Api.Features.Agreement;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Infrastructure.Persistence;
@@ -22,14 +23,15 @@ public sealed record CreateOrganizationRequest(
 public sealed record CreateOrganizationResponse(
     Guid OrganizationId, Guid StoreId, Guid OwnerUserId, string? SetupLink, DateTimeOffset? SetupLinkExpiresAt, bool SetupLinkShown);
 
-public sealed record OrganizationListItem(Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, bool OwnerSetupPending, DateTimeOffset CreatedAt);
+/// <param name="AgreementAccepted">Firma GÜNCEL hizmet sözleşmesi sürümünü kabul etti mi (müşteri KVKK onayından ayrıdır).</param>
+public sealed record OrganizationListItem(Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, bool OwnerSetupPending, bool AgreementAccepted, DateTimeOffset CreatedAt);
 
 public sealed record OrganizationStoreItem(Guid Id, string Name, string Code, bool IsActive);
 
 public sealed record OrganizationOwnerItem(Guid UserId, string DisplayName, string Email, bool SetupPending);
 
 public sealed record OrganizationDetail(
-    Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, DateTimeOffset CreatedAt,
+    Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, DateTimeOffset CreatedAt, bool AgreementAccepted, DateTimeOffset? AgreementAcceptedAt, string AgreementVersion,
     IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners);
 
 public sealed record SetupLinkResponse(Guid OrganizationId, Guid OwnerUserId, string SetupLink, DateTimeOffset SetupLinkExpiresAt);
@@ -82,16 +84,19 @@ public static class PlatformOrganizationEndpoints
             : TypedResults.Ok(body);
     }
 
-    private static async Task<IResult> ListAsync(AppDbContext db, CancellationToken ct, int take = 50)
+    private static async Task<IResult> ListAsync(AppDbContext db, AgreementGate gate, CancellationToken ct, int take = 50)
     {
         take = Math.Clamp(take, 1, 200);
         var organizations = await db.Organizations.AsNoTracking().OrderByDescending(o => o.CreatedAt).Take(take).ToListAsync(ct);
         var ids = organizations.Select(o => o.Id).ToList();
         var pending = (await PendingOwnersAsync(db, ids, ct)).Select(p => p.OrganizationId).ToHashSet();
-        return TypedResults.Ok(organizations.Select(o => new OrganizationListItem(o.Id, o.Name, o.Slug, o.IsActive, o.Settings.PaidAiEnabled, pending.Contains(o.Id), o.CreatedAt)).ToList());
+        var version = gate.Current.Version;
+        var accepted = (await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => ids.Contains(a.OrganizationId) && a.AgreementVersion == version).Select(a => a.OrganizationId).ToListAsync(ct)).ToHashSet();
+        return TypedResults.Ok(organizations.Select(o => new OrganizationListItem(o.Id, o.Name, o.Slug, o.IsActive, o.Settings.PaidAiEnabled, pending.Contains(o.Id), accepted.Contains(o.Id), o.CreatedAt)).ToList());
     }
 
-    private static async Task<IResult> GetAsync(Guid id, AppDbContext db, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, AppDbContext db, AgreementGate gate, CancellationToken ct)
     {
         var organization = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id, ct);
         if (organization is null)
@@ -104,7 +109,11 @@ public static class PlatformOrganizationEndpoints
         var ownerIds = db.UserStoreRoles.IgnoreQueryFilters().Where(r => r.OrganizationId == id && r.Role == StoreRole.Owner).Select(r => r.UserId).Distinct();
         var owners = await db.Users.AsNoTracking().Where(u => u.OrganizationId == id && ownerIds.Contains(u.Id)).OrderBy(u => u.CreatedAt)
             .Select(u => new OrganizationOwnerItem(u.Id, u.DisplayName, u.Email!, u.PasswordHash == null)).ToListAsync(ct);
-        return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled, organization.CreatedAt, stores, owners));
+        var version = gate.Current.Version;
+        var acceptedAt = await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
+            .Where(a => a.OrganizationId == id && a.AgreementVersion == version).Select(a => (DateTimeOffset?)a.AcceptedAt).SingleOrDefaultAsync(ct);
+        return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled, organization.CreatedAt,
+            acceptedAt is not null, acceptedAt, version, stores, owners));
     }
 
     private static async Task<IResult> ReissueAsync(Guid id, PlatformOnboardingService service, CurrentUser user, HttpContext http, CancellationToken ct)

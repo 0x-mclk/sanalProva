@@ -1,11 +1,24 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router';
 import { ApiError } from '../shared/api/http';
+import { qk } from '../shared/api/hooks';
 import { AuthProvider } from '../shared/auth/AuthContext';
 import { ThemeProvider } from '../shared/theme/ThemeProvider';
 import { router } from './router';
 
-const queryClient = new QueryClient({
+/**
+ * Sunucu hizmet sözleşmesi kapısı kapalıyken (ör. yeni sürüm yayımlandı) herhangi bir istek 403 AGREEMENT_ACCEPTANCE_REQUIRED alırsa oturum bilgisi yenilenir:
+ * `agreementAcceptanceRequired` değişir ve yönlendirme /sozlesme'ye gider. Karar sunucudadır; burası yalnızca arayüzü senkronlar.
+ */
+function syncAgreementGate(error: unknown) {
+  if (error instanceof ApiError && error.code === 'AGREEMENT_ACCEPTANCE_REQUIRED') {
+    void queryClient.invalidateQueries({ queryKey: qk.me });
+  }
+}
+
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: syncAgreementGate }),
+  mutationCache: new MutationCache({ onError: syncAgreementGate }),
   defaultOptions: {
     queries: {
       staleTime: 30_000,
