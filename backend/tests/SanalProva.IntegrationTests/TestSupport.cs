@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SanalProva.Domain.Catalog;
 using SanalProva.Domain.Common;
@@ -26,7 +27,7 @@ internal static class TestData
 {
     public const string Password = "Test-Parola-12345";
 
-    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff)
+    public static async Task<TestTenant> CreateTenantAsync(IServiceProvider services, StoreRole role = StoreRole.Staff, bool acceptAgreement = true)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -38,7 +39,26 @@ internal static class TestData
         await db.SaveChangesAsync();
 
         var email = await AddUserAsync(services, organization.Id, [(store.Id, role)]);
+        if (acceptAgreement)
+        {
+            await AcceptAgreementAsync(services, organization.Id, email);
+        }
+
         return new TestTenant(organization.Id, store.Id, email, Password);
+    }
+
+    /// <summary>Firma adına güncel hizmet sözleşmesini (veya verilen sürümü) kabul edilmiş yazar. Fixture: gerçek akışta yalnızca Owner uç noktasıyla kabul edilir.</summary>
+    public static async Task AcceptAgreementAsync(IServiceProvider services, Guid organizationId, string userEmail, string? version = null)
+    {
+        await using var scope = services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var userId = await db.Users.Where(u => u.Email == userEmail).Select(u => u.Id).SingleAsync();
+        var agreement = ServiceAgreement.Document;
+        db.OrganizationAgreementAcceptances.Add(new OrganizationAgreementAcceptance
+        {
+            OrganizationId = organizationId, UserId = userId, AgreementVersion = version ?? agreement.Version, TextSha256 = agreement.TextSha256, AcceptedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 
     public static async Task<Guid> AddStoreAsync(IServiceProvider services, Guid organizationId, string code = "ST2")

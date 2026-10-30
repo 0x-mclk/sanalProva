@@ -1,4 +1,6 @@
 using System.Net;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using SanalProva.Api.Features.Catalog;
 using SanalProva.Api.Features.TryOn;
@@ -16,6 +18,23 @@ public abstract class ApiTestBase(ApiFactory factory)
     protected ApiFactory Factory { get; } = factory;
 
     protected IServiceProvider Services => Factory.Services;
+
+    /// <summary>
+    /// İkinci bir test sunucusu (aynı veritabanı). Üretim işçisi bu sunucuda <b>hiç çalışmaz</b>: işçi döngüleri açılışta hemen iş kapar; paylaşılan veritabanında başka testlerin
+    /// işlerini kapıp sunucu kapanınca yarıda bırakırdı (kilit süresi dolana kadar o testler zaman aşımına uğrar).
+    /// </summary>
+    protected WebApplicationFactory<Program> DerivedHost(Action<Microsoft.AspNetCore.Hosting.IWebHostBuilder>? configure = null) =>
+        Factory.WithWebHostBuilder(b =>
+        {
+            b.ConfigureTestServices(services =>
+            {
+                foreach (var worker in services.Where(d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) && d.ImplementationType == typeof(SanalProva.Infrastructure.Generation.GenerationWorker)).ToList())
+                {
+                    services.Remove(worker);
+                }
+            });
+            configure?.Invoke(b);
+        });
 
     /// <summary>Kiracı bağlamı atanmış kapsamlı DbContext. <c>using</c> ile kullanılmalı.</summary>
     protected (IServiceScope Scope, AppDbContext Db) OpenDb(Guid? organizationId = null)

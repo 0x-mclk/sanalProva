@@ -1,9 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -115,6 +115,14 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
         Assert.Equal(created.OrganizationId, me.OrganizationId);
         Assert.Equal(created.StoreId, Assert.Single(me.Stores).Id);
         Assert.Equal(StoreRole.Owner, me.Stores[0].Role);
+
+        // Yeni firma sözleşmeyi henüz kabul etmedi: mağaza işlemleri kapalı, oturum bilgisi ve sözleşme açık; Owner kabul edince açılır
+        Assert.True(me.AgreementAcceptanceRequired);
+        Assert.True(me.CanAcceptAgreement);
+        await ApiClient.AssertProblemAsync(await owner.GetAsync("/api/v1/products"), HttpStatusCode.Forbidden, "AGREEMENT_ACCEPTANCE_REQUIRED");
+        var agreement = await owner.GetAsync<SanalProva.Api.Features.Agreement.AgreementDto>("/api/v1/agreement/current");
+        await owner.PostAsync<SanalProva.Api.Features.Agreement.AgreementDto>("/api/v1/organization/agreement-acceptance", new { version = agreement.Version, textSha256 = agreement.TextSha256 }, HttpStatusCode.Created);
+        Assert.False((await owner.GetAsync<SanalProva.Api.Features.Auth.MeResponse>("/api/v1/auth/me")).AgreementAcceptanceRequired);
 
         // Başka firmanın kataloğu ve şubesi görünmez/erişilemez; platform uç noktaları kapalı
         var products = await (await owner.GetAsync("/api/v1/products")).Content.ReadAsStringAsync(Ct);
@@ -274,7 +282,7 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
     public async Task IP_basina_hiz_siniri_uygulanir()
     {
         ApiFactory.RequireDatabase(Factory);
-        using var limited = Factory.WithWebHostBuilder(b => b.UseSetting("Security:SetupPasswordRateLimitPerMinute", "3"));
+        using var limited = DerivedHost(b => b.UseSetting("Security:SetupPasswordRateLimitPerMinute", "3"));
         var client = Anonymous(limited);
         for (var i = 0; i < 3; i++)
         {
@@ -288,37 +296,48 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
     public async Task Denetim_kaydi_yazilamazsa_butun_islem_geri_alinir_token_yanmaz_parola_yazilmaz()
     {
         ApiFactory.RequireDatabase(Factory);
-        Assert.SkipUnless(Factory.MigratorConnectionString is not null, "Tetikleyici kurmak için migrator bağlantısı gerekir.");
         var logs = new CapturingLoggerProvider();
-        using var host = Factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<ILoggerFactory>(LoggerFactory.Create(l => l.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)))));
+        // Kullanıcı kimliği sunucu başlamadan bilinmez: kesinti, sonradan ayarlanan paylaşımlı bir kutudaki kimlik için çalışır
+        var flag = new StrongBox<Guid>(Guid.Empty);
+        using var host = DerivedHost(b => b.ConfigureTestServices(s =>
+        {
+            s.AddSingleton<ILoggerFactory>(LoggerFactory.Create(l => l.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
+            s.ConfigureDbContext<AppDbContext>(o => o.AddInterceptors(new LateBoundFailInterceptor(flag)));
+        }));
         var (_, created, token, email) = await NewOrganizationAsync(host);
+        flag.Value = created.OwnerUserId;
 
-        // Yalnızca BU kullanıcının parola denetim kaydını reddeden geçici CHECK kısıtı (EF kimlik OUTPUT'u tetikleyiciyle çalışmaz):
-        // parola yazıldıktan SONRA, commit'ten ÖNCE patlar. Yalnızca bu test kullanıcısını etkiler.
-        var constraint = $"ck_test_fail_pw_audit_{Guid.NewGuid():N}"[..40];
-        await ExecuteMigratorAsync($"ALTER TABLE dbo.audit_logs WITH NOCHECK ADD CONSTRAINT {constraint} CHECK (action <> N'Account.PasswordSet' OR entity_id <> '{created.OwnerUserId}');");
-        try
-        {
-            var failed = await SetPasswordAsync(Anonymous(host), token, StrongPassword);
-            Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
-            Assert.Null(await PasswordHashAsync(created.OwnerUserId)); // parola yazılmadı
-            Assert.Equal(SetupTokenValidity.Valid, await ValidityAsync(token)); // token tüketilmedi
-            var attempt = await new ApiClient(Factory.CreateClient()).SendAsync(HttpMethod.Post, "/api/v1/auth/login", new { email, password = StrongPassword, rememberMe = false });
-            Assert.Equal(HttpStatusCode.Unauthorized, attempt.StatusCode);
-        }
-        finally
-        {
-            await ExecuteMigratorAsync($"ALTER TABLE dbo.audit_logs DROP CONSTRAINT IF EXISTS {constraint};");
-        }
+        var failed = await SetPasswordAsync(Anonymous(host), token, StrongPassword);
+        Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+        Assert.Null(await PasswordHashAsync(created.OwnerUserId)); // parola yazılmadı (aynı transaction geri alındı)
+        Assert.Equal(SetupTokenValidity.Valid, await ValidityAsync(token)); // token tüketilmedi
+        var attempt = await new ApiClient(Factory.CreateClient()).SendAsync(HttpMethod.Post, "/api/v1/auth/login", new { email, password = StrongPassword, rememberMe = false });
+        Assert.Equal(HttpStatusCode.Unauthorized, attempt.StatusCode);
 
         // Hata giderilince aynı bağlantı çalışır (yanmamıştı)
+        flag.Value = Guid.Empty;
         Assert.Equal(HttpStatusCode.NoContent, (await SetPasswordAsync(Anonymous(host), token, StrongPassword)).StatusCode);
 
         // Hata günlüğü dahil hiçbir günlük satırı token'ı veya parolayı içermez
         var all = string.Join('\n', logs.Lines);
-        Assert.Contains("ck_test_fail_pw_audit", all, StringComparison.Ordinal); // istisna gerçekten günlüğe düştü (test geçerli)
+        Assert.Contains("test: denetim yazilamadi", all, StringComparison.Ordinal); // istisna gerçekten günlüğe düştü (test geçerli)
         Assert.DoesNotContain(token, all, StringComparison.Ordinal);
         Assert.DoesNotContain(StrongPassword, all, StringComparison.Ordinal);
+    }
+
+    private sealed class LateBoundFailInterceptor(StrongBox<Guid> userId) : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData, Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var target = userId.Value;
+            if (target != Guid.Empty && eventData.Context!.ChangeTracker.Entries<SanalProva.Domain.Audit.AuditLog>().Any(e => e.State == EntityState.Added && e.Entity.Action == "Account.PasswordSet" && e.Entity.EntityId == target))
+            {
+                throw new InvalidOperationException("test: denetim yazilamadi");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     [Fact]
@@ -326,7 +345,7 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
     {
         ApiFactory.RequireDatabase(Factory);
         var logs = new CapturingLoggerProvider();
-        using var host = Factory.WithWebHostBuilder(b => b.ConfigureTestServices(s => s.AddSingleton<ILoggerFactory>(LoggerFactory.Create(l => l.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)))));
+        using var host = DerivedHost(b => b.ConfigureTestServices(s => s.AddSingleton<ILoggerFactory>(LoggerFactory.Create(l => l.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)))));
         var (admin, created, token, email) = await NewOrganizationAsync(host);
         var anonymous = Anonymous(host);
 
@@ -350,13 +369,5 @@ public sealed class SetupPasswordTests(ApiFactory factory) : ApiTestBase(factory
 
         Assert.DoesNotContain("#t=", all, StringComparison.Ordinal);
         Assert.DoesNotContain(email, all, StringComparison.OrdinalIgnoreCase); // e-posta (kişisel veri) günlüğe girmez
-    }
-
-    private async Task ExecuteMigratorAsync(string sql)
-    {
-        await using var connection = new SqlConnection(Factory.MigratorConnectionString);
-        await connection.OpenAsync(Ct);
-        await using var command = new SqlCommand(sql, connection);
-        await command.ExecuteNonQueryAsync(Ct);
     }
 }

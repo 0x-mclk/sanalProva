@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SanalProva.Api.Hubs;
+using SanalProva.Api.Features.Agreement;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Display;
 using SanalProva.Domain.Tenancy;
@@ -398,7 +399,7 @@ public static class DisplayEndpoints
         var group = app.MapGroup("/api/v1/display").WithTags("Display");
         group.MapPost("/pairing", StartPairingAsync).AllowAnonymous().RequireRateLimiting(PairingRateLimit).Produces<PairingStartedDto>();
         group.MapGet("/pairing/status", PairingStatusAsync).AllowAnonymous().RequireRateLimiting(PairingStatusRateLimit).Produces<PairingStatusDto>();
-        group.MapGet("/state", GetStateAsync).RequireAuthorization(DisplayHub.DevicePolicy).RequireRateLimiting(DeviceStateRateLimit).Produces<TvStateDto>();
+        group.MapGet("/state", GetStateAsync).RequireAuthorization(DisplayHub.DevicePolicy).AllowWithoutAgreement("TV cihazı: ayrı cihaz belirteci kimliği (personel oturumu değil)").RequireRateLimiting(DeviceStateRateLimit).Produces<TvStateDto>();
         return app;
     }
 

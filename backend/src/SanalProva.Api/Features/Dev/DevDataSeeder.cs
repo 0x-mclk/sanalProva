@@ -123,6 +123,7 @@ public static partial class DevDataSeeder
         }
 
         var users = sp.GetRequiredService<UserManager<AppUser>>();
+        Guid? demoOwnerId = null;
         foreach (var (email, name, role) in new[]
                  {
                      ("elif@lal.local", "Elif K.", StoreRole.Staff),
@@ -138,7 +139,18 @@ public static partial class DevDataSeeder
             }
 
             db.UserStoreRoles.Add(new UserStoreRole { UserId = user.Id, StoreId = store.Id, OrganizationId = organization.Id, Role = role });
+            if (role == StoreRole.Owner)
+            {
+                demoOwnerId = user.Id;
+            }
         }
+
+        // Demo firma (yalnızca Development + Seed:Enabled): sözleşme demo Owner adına kabul edilmiş sayılır; gerçek firmalar sözleşmeyi kendi Owner'larıyla kabul eder
+        var agreement = SanalProva.Domain.Tenancy.ServiceAgreement.Document;
+        db.OrganizationAgreementAcceptances.Add(new OrganizationAgreementAcceptance
+        {
+            OrganizationId = organization.Id, UserId = demoOwnerId!.Value, AgreementVersion = agreement.Version, TextSha256 = agreement.TextSha256, AcceptedAt = DateTimeOffset.UtcNow,
+        });
 
         await db.SaveChangesAsync(ct);
         LogSeeded(logger);

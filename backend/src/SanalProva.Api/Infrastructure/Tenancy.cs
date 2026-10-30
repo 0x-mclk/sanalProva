@@ -193,7 +193,8 @@ public static class AccessExtensions
 {
     public static TBuilder RequirePlatformAdmin<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder =>
-        builder.RequireAuthorization().AddEndpointFilter(new PlatformAdminFilter());
+        builder.RequireAuthorization().AddEndpointFilter(new PlatformAdminFilter())
+            .WithMetadata(new SanalProva.Api.Features.Agreement.AgreementExemptMetadata("Platform yönetimi: platform yöneticisi firma sözleşmesine tabi değildir; yetki her istekte veritabanından doğrulanır"));
 
     public static TBuilder RequireStore<TBuilder>(this TBuilder builder, StoreRole minimum = StoreRole.Staff)
         where TBuilder : IEndpointConventionBuilder =>

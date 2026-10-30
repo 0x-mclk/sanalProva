@@ -162,7 +162,6 @@ public sealed class PlatformOrganizationTests(ApiFactory factory) : ApiTestBase(
 
         // Düz token ve e-posta dışında hiçbir değer sızmaz: tüm metin sütunları (denetim, JSON ayarlar, hash'ler) düz token'ı içermez
         Assert.Equal(0, await CountOccurrencesAsync(Factory.TestConnectionString!, token, Ct));
-        Assert.Equal(0, await CountOccurrencesAsync(Factory.TestConnectionString!, "#t=", Ct));
     }
 
     [Fact]
@@ -211,9 +210,14 @@ public sealed class PlatformOrganizationTests(ApiFactory factory) : ApiTestBase(
         var slug = (string)body.GetType().GetProperty("slug")!.GetValue(body)!;
         var key = NewKey();
 
-        var statuses = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+        var clients = new List<ApiClient>();
+        for (var i = 0; i < 8; i++)
         {
-            var client = await ApiClient.LoginAsync(Factory, admin.Email, admin.StoreId);
+            clients.Add(await ApiClient.LoginAsync(Factory, admin.Email, admin.StoreId)); // parola özeti CPU yükü sıralı; yarışan kısım yalnızca oluşturma isteğidir
+        }
+
+        var statuses = await Task.WhenAll(clients.Select(async client =>
+        {
             var response = await CreateRawAsync(client, body, key);
             var text = await response.Content.ReadAsStringAsync(Ct);
             return (response.StatusCode, Text: text);

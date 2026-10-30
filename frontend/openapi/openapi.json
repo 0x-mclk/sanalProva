@@ -111,6 +111,139 @@
         }
       }
     },
+    "/api/v1/agreement/current": {
+      "get": {
+        "tags": [
+          "Agreement"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization/agreement-acceptance": {
+      "post": {
+        "tags": [
+          "Agreement"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptAgreementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementDto"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consent-notice/current": {
+      "get": {
+        "tags": [
+          "TryOn"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentNoticeDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/usage": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/try-on-options": {
+      "get": {
+        "tags": [
+          "Generation"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TryOnOptionsDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/categories": {
       "get": {
         "tags": [
@@ -694,81 +827,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProductDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/consent-notice/current": {
-      "get": {
-        "tags": [
-          "TryOn"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConsentNoticeDto"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/usage": {
-      "get": {
-        "tags": [
-          "Admin"
-        ],
-        "parameters": [
-          {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "date"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageReport"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/ai/try-on-options": {
-      "get": {
-        "tags": [
-          "Generation"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TryOnOptionsDto"
                 }
               }
             }
@@ -2075,6 +2133,25 @@
   },
   "components": {
     "schemas": {
+      "AcceptAgreementRequest": {
+        "required": [
+          "version",
+          "textSha256"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "maxLength": 20,
+            "minLength": 0,
+            "type": "string"
+          },
+          "textSha256": {
+            "maxLength": 64,
+            "minLength": 64,
+            "type": "string"
+          }
+        }
+      },
       "AdminTryOnModelDto": {
         "required": [
           "key",
@@ -2129,6 +2206,45 @@
             "items": {
               "$ref": "#/components/schemas/TryOnQualityDto"
             }
+          }
+        }
+      },
+      "AgreementDto": {
+        "required": [
+          "version",
+          "title",
+          "text",
+          "textSha256",
+          "accepted",
+          "acceptedAt",
+          "canAccept"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "textSha256": {
+            "type": "string"
+          },
+          "accepted": {
+            "type": "boolean"
+          },
+          "acceptedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "canAccept": {
+            "type": "boolean"
           }
         }
       },
@@ -3507,7 +3623,9 @@
           "organizationId",
           "organizationName",
           "demoCatalog",
-          "stores"
+          "stores",
+          "agreementAcceptanceRequired",
+          "canAcceptAgreement"
         ],
         "type": "object",
         "properties": {
@@ -3536,6 +3654,12 @@
             "items": {
               "$ref": "#/components/schemas/StoreAccessDto"
             }
+          },
+          "agreementAcceptanceRequired": {
+            "type": "boolean"
+          },
+          "canAcceptAgreement": {
+            "type": "boolean"
           }
         }
       },
@@ -5251,7 +5375,7 @@
       "name": "Account"
     },
     {
-      "name": "Catalog"
+      "name": "Agreement"
     },
     {
       "name": "TryOn"
@@ -5261,6 +5385,9 @@
     },
     {
       "name": "Generation"
+    },
+    {
+      "name": "Catalog"
     },
     {
       "name": "Display"

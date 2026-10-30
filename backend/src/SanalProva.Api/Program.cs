@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using SanalProva.Api.Features.Account;
 using SanalProva.Api.Features.Admin;
+using SanalProva.Api.Features.Agreement;
 using SanalProva.Api.Features.Auth;
 using SanalProva.Api.Features.Catalog;
 using SanalProva.Api.Features.Dev;
@@ -101,6 +102,8 @@ builder.Services.AddScoped<ImageLinks>();
 builder.Services.AddScoped<SessionReader>();
 builder.Services.AddScoped<AuditTrail>();
 builder.Services.AddScoped<PlatformOnboardingService>();
+builder.Services.AddSingleton<IServiceAgreementSource, StaticServiceAgreementSource>();
+builder.Services.AddSingleton<AgreementGate>();
 builder.Services.AddSingleton<SanalProva.Infrastructure.Generation.IJobNotifier, SignalRJobNotifier>();
 builder.Services.AddSingleton<SanalProva.Infrastructure.Displays.IDisplayNotifier, SignalRDisplayNotifier>();
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.MultipartBodyLengthLimit = 20 * 1024 * 1024);
@@ -130,6 +133,7 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseTenantContext();
 app.UseAuthorization();
+app.UseAgreementEnforcement();
 
 app.MapAppHealthChecks();
 app.MapFileEndpoints();
@@ -137,6 +141,7 @@ app.MapFileEndpoints();
 var api = app.MapGroup("/api/v1").AddEndpointFilter<AntiforgeryFilter>();
 api.MapAuthEndpoints();
 api.MapAccountEndpoints();
+api.MapAgreementEndpoints();
 api.MapCatalogEndpoints();
 api.MapSessionEndpoints();
 api.MapGenerationEndpoints();
@@ -149,7 +154,7 @@ api.MapAiModelEndpoints();
 app.MapDisplayDeviceEndpoints();
 
 app.MapHub<StaffHub>(StaffHub.Path);
-app.MapHub<DisplayHub>(DisplayHub.Path);
+app.MapHub<DisplayHub>(DisplayHub.Path).AllowWithoutAgreement("TV cihazı: ayrı cihaz belirteci kimliği; sözleşmesi kabul edilmemiş firmada personel oturumu zaten açılamaz, TV durumu yalnızca bağlı oturumdan gelir");
 
 if (app.Environment.IsDevelopment())
 {
