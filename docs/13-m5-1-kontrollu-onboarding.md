@@ -1,6 +1,6 @@
 # 13 — M5.1 Kontrollü Onboarding: teknik plan
 
-> Durum: **tasarım onaylandı, uygulama ayrı onay bekliyor.** Ürün kodu, migration ve veritabanları bu belgeyle değişmez.
+> Durum: **uygulandı (M5.1a–i, yerelde doğrulandı; toplu GitHub CI doğrulaması kullanıcıda).** Bu belge tasarım kaydıdır; uygulama sapmaları: ayrı `harden-agreement-acceptances.sql`, zorlama filtre yerine middleware (varsayılan-zorlama), yeniden üretimde sunucu idempotency'si yok — bkz. [14](14-platform-operator-komutlari.md).
 > Kapsam: platform yöneticisinin güvenli ilk ataması, firma + ilk şube + Owner oluşturma, tek kullanımlık şifre belirleme bağlantısı,
 > Owner'ın sürümlü hizmet sözleşmesi kabulü. Mevcut tenant, kimlik, rol, katalog ve üretim akışları **yeniden yazılmaz**, yalnızca eklenir.
 

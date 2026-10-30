@@ -476,7 +476,9 @@ public sealed class PlatformCommandsTests
     {
         ApiFactory.RequireDatabase(Factory);
         var connection = Factory.TestConnectionString!;
-        var apiDll = MigrationLab.RepoFile("backend/src/SanalProva.Api/bin/Debug/net10.0/SanalProva.Api.dll");
+        // Test hangi yapılandırmayla (Debug yerelde, Release CI entegrasyon işinde) derlendiyse API de aynısıyla derlenmiştir
+        var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ? "Release" : "Debug";
+        var apiDll = MigrationLab.RepoFile($"backend/src/SanalProva.Api/bin/{configuration}/net10.0/SanalProva.Api.dll");
         Assert.True(File.Exists(apiDll), "Önce çözüm derlenmeli: " + apiDll);
 
         int UsersWithEmail(string address)

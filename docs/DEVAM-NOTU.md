@@ -1,4 +1,4 @@
-﻿# Devam notu (son güncelleme: M4.2 tamamlandı — CI #9 yeşil; sıradaki aşama onay bekliyor)
+﻿# Devam notu (son güncelleme: M5.1a–i tamamlandı, yerelde doğrulandı; toplu GitHub CI doğrulaması bekliyor — sıradaki aşama M5.2 onay bekliyor)
 
 Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **Sıradaki geliştirme aşaması için kullanıcı onayı beklenir (aşağıda \
 
@@ -21,6 +21,15 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 | M3.9 | Playwright E2E (izole MSSQL), `useDraftItems.flush` yarışı düzeltmesi | `5113ebb` |
 | M3.10 | PostgreSQL kalıntı taraması, belge güncellemeleri, risk sınıflandırması, son regresyon | `d7fc9eb` |
 | M4.1 | `db.ps1` MSSQL'e yeniden yazıldı (status/migrate/reset/script, izin listeli hedefler); README ve docs 02/03/09/10/README güncellendi | `fc0d8a1` |
+| M5.1a | Kontrollü onboarding şeması: `PlatformOnboarding` migration'ı (token, sözleşme kabulü, e-posta benzersizliği, idempotency alanları), append-only DENY | `91bab31` |
+| M5.1b | Güvenli kurulum token servisi (256 bit CSPRNG, HMAC-SHA256, atomik tek tüketim) | `565a5f8` |
+| M5.1c | Platform yöneticisinin firma + ilk şube + Owner oluşturma API'si (idempotency, tek seferlik bağlantı, denetim) | `be256d6` |
+| M5.1d | Tek kullanımlık bağlantıyla şifre belirleme (tek transaction, rollback) | `31f88a2` |
+| M5.1e | İşletme hizmet sözleşmesi + sunucu tarafı varsayılan-zorlama (middleware) | `f92e93c` |
+| M5.1f | Firma düzeyinde ücretli AI kapısı (`PaidAiEnabled`, iki kontrol, fail-closed) | `7642cb8` |
+| M5.1g | Platform operatör komutları (bootstrap/reissue-link/revoke/reset-access/paid-ai), hub sözleşme denetimi, idempotency yarışı düzeltmesi | `dd9e3f9` |
+| M5.1h | React ekranları (platform paneli, şifre belirleme, sözleşme) + Playwright onboarding E2E | `8beb11a` |
+| M5.1i | CI uyumluluğu (Release/Debug dll yolu), belgeler, M5.1 toplu doğrulama | bu commit |
 | M4.2 | Docker (API, migration paketi, image-worker, SQL Server 2025 Express konteyneri) + Compose + GitHub Actions CI | `1b9b6b7` … `670ccf3` (CI #1–#9 düzeltmeleri dahil); **CI #9: 6 işin tamamı yeşil** |
 
 ## Ortamın durumu (önemli)
@@ -101,6 +110,31 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 4. **M5.4 Kredi sistemi (ödeme olmadan):** append-only kredi defteri, iş başına **müşteri kredi rezervasyonu** (maliyet rezervasyonundan ayrı kavram), başarıda düşüm, başarısız/iptalde iade kuralı, yetersiz bakiyede açık hata kodu, platform yöneticisinin elle kredi yüklemesi, bakiye/hareket ekranı. Bu adımla ilk pilot mağazalar faturayı elle ödeyerek kullanabilir.
 5. **M5.5 Ödeme altyapısı:** sağlayıcı seçimi (TR için kart/3D Secure, iade, e-fatura uyumu — ayrı karar), paket satın alma → krediye dönüşüm (idempotent webhook), fatura kaydı.
 6. **Canlıya çıkış kapısı (paralel ilerler):** A grubundaki zorunlular (yedek/geri yükleme provası, silinen verinin yedekten dönmemesi, saklama politikası, sağlayıcı DPA, hukuki aydınlatma metni, üretim TLS/gizli yönetimi, sunucu harmanlaması kurulumda seçilir), onaylı canlı AI testi, gerçek mağaza TV denemesi.
+## M5.1 sonucu — kontrollü onboarding (M5.1a–i)
+
+**Tamamlanan özellikler:** platform yöneticisi yalnızca operatör CLI'siyle oluşturulur (`dotnet SanalProva.Api.dll platform bootstrap …`; HTTP'den erişilemez, `--confirm` olmadan yazmaz, aktif yönetici varken ikincisini reddeder);
+yönetici işletmeyi (firma + ilk şube + parolasız Owner) panelden/API'den oluşturur, 72 saatlik tek kullanımlık kurulum bağlantısı yalnızca ilk yanıtta gösterilir (`#t=` fragment, HMAC özeti DB'de); Owner şifreyi belirler
+(token tüketimi + şifre + denetim tek transaction); Owner hizmet sözleşmesini kabul edene kadar kimliklendirilmiş TÜM uç noktalar (REST + hub) sunucuda kapalıdır (varsayılan-zorlama middleware, sabit muaf liste + mimari test);
+`PaidAiEnabled` yeni firmalar için kapalı, kabulde ve sağlayıcı çağrısından önce denetlenir, yalnızca operatör komutuyla değişir. Ayrıntı: [docs/13](13-m5-1-kontrollu-onboarding.md), [docs/14](14-platform-operator-komutlari.md).
+
+**Güvenlik kontrolleri (testle kanıtlı):** token DB'nin hiçbir metin sütununda, günlükte, denetim kaydında, URL'de, depolamada, sorgu/mutation önbelleğinde yok; eşzamanlı tüketimde tam bir başarı; geçersiz bağlantıların tek yanıtı;
+tenant izolasyonu (platform yöneticisi müşteri katalog/oturum/fotoğraf verisine erişemez); sözleşme kabul kaydı append-only (DENY); hizmet sözleşmesi ile müşteri KVKK onayı ayrı; kaynak taraması testleri (`IsPlatformAdmin`/`PaidAiEnabled` tek yazıcı, komut HTTP'den çağrılmaz);
+ücretli sağlayıcı çağrısı olmadan fail-closed testleri (bozuk ayar, yetki geri alma, paralel işler).
+
+**Doğrulama (yerel):** birim 266, entegrasyon 324 (4 beklenen atlama), React 127, Playwright 10/10 (izole `sanalprova_e2e`). **Toplu GitHub CI doğrulaması M5.1i push'undan sonra kullanıcı tarafından kontrol edilecek (sonuç buraya işlenmedi).**
+CI'de lab veritabanı gerektiren testler (`PlatformCommandsTests` lab senaryoları, migration lab) `SANALPROVA_LAB_ADMIN` olmadığı için atlanır; ayrı süreç testi ve tüm HTTP testleri çalışır.
+
+**Canlıya çıkış öncesi AÇIK riskler (M5.1'e özgü):**
+1. Hizmet sözleşmesi metni **TASLAK**; hukuki onay olmadan canlıya çıkmaz (sürüm artırma kuralı birim testle korunur).
+2. Platform operatör kimliği doğrulaması (MFA) yok; yetki = sunucu/DB bağlantısına erişim. CLI çıktısındaki bağlantı kabuk geçmişine/ekran kaydına düşebilir; denetimde operatör `UserId`'si boş (işletim sistemi günlükleri gerekir).
+3. Bağlantı yeniden üretmede (`POST …/owner/setup-link`) sunucu idempotency'si yok; arayüz koruması yalnızca istemci tarafı. E-posta ile gönderim yok (bağlantı yöneticiye ekranda gösterilir).
+4. Açık SignalR bağlantıları sözleşme sürümü değişince kopmaz (yeni abonelik reddedilir); hub'da periyodik yeniden yetkilendirme yok.
+5. `PaidAiEnabled` yarış penceresi (ms; iş başına maliyet ve bütçeyle sınırlı) ve sürmekte olan çağrı iptal edilmez — docs/14 §5. M5.4 kredi sistemi gelene kadar firma bayrağı tek firma kapısıdır.
+6. `reset-access` sonrası açık oturum çerezleri güvenlik damgası denetimine kadar (varsayılan ≤ 30 dk) geçerli kalır.
+7. Platform firması sözleşmeye tabidir (yalnızca `/platform/*` ve muaf uçlar kullanılır); mağaza ekranı gerekiyorsa o firma da kabul etmelidir.
+8. `sanalprova_test`'e `harden-agreement-acceptances.sql` elle uygulandı (DENY); CI/Compose `db-harden` bunu otomatik uygular, üretimde dağıtım adımı olarak çalıştırılmalı.
+9. Mevcut A grubu riskler (yedek/geri yükleme, saklama politikası, DPA, canlı AI/TV denemesi) değişmedi.
+
 ## Açık riskler (üç grup)
 
 ### A. Ticari kullanımdan önce MUTLAKA çözülmeli
@@ -154,6 +188,6 @@ Ayrıca: gerçek mağaza TV denemesi, hukuki onaylı aydınlatma metni, S3 için
 1. ~~**M4.1 Geliştirici ortamı + belgeler**~~ — **yapıldı** (`db.ps1` MSSQL, README, docs; `.local` PostgreSQL arşiv kararı: dokunulmaz, M4.3'te yedek stratejisiyle birlikte yeniden ele alınır).
 2. ~~**M4.2 Konteyner + CI**~~ — **dosyalar yazıldı, fiilen çalıştırılmadı** (yukarıdaki bölüm). M4.3 başında: Docker kurulu bir makinede/CI'da ilk koşu ve düzeltmeler; imaj özetleri; idempotent migration betiğiyle dağıtım.
 3. **M4.3 Yedek/geri yükleme + üretim sertleştirme:** A-1, A-2, A-5 (prova dahil); dev şema kurulumu ve PostgreSQL kimliklerini koruma kararı.
-4. **M5.1 İşletme kaydı + platform yönetimi:** firma/şube açılışı, platform yöneticisi sağlama ve mutabakat arayüzü.
+4. ~~**M5.1 İşletme kaydı + platform yönetimi**~~ — **yapıldı (M5.1a–i; yukarıdaki bölüm)**. Platform mutabakat arayüzü (maliyet vakaları) hâlâ yalnızca API'dedir. Sıradaki M5.2 (şube/personel yönetimi; kullanıcı kararı) onay bekler.
 5. **M5.2 Bütçe/kredi:** rezervasyon kapanış kuralı, platform/şube limiti, kredi paketleri (aynı rezervasyon modeli), ardından ödeme altyapısı (sağlayıcı seçimi için ayrı karar).
 6. **Canlıya çıkış kapısı:** A grubunun tamamı + canlı AI testi (onaylı) + gerçek TV denemesi + hukuki metin.

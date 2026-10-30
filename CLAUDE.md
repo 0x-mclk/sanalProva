@@ -22,6 +22,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | 4 Gerçek AI entegrasyonu (FASHN, Gemini) | ✅ kod tamamlandı (mock/sözleşme testleri geçti); **canlı API testi yapılmadı, ücretli çağrılar kapalı** — canlı test ve Aşama 5 için kullanıcı onayı bekleniyor ([docs/11](docs/11-ai-entegrasyon-plani-ve-test.md)) |
 | 4b Tek kaftan modelleri (Seedream 5 Flash, GPT Image 2.5, Pruna) | ✅ kod tamamlandı, mock/sözleşme testleri geçti; **canlı test onay bekliyor** ([docs/12](docs/12-tek-kaftan-model-entegrasyonu.md)) |
 | 5 Revizyon motoru (Gemini edit, SAM 2 + OpenCV) | bekliyor (onay gerekir) |
+| M5.1 Kontrollü onboarding (a–i) | ✅ yerelde tamamlandı ve doğrulandı (birim 266, entegrasyon 324, React 127, Playwright 10/10); **toplu GitHub CI doğrulaması kullanıcıda**; sözleşme metni TASLAK ([docs/13](docs/13-m5-1-kontrollu-onboarding.md), [docs/14](docs/14-platform-operator-komutlari.md)). Sıradaki: M5.2 şube/personel yönetimi (onay bekliyor) |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
@@ -44,6 +45,8 @@ Plan `docs/` altında; ayrıntı orada, burada yinelenmez. Başlangıç: [docs/R
 | [09-gorev-listesi](docs/09-gorev-listesi.md) | Aşama 1–6 görevleri ve çıkış kriterleri |
 | [10-test-ve-kabul](docs/10-test-ve-kabul.md) | Kabul kriterleri, test planı |
 | [11-ai-entegrasyon-plani-ve-test](docs/11-ai-entegrasyon-plani-ve-test.md) | **Aşama 4**: doğrulanan API bilgileri, bütçe kapıları, onay bekleyen canlı test planı |
+| [13-m5-1-kontrollu-onboarding](docs/13-m5-1-kontrollu-onboarding.md) | **M5.1 tasarımı** (uygulandı): platform yöneticisi, onboarding, kurulum bağlantısı, hizmet sözleşmesi, ücretli AI kapısı |
+| [14-platform-operator-komutlari](docs/14-platform-operator-komutlari.md) | **Operatör komutları**, arayüz, SignalR ve `PaidAiEnabled` yarış sınırları |
 | [12-tek-kaftan-model-entegrasyonu](docs/12-tek-kaftan-model-entegrasyonu.md) | **Güncel modeller**: Seedream/GPT Image/Pruna, model-kalite ayarları, KVKK (Pruna saklama), canlı test planı |
 
 `docs/design/reference.png` = Figma referansı (dört ekran). `docs/screenshots/asama-2/` = Aşama 2 ekran görüntüleri.
@@ -87,6 +90,16 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 ## Aşama 4b'de gelenler (tek kaftan modelleri)
 
 `TryOnModels` kataloğu + `TryOnPolicyResolver` (firma ayarı: etkin modeller, izinli kaliteler, varsayılanlar), `FalQueueClient` + `FalSeedreamTryOnProvider` + `FalGptImageTryOnProvider`, `PrunaTryOnProvider`, `GET/PUT /admin/ai-models`, `GET /ai/try-on-options`, üretim isteğinde `modelKey`/`quality` (işe sabitlenir; parmak izine dahil), tek kaftan akışı (`CombinationRules.IsSingleTryOnItem`, `/products?tryOn=true`), gerçek modda kombin kapalı (`Generation:LiveFreeCombinationEnabled=false`), kullanım kaydında kalite. Varsayılan model **Seedream 5 Flash**; GPT Image varsayılan kalite **medium**; GPT'nin altı kalitesi (auto/low/medium/high/xhigh/max) desteklenir, auto/xhigh/max varsayılan kapalı (yönetici açar). GPT maliyeti `GptImagePricing` ile kalite × çıktı boyutu + referans görseller + prompt + görsel sayısından hesaplanır (docs/12 §2a); en kötü durumu iş başı sınırı aşan kalite `QUALITY_OVER_BUDGET` ile reddedilir. FASHN eski/pasif (kod korunur). Anahtarlar: `Ai__Fal__ApiKey`, `Ai__Pruna__ApiKey`.
+
+## M5.1'de gelenler (kontrollü onboarding)
+
+- **Operatör CLI'si:** `dotnet SanalProva.Api.dll platform bootstrap|reissue-link|revoke|reset-access|paid-ai` (`PlatformCommands`): web sunucusu başlamaz, HTTP'den çağrılamaz, `--confirm` yoksa yazmaz; bağlantı yalnızca stdout'a bir kez. `IsPlatformAdmin` ve `PaidAiEnabled`'ı yazan TEK yer bu sınıftır (kaynak taraması testleri).
+- **Platform API/ekranları:** `POST/GET /platform/organizations` (Idempotency-Key, bağlantı yalnızca ilk yanıtta), `POST …/owner/setup-link`, `POST /account/setup-password` (anonim; consume + şifre + denetim tek transaction); React: `/platform`, `/platform/yeni`, `/platform/:id`, `/hesap/sifre-belirle`, `/sozlesme`.
+- **Token:** 256 bit CSPRNG, DB'de `HMAC-SHA256(Security:SetupTokenKey)`; **`Security:SetupTokenKey` zorunlu** (≥32 karakter; user-secrets/ortam; compose/CI/E2E `.env` üretir). Token yalnızca URL fragment'ında/bellekte; token taşıyan çağrılar `useMutation` KULLANMAZ.
+- **Hizmet sözleşmesi:** `ServiceAgreement` (sürümlü, SHA-256 birim testle sabit; metin değişirse sürüm artırılır), `organization_agreement_acceptances` append-only. **Zorlama `AgreementEnforcementMiddleware`'dir ve VARSAYILANDIR**: kimlik isteyen her uç nokta (REST + StaffHub), açıkça `AllowWithoutAgreement` taşımıyorsa 403 `AGREEMENT_ACCEPTANCE_REQUIRED` alır; muaf/anonim liste `AgreementTests`'te sabit. Müşteri KVKK onayından tamamen ayrı.
+- **Ücretli AI kapısı:** `OrganizationSettings.PaidAiEnabled` (varsayılan false, fail-closed): kabulde (`/generations`, `/retry`) ve `BudgetGuard.ReserveAsync` içinde; mock mod etkilenmez. Test fixture'ı varsayılanı **true** verir (`TestData.CreateTenantAsync(paidAiEnabled:)`).
+- **Fixture'lar:** `TestData.CreateTenantAsync` güncel sözleşmeyi kabul edilmiş yazar (`acceptAgreement:false` ile kapatılır); demo tohumu ve E2E `isolation-seed.sql` de öyle.
+- **Tuzaklar:** (1) ikinci test sunucusu için `ApiTestBase.DerivedHost` kullanın: `WithWebHostBuilder` üretim işçisini bırakırsa başka testlerin işlerini kapıp yarıda bırakır. (2) Aynı Idempotency-Key ile eşzamanlı isteklerde "slug/e-posta alınmış" kararından önce tekrar yeniden değerlendirilir (aksi halde 409). (3) Aynı sekmede ikinci kurulum bağlantısı yalnızca `hashchange` üretir (router yakalamaz): `SetupPasswordPage` bu olayı dinler. (4) Playwright onboarding senaryosu operatör CLI'sini çalıştırır: API'nin önceden derlenmiş olması (`dotnet build backend/src/SanalProva.Api`) ve `SANALPROVA_E2E_SETUP_TOKEN_KEY` gerekir (`e2e-env.ps1 up` ve CI üretir). (5) Süreç testi API dll'ini test yapılandırmasına (Debug/Release) göre arar. (6) Platform yöneticisinin hiçbir firmada mağaza rolü yoktur: katalog/oturum uçları 403.
 
 ## Yerel çalıştırma
 

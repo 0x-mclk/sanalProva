@@ -1,6 +1,6 @@
 # 14 — Platform operatör komutları ve bilinen sınırlar (M5.1g)
 
-> Kapsam: ilk platform yöneticisinin güvenli oluşturulması, bağlantı yeniden üretme/iptal/erişim kurtarma, firma bazında ücretli AI yetkisi. Tasarım kaynağı: [13-m5-1-kontrollu-onboarding](13-m5-1-kontrollu-onboarding.md) §2.4–2.5.
+> Durum: **uygulandı ve yerelde doğrulandı (M5.1g/h/i).** CI sonucu kullanıcı tarafından kontrol edilecek. Kapsam: ilk platform yöneticisinin güvenli oluşturulması, bağlantı yeniden üretme/iptal/erişim kurtarma, firma bazında ücretli AI yetkisi. Tasarım kaynağı: [13-m5-1-kontrollu-onboarding](13-m5-1-kontrollu-onboarding.md) §2.4–2.5.
 
 ## 1. Güvenlik modeli
 
