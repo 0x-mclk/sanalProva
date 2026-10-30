@@ -38,21 +38,42 @@ public static class AccountEndpoints
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
-        // Koşullu tek UPDATE: eşzamanlı isteklerden yalnızca biri geçer; ikincisi birincinin commit/rollback'ini bekler
-        var consumed = await tokens.ConsumeAsync(request.Token, AccountSetupTokenPurpose.InitialPassword, ct);
+        // Koşullu tek UPDATE: eşzamanlı isteklerden yalnızca biri geçer; ikincisi birincinin commit/rollback'ini bekler.
+        // Önce ilk kurulum/davet bağlantısı, değilse parola sıfırlama bağlantısı denenir (ikisi de geçersizse tek ve aynı yanıt).
+        var purpose = AccountSetupTokenPurpose.InitialPassword;
+        var consumed = await tokens.ConsumeAsync(request.Token, purpose, ct);
+        if (consumed.Status != SetupTokenConsumeStatus.Success)
+        {
+            purpose = AccountSetupTokenPurpose.PasswordReset;
+            consumed = await tokens.ConsumeAsync(request.Token, purpose, ct);
+        }
+
         if (consumed.Status != SetupTokenConsumeStatus.Success)
         {
             return InvalidLink();
         }
 
         var user = await users.FindByIdAsync(consumed.UserId.ToString());
-        if (user is null || !user.IsActive || user.OrganizationId != consumed.OrganizationId || user.PasswordHash is not null)
+        var isReset = purpose == AccountSetupTokenPurpose.PasswordReset;
+        // İlk kurulumda hesap parolasız, sıfırlamada parolalı olmalı (amaç/durum uyuşmazlığı = geçersiz bağlantı)
+        if (user is null || !user.IsActive || user.OrganizationId != consumed.OrganizationId || (user.PasswordHash is null) == isReset)
         {
             await transaction.RollbackAsync(ct);
             return InvalidLink();
         }
 
         // Parola politikası bu çağrıda doğrulanır; ihlalde transaction geri alınır (token tüketilmemiş sayılır, kullanıcı yeniden deneyebilir)
+        if (isReset)
+        {
+            // Eski parola doğrulanmadan değiştirilir (bağlantı yetkidir); güvenlik damgası yenilenir → açık oturumlar düşer; kilit sıfırlanır
+            var removed = await users.RemovePasswordAsync(user);
+            if (!removed.Succeeded)
+            {
+                await transaction.RollbackAsync(ct);
+                return InvalidLink();
+            }
+        }
+
         var added = await users.AddPasswordAsync(user, request.Password);
         if (!added.Succeeded)
         {
@@ -61,7 +82,14 @@ public static class AccountEndpoints
                 new Dictionary<string, object?> { ["errors"] = added.Errors.Select(e => e.Code).ToList() });
         }
 
-        audit.RecordFor(user.OrganizationId, user.Id, "Account.PasswordSet", nameof(AppUser), user.Id);
+        if (isReset)
+        {
+            await users.ResetAccessFailedCountAsync(user);
+            await users.SetLockoutEndDateAsync(user, null);
+            await users.UpdateSecurityStampAsync(user);
+        }
+
+        audit.RecordFor(user.OrganizationId, user.Id, isReset ? "Account.PasswordReset" : "Account.PasswordSet", nameof(AppUser), user.Id);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return TypedResults.NoContent();

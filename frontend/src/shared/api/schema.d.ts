@@ -2171,6 +2171,202 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/management/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StaffMemberDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InviteStaffRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InviteStaffResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/management/users/{id}/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetStaffAssignmentsRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StaffMemberDto"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/management/users/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetStaffStatusRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StaffMemberDto"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/management/users/{id}/setup-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StaffSetupLinkDto"];
+                    };
+                };
+            };
+        };
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/ai-quality": {
         parameters: {
             query?: never;
@@ -2808,6 +3004,17 @@ export interface components {
             url: string;
             thumbUrl: string;
         };
+        InviteStaffRequest: {
+            email: string;
+            displayName: string;
+            assignments: components["schemas"]["StaffAssignmentRequest"][];
+        };
+        InviteStaffResponse: {
+            member: components["schemas"]["StaffMemberDto"];
+            setupLink: string;
+            /** Format: date-time */
+            setupLinkExpiresAt: string;
+        };
         JobDto: {
             /** Format: uuid */
             id: string;
@@ -3138,6 +3345,12 @@ export interface components {
             /** Format: int64 */
             expectedVersion: null | number;
         };
+        SetStaffAssignmentsRequest: {
+            assignments: components["schemas"]["StaffAssignmentRequest"][];
+        };
+        SetStaffStatusRequest: {
+            isActive: boolean;
+        };
         SetStoreStatusRequest: {
             isActive: boolean;
         };
@@ -3153,6 +3366,40 @@ export interface components {
         SetupPasswordRequest: {
             token: string;
             password: string;
+        };
+        StaffAssignmentDto: {
+            /** Format: uuid */
+            storeId: string;
+            storeName: string;
+            storeCode: string;
+            storeActive: boolean;
+            role: components["schemas"]["StoreRole"];
+        };
+        StaffAssignmentRequest: {
+            /** Format: uuid */
+            storeId: string;
+            role: components["schemas"]["StoreRole"];
+        };
+        StaffMemberDto: {
+            /** Format: uuid */
+            id: string;
+            displayName: string;
+            email: string;
+            isActive: boolean;
+            setupPending: boolean;
+            isSelf: boolean;
+            canManage: boolean;
+            /** Format: date-time */
+            openLinkExpiresAt: null | string;
+            assignments: components["schemas"]["StaffAssignmentDto"][];
+        };
+        StaffSetupLinkDto: {
+            /** Format: uuid */
+            userId: string;
+            setupLink: string;
+            /** Format: date-time */
+            expiresAt: string;
+            purpose: string;
         };
         StartGenerationRequest: {
             /** Format: uuid */
