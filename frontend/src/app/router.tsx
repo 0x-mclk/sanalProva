@@ -31,6 +31,7 @@ const CreateOrganizationPage = lazy(() => import('../features/platform/CreateOrg
 const OrganizationDetailPage = lazy(() => import('../features/platform/OrganizationDetailPage').then((m) => ({ default: m.OrganizationDetailPage })));
 const StoresPage = lazy(() => import('../features/management/StoresPage').then((m) => ({ default: m.StoresPage })));
 const StaffPage = lazy(() => import('../features/management/StaffPage').then((m) => ({ default: m.StaffPage })));
+const CreditsPage = lazy(() => import('../features/credits/CreditsPage').then((m) => ({ default: m.CreditsPage })));
 const DevStatusPage = lazy(() => import('../features/dev/DevStatusPage').then((m) => ({ default: m.DevStatusPage })));
 
 const lazyPage = (node: React.ReactNode) => (
@@ -108,7 +109,13 @@ export const router = createBrowserRouter([
         ],
       },
       // Şube yönetimi: yalnızca firma sahibi; personel yönetimi: Manager+ (sunucu kapsamı her işlemde yeniden hesaplar)
-      { element: <RequireOwner />, children: [{ path: '/yonetim/subeler', element: lazyPage(<StoresPage />) }] },
+      {
+        element: <RequireOwner />,
+        children: [
+          { path: '/yonetim/subeler', element: lazyPage(<StoresPage />) },
+          { path: '/yonetim/kredi', element: lazyPage(<CreditsPage />) },
+        ],
+      },
       { element: <RequireStaffManager />, children: [{ path: '/yonetim/personel', element: lazyPage(<StaffPage />) }] },
       { path: '/dev', element: lazyPage(<DevStatusPage />) },
     ],

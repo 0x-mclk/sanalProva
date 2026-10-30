@@ -95,6 +95,9 @@ export const tr = {
     EMAIL_TAKEN: 'Bu e-posta adresiyle zaten bir hesap var.',
     STORE_CODE_TAKEN: 'Bu şube kodu zaten kullanılıyor.',
     OWNER_ALREADY_ACTIVATED: 'Firma sahibi şifresini zaten belirlemiş; yeni kurulum bağlantısı üretilemez.',
+    // M5.4: kredi
+    INSUFFICIENT_CREDITS: 'Yeterli krediniz yok, bu üretim başlatılamadı. İşletme sahibi veya yöneticiyle iletişime geçip kredi yükletin.',
+    HTTP_402: 'Yeterli krediniz yok. İşletme sahibi veya yöneticiyle iletişime geçip kredi yükletin.',
     // M5.2: şube ve personel yönetimi
     MANAGER_LIMIT: 'Yönetici yalnızca kendi şubelerinde Personel (Staff) yetkisi verebilir; bu kişinin yetkisini yalnızca firma sahibi değiştirebilir.',
     SELF_CHANGE_FORBIDDEN: 'Kendi yetkinizi veya hesap durumunuzu değiştiremezsiniz.',

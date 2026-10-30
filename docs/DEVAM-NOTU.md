@@ -1,4 +1,4 @@
-﻿# Devam notu (son güncelleme: M5.3 tamamlandı, yerelde doğrulandı; push/CI kullanıcıda — sıradaki aşama M5.4 onay bekliyor)
+﻿# Devam notu (son güncelleme: M5.4 tamamlandı, yerelde doğrulandı; push/CI kullanıcıda — sıradaki aşama M5.5 (ödeme) onay bekliyor)
 
 Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **Sıradaki geliştirme aşaması için kullanıcı onayı beklenir (aşağıda \
 
@@ -107,7 +107,7 @@ Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her 
 1. **M5.1 Kontrollü işletme kaydı (onboarding):** platform yöneticisi sağlama komutu (CLI, veritabanına yazan tek resmi yol) → platform yöneticisi firma + ilk şube + sahip (Owner) oluşturur → sahibe tek kullanımlık, süreli **şifre belirleme bağlantısı** (e-posta altyapısı gelene kadar bağlantı yöneticiye gösterilir) → ilk girişte KVKK/hizmet sözleşmesi onayı kaydı. Halka açık kendi kendine kayıt MVP dışında (KVKK sözleşmesi ve kötüye kullanım riski).
 2. **M5.2 Şube ve personel yönetimi (Owner/Manager):** şube CRUD (ad, kod, saat dilimi, günlük kota, aktif/pasif), personel davet/rol/devre dışı bırakma, yönetici tarafından şifre sıfırlama bağlantısı; tüm uç noktalar mevcut rol filtreleri ve tenant filtreleriyle, izolasyon testleriyle.
 3. ~~**M5.3 Rezervasyon kapanış kuralı + firma başına parasal limitler:**~~ **(yapıldı: yukarıdaki M5.3 sonucu)** belgelenen karar (gönderilmemiş → serbest; gönderilmiş/belirsiz → kurtarma süresi sonunda idempotent `OutcomeUncertain` maliyet kaydı); bütçe limitlerini firma ayarına taşıma + platform geneli üst sınır.
-4. **M5.4 Kredi sistemi (ödeme olmadan):** append-only kredi defteri, iş başına **müşteri kredi rezervasyonu** (maliyet rezervasyonundan ayrı kavram), başarıda düşüm, başarısız/iptalde iade kuralı, yetersiz bakiyede açık hata kodu, platform yöneticisinin elle kredi yüklemesi, bakiye/hareket ekranı. Bu adımla ilk pilot mağazalar faturayı elle ödeyerek kullanabilir.
+4. ~~**M5.4 Kredi sistemi (ödeme olmadan):**~~ **(yapıldı: yukarıdaki M5.4 sonucu)** append-only kredi defteri, iş başına **müşteri kredi rezervasyonu** (maliyet rezervasyonundan ayrı kavram), başarıda düşüm, başarısız/iptalde iade kuralı, yetersiz bakiyede açık hata kodu, platform yöneticisinin elle kredi yüklemesi, bakiye/hareket ekranı. Bu adımla ilk pilot mağazalar faturayı elle ödeyerek kullanabilir.
 5. **M5.5 Ödeme altyapısı:** sağlayıcı seçimi (TR için kart/3D Secure, iade, e-fatura uyumu — ayrı karar), paket satın alma → krediye dönüşüm (idempotent webhook), fatura kaydı.
 6. **Canlıya çıkış kapısı (paralel ilerler):** A grubundaki zorunlular (yedek/geri yükleme provası, silinen verinin yedekten dönmemesi, saklama politikası, sağlayıcı DPA, hukuki aydınlatma metni, üretim TLS/gizli yönetimi, sunucu harmanlaması kurulumda seçilir), onaylı canlı AI testi, gerçek mağaza TV denemesi.
 ## M5.1 sonucu — kontrollü onboarding (M5.1a–i)
@@ -145,6 +145,12 @@ Ayrıntı: [docs/15](15-m5-2-sube-personel-yonetimi.md). Yerelde: backend 624 te
 Ayrıntı: [docs/16](16-m5-3-butce-ve-mutabakat.md). Özet: firma başına günlük/aylık/iş başı sınır (etkin = min(platform tavanı, firma), yalnızca operatör komutu `platform budget`); iptal edilmiş işlerin rezervasyonları doğru kapanır (hiç gönderilmemiş → hemen serbest; gönderilmiş → kurtarma süresi sonunda tek idempotent `OutcomeUncertain`); firmalar birbirinin bütçesini etkilemez (kilit ve sorgu firma başına; platform toplam sınırı bilinçli yok). **"R5 öncesi" risk #1 (iptal edilmiş + kayıtsız rezervasyon süresiz açık kalması) kapandı.** Doğrulama: backend 639 test (4 beklenen atlama), React 140, Playwright 12/12.
 
 Açık: platform toplam (tüm firmalar) sınırı yok (karar); günlük pencere UTC; fal/Pruna maliyeti tahmin; firma sahibi kendi sınırını arayüzden değiştiremez (yalnızca operatör); gönderilmiş işi iptal edip aynı isteği yeniden vermek bilinçli ikinci ücretli iş açar (bütçe kapısından geçer).
+
+## M5.4 sonucu — firma bazlı kredi sistemi
+
+Ayrıntı: [docs/17](17-m5-4-kredi-sistemi.md). Özet: firma başına kredi hesabı + değiştirilemez defter; gerçek sağlayıcıya giden iş kabulünde bedel tarifeden işe yazılıp ayrılır (yetersiz → 402), başarıda düşer, kesin başarısızlık/hiç gönderilmemiş iptalde iade edilir, sonucu belirsiz işlerde mutabakat kararına kadar bloke kalır (karara göre düşüm/iade); çift düşüm/çift iade veritabanında (filtreli benzersiz indeks) ve kodda (idempotent `SettleJobAsync`) imkânsızdır; operatör yüklemesi referansla idempotent ve denetimlidir; işletme sahibi bakiye/rezerve/geçmişi `/yonetim/kredi`'de görür. Doğrulama: backend 693 test (4 beklenen atlama), React 147, Playwright 13/13. **Ödeme alma yok (M5.5).**
+
+**Açık ticari kararlar (kullanıcıdan):** kredi fiyatı/paketleri (varsayılan: 1 kredi/üretim, yapılandırılabilir), kredi son kullanma tarihi, para iadesi/devri, fatura/KDV, Staff/Manager'a kalan kredi gösterimi ve düşük kredi uyarısı, belirsiz işlerde müşteriye bekleme açıklaması. M5.5 öncesi: ödeme sağlayıcısı seçimi (ayrı karar), `Payment` kaynaklı Grant akışı (`CreditLedgerService` aynı idempotency'yi kullanır).
 
 ## Açık riskler (üç grup)
 

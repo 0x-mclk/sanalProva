@@ -107,6 +107,11 @@ export function HomePage() {
                 Şube yönetimi
               </Menu.Item>
             ) : null}
+            {isOwner ? (
+              <Menu.Item leftSection={<SparklesIcon size={16} />} component={Link} to="/yonetim/kredi">
+                Kredi
+              </Menu.Item>
+            ) : null}
             {canManageCatalog ? (
               <Menu.Item leftSection={<HistoryIcon size={16} />} component={Link} to="/maliyet">
                 AI kullanım ve maliyet

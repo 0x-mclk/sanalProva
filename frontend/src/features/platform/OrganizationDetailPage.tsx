@@ -83,6 +83,10 @@ export function OrganizationDetailPage() {
         <dd>
           günlük {limitText(organization.dailyBudgetUsd)} · aylık {limitText(organization.monthlyBudgetUsd)} · iş başı {limitText(organization.maxJobCostUsd)}
         </dd>
+        <dt>Kredi</dt>
+        <dd>
+          bakiye {organization.creditBalance} · bekleyen {organization.creditReserved} (yükleme yalnızca operatör komutuyla)
+        </dd>
         <dt>Şubeler</dt>
         <dd>{organization.stores.map((store) => `${store.name} (${store.code})`).join(', ')}</dd>
         <dt>Firma sahibi</dt>
@@ -90,7 +94,7 @@ export function OrganizationDetailPage() {
       </dl>
 
       <Notice tone="info">
-        Ücretli yapay zekâ yetkisi bu ekrandan değiştirilemez; yalnızca sunucudaki operatör komutlarıyla (paid-ai, budget; denetime yazılır) değişir; AI bütçe sınırları da öyle. Müşteri fotoğraf, oturum ve katalog verisi bu panelde görünmez.
+        Ücretli yapay zekâ yetkisi bu ekrandan değiştirilemez; yalnızca sunucudaki operatör komutlarıyla (paid-ai, budget, credits; denetime yazılır) değişir; AI bütçe sınırları da öyle. Müşteri fotoğraf, oturum ve katalog verisi bu panelde görünmez.
       </Notice>
 
       {link ? (

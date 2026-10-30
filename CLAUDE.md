@@ -25,6 +25,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | M5.1 Kontrollü onboarding (a–i) | ✅ yerelde tamamlandı ve doğrulandı (birim 266, entegrasyon 324, React 127, Playwright 10/10); **toplu GitHub CI doğrulaması kullanıcıda**; sözleşme metni TASLAK ([docs/13](docs/13-m5-1-kontrollu-onboarding.md), [docs/14](docs/14-platform-operator-komutlari.md)). Sıradaki: M5.2 (aşağıda) |
 | M5.2 Şube ve personel yönetimi (a–e) | ✅ yerelde tamamlandı ve doğrulandı (backend 624 test, React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/15](docs/15-m5-2-sube-personel-yonetimi.md)). Sıradaki: M5.3 (onay bekliyor) |
 | M5.3 Firma bazlı bütçe ve AI mutabakatı | ✅ yerelde tamamlandı ve doğrulandı (backend 639 test (4 beklenen atlama), React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/16](docs/16-m5-3-butce-ve-mutabakat.md)). Sıradaki: M5.4 kredi sistemi (onay bekliyor) |
+| M5.4 Firma bazlı kredi sistemi | ✅ yerelde tamamlandı ve doğrulandı (backend 693 test (4 beklenen atlama), React 147, Playwright 13/13); **CI/push kullanıcıda**; fiyat/paket kararı BEKLİYOR (varsayılan 1 kredi/üretim); ödeme yok ([docs/17](docs/17-m5-4-kredi-sistemi.md)). Sıradaki: M5.5 ödeme (onay bekliyor) |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
@@ -117,6 +118,15 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 - **Yazma yalnızca operatör komutu:** `platform budget --org SLUG [--daily|--monthly|--job USD|none] [--confirm]` (`Platform.BudgetChanged`); kaynak taraması testi (`BudgetLimitsApiTests`). Görünürlük: `GET /admin/usage` (etkin + tavan + açık rezervasyon), platform ayrıntısı (salt okunur), kullanım ekranı.
 - **Rezervasyon kapanışı:** iptal + hiç gönderilmemiş → hemen serbest (`OpenReservations` saymaz, süpürücü alanı temizler); iptal + gönderilmiş + kayıtsız → `CancelledReservationRecoverySeconds` (900) sonra süpürücü **tek idempotent** `OutcomeUncertain` kaydı yazar (olay anahtarı `uncertain:{jobId}`; eşzamanlı süpürücülerde benzersiz indeks ihlali `TryExecuteAsync` ile yutulur).
 - **Tuzak:** `TenantArchitectureTests` envanteri (`CostReconciliation.cs` 5/1/0: ham SQL tek yardımcıdan geçer). Yeni işi test ederken `PaidProviderPipelineTests.CancelledJobAsync` yardımcısını kullanın.
+
+## M5.4'te gelenler (firma bazlı kredi sistemi)
+
+- **Veri:** `credit_accounts` (firma başına tek satır; `balance ≥ 0`, `0 ≤ reserved ≤ balance` CHECK) ve `credit_ledger` (**append-only**: `tr_credit_ledger_append_only` tetikleyicisi UPDATE/DELETE'i reddeder; iş başına tek Reserve + tek kapanış, `(organization_id, reference)` benzersiz). `generation_jobs.credit_cost` = işlem anındaki bedel. `job_id` bilinçli FK değil (KVKK silmesi mali kaydı silmez).
+- **Tek yazıcı:** `Credits/CreditLedgerService` (kaynak taraması testi); firma başına `sp_getapplock` (`OrganizationCredits`) + tek transaction. Kabulde (`AdmitAsync`, yalnızca GERÇEK sağlayıcı) tarifeden bedel işe yazılıp aynı transaction'da ayrılır; yetersizse 402 `INSUFFICIENT_CREDITS`. Mock sağlayıcı kredi tüketmez. `Credits:Enforce` (varsayılan true).
+- **Kapanış:** `SettleJobAsync` işin şu anki durumuna göre karar verir (başarı → Consume; kesin başarısızlık/hiç gönderilmemiş iptal/iş yok → Release; belirsiz/gönderilmiş-kayıtsız iptal → bloke; maliyet kararı `ConfirmedCharged` → Consume, `ConfirmedNotCharged`/`WrittenOff` → Release). İdempotent; işçi (`finally`), iptal ucu, zaman aşımı kurtarması, `DecideAsync` ve süpürücü çağırır.
+- **Tarife:** `Credits:Tariff` (`İşTipi[:model[:kalite]]`, en özel kazanır, varsayılan `DefaultCostPerJob`=1). **Ticari fiyat kararı yok: fiyat uydurulmadı.**
+- **Operatör:** `platform credits --org SLUG [--grant N | --adjust ±N --note ..] --ref REF [--confirm]` (idempotent referans, denetim). **Hiçbir HTTP ucu kredi yükleyemez.** `GET /credits`, `/credits/ledger` (yalnızca Owner), React `/yonetim/kredi`.
+- **Tuzaklar:** (1) `ApiFactory.ResetDataAsync` defter tetikleyicisini yalnızca atılabilir test veritabanında geçici kapatır. (2) `TestData.CreateTenantAsync(credits: 1000)` varsayılanı kredi yükler (negatif testler `credits: 0`). (3) Genel bütünlük testleri append-only tabloda UPDATE kullanamaz: `credit_ledger` enum/FK sınamaları INSERT ile (`CreditSystemTests`, `DatabaseIntegrityTests` istisnası). (4) `TenantArchitectureTests` envanteri (`CreditLedgerService.cs` 12/0/0, `PlatformCommands.cs` 1/0/0).
 
 ## Yerel çalıştırma
 
