@@ -45,7 +45,7 @@ public sealed class MigrationValidationTests
         Assert.Equal(migrations.Order(StringComparer.Ordinal).ToArray(), migrations);
         Assert.Equal(migrations.Length, migrations.Distinct().Count());
         Assert.All(migrations, m => Assert.Matches(@"^\d{14}_[A-Za-z0-9]+$", m));
-        Assert.EndsWith("_TenantConsistency", migrations[^1], StringComparison.Ordinal);
+        Assert.EndsWith("_PlatformOnboarding", migrations[^1], StringComparison.Ordinal);
 
         await lab.MigrateAsync(Ct);
         await using (var db = lab.OpenMigrator())
@@ -596,6 +596,7 @@ public sealed class MigrationValidationTests
     }
 
     private const string AppendOnlyScript = "scripts/mssql/harden-append-only.sql";
+    private const string AgreementAcceptanceScript = "scripts/mssql/harden-agreement-acceptances.sql";
 
     [Fact]
     public async Task Karar_kayitlari_yalnizca_eklemeli_olur_DENY_UPDATE_DELETE_karar_duzeltme_listeleme_ve_silme_akislarini_bozmaz()
@@ -751,6 +752,14 @@ public sealed class MigrationValidationTests
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(provision, System.Text.RegularExpressions.Regex.Escape(denyAppendOnly)));
         Assert.DoesNotContain("INSERT", denyAppendOnly, StringComparison.Ordinal); // eklemek serbest
         Assert.DoesNotContain("SELECT", denyAppendOnly, StringComparison.Ordinal);
+
+        // M5.1: sözleşme kabul kayıtları da yalnızca ekleme (ayrı betik, ai_cost_reconciliations'tan bağımsız; aynı desen, aynı deyim iki dosyada)
+        var agreementAcceptance = File.ReadAllText(MigrationLab.RepoFile(AgreementAcceptanceScript));
+        const string denyAgreementAcceptance = "DENY UPDATE, DELETE ON OBJECT::dbo.organization_agreement_acceptances TO [sanalprova_app];";
+        Assert.Contains(denyAgreementAcceptance, agreementAcceptance, StringComparison.Ordinal);
+        Assert.Equal(2, System.Text.RegularExpressions.Regex.Count(provision, System.Text.RegularExpressions.Regex.Escape(denyAgreementAcceptance)));
+        Assert.DoesNotContain("INSERT", denyAgreementAcceptance, StringComparison.Ordinal); // eklemek serbest
+        Assert.DoesNotContain("SELECT", denyAgreementAcceptance, StringComparison.Ordinal);
 
         // Takipli provision betiği parola içermez: parolalar sqlcmd değişkenidir
         Assert.DoesNotMatch(@"PASSWORD\s*=\s*N?'(?!\$\()", provision); // değişken olmayan (düz metin) parola yok

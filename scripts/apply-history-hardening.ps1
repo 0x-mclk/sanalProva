@@ -1,5 +1,5 @@
 ﻿# Sertlestirmeleri MEVCUT bir dev/test veritabanina uygular (hedef kullanici: sanalprova_app): History = migration gecmisi (DENY INSERT/UPDATE/DELETE),
-# AppendOnly = ai_cost_reconciliations (DENY UPDATE/DELETE), All = ikisi.
+# AppendOnly = yalnizca-ekleme tablolari (ai_cost_reconciliations, organization_agreement_acceptances; DENY UPDATE/DELETE), All = ikisi.
 # GUVENLI VARSAYILAN: -Apply verilmezse hicbir sey DEGISTIRMEZ; yalnizca durumu okur (meta veri) ve yapilacak islemi gosterir.
 # -Apply ile bile calistirmadan once onay ister (-Confirm:$false ile atlanir; yalnizca bilincli kullanin).
 # Kullanim:
@@ -17,7 +17,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $scripts = @()
 if ($Hardening -in 'History', 'All') { $scripts += (Join-Path $PSScriptRoot 'mssql/harden-migration-history.sql') }
-if ($Hardening -in 'AppendOnly', 'All') { $scripts += (Join-Path $PSScriptRoot 'mssql/harden-append-only.sql') }
+if ($Hardening -in 'AppendOnly', 'All') { $scripts += (Join-Path $PSScriptRoot 'mssql/harden-append-only.sql'); $scripts += (Join-Path $PSScriptRoot 'mssql/harden-agreement-acceptances.sql') }
 foreach ($s in $scripts) { if (-not (Test-Path $s)) { throw "Betik bulunamadi: $s" } }
 
 function Invoke-Sql([string]$Query, [string]$Db = 'master') {
@@ -39,7 +39,7 @@ function Get-State([string]$Table) {
 }
 $tables = @()
 if ($Hardening -in 'History', 'All') { $tables += '__ef_migrations_history' }
-if ($Hardening -in 'AppendOnly', 'All') { $tables += 'ai_cost_reconciliations' }
+if ($Hardening -in 'AppendOnly', 'All') { $tables += 'ai_cost_reconciliations'; $tables += 'organization_agreement_acceptances' }
 Write-Host "Veritabani: $Database | sertlestirme: $Hardening"
 foreach ($t in $tables) { Write-Host (Get-State $t) }
 

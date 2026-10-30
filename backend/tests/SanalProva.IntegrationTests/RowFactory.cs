@@ -265,7 +265,10 @@ internal sealed partial class RowFactory
             case "datetime2" or "datetime":
                 return DateTime.UtcNow;
             case "varbinary" or "binary":
-                return new byte[] { 1 };
+                // Rastgele: sabit bir bayt dizisi (ör. {1}) benzersiz indeksli ikilik sütunlarda (M5.1: account_setup_tokens.token_hash) her çağrıda çakışırdı.
+                var bytes = new byte[column.MaxLength > 0 ? column.MaxLength : 16];
+                Random.Shared.NextBytes(bytes);
+                return bytes;
             default:
                 throw new InvalidOperationException($"{table}.{column.Name}: tür {column.Type} için üretici değer tanımlı değil.");
         }

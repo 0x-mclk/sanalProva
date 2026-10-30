@@ -77,13 +77,15 @@ GO
 -- 7) Migration gecmisi sertlestirmesi (SONRADAN calisir): tablo migration ile olusur. Tablo varsa sanalprova_app icin INSERT/UPDATE/DELETE
 --    reddedilir, yoksa atlanir. Migration'dan sonra bu betigi yeniden calistirmak (veya harden-migration-history.sql) yeterlidir.
 --    Ayni deyim scripts/mssql/harden-migration-history.sql icindedir (bir test ikisinin ayni oldugunu denetler).
--- (yalnizca ekleme tablolari: scripts/mssql/harden-append-only.sql ile ayni deyim)
+-- (yalnizca ekleme tablolari: scripts/mssql/harden-append-only.sql ve scripts/mssql/harden-agreement-acceptances.sql ile ayni deyimler)
 USE [sanalprova_dev];
 GO
 IF OBJECT_ID(N'dbo.__ef_migrations_history', N'U') IS NOT NULL AND USER_ID(N'sanalprova_app') IS NOT NULL
     DENY INSERT, UPDATE, DELETE ON OBJECT::dbo.__ef_migrations_history TO [sanalprova_app];
 IF OBJECT_ID(N'dbo.ai_cost_reconciliations', N'U') IS NOT NULL AND USER_ID(N'sanalprova_app') IS NOT NULL
     DENY UPDATE, DELETE ON OBJECT::dbo.ai_cost_reconciliations TO [sanalprova_app];
+IF OBJECT_ID(N'dbo.organization_agreement_acceptances', N'U') IS NOT NULL AND USER_ID(N'sanalprova_app') IS NOT NULL
+    DENY UPDATE, DELETE ON OBJECT::dbo.organization_agreement_acceptances TO [sanalprova_app];
 GO
 USE [sanalprova_test];
 GO
@@ -91,4 +93,6 @@ IF OBJECT_ID(N'dbo.__ef_migrations_history', N'U') IS NOT NULL AND USER_ID(N'san
     DENY INSERT, UPDATE, DELETE ON OBJECT::dbo.__ef_migrations_history TO [sanalprova_app];
 IF OBJECT_ID(N'dbo.ai_cost_reconciliations', N'U') IS NOT NULL AND USER_ID(N'sanalprova_app') IS NOT NULL
     DENY UPDATE, DELETE ON OBJECT::dbo.ai_cost_reconciliations TO [sanalprova_app];
+IF OBJECT_ID(N'dbo.organization_agreement_acceptances', N'U') IS NOT NULL AND USER_ID(N'sanalprova_app') IS NOT NULL
+    DENY UPDATE, DELETE ON OBJECT::dbo.organization_agreement_acceptances TO [sanalprova_app];
 GO

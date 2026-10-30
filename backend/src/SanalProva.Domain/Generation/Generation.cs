@@ -55,6 +55,9 @@ public enum GenerationErrorCode
 
     /// <summary>Gerçek sağlayıcı kapalı (ücretli çağrılara izin verilmemiş) veya API anahtarı yok; sağlayıcı çağrılmadı.</summary>
     ProviderNotConfigured,
+
+    /// <summary>Firma için ücretli AI kullanımı henüz açılmadı (<c>OrganizationSettings.PaidAiEnabled</c> = false); sağlayıcı çağrılmadı (M5.1/M5.4).</summary>
+    PaidAiNotEnabled,
     Unknown,
 }
 

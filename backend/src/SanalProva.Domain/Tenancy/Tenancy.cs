@@ -9,6 +9,18 @@ public sealed class Organization : Entity
     public required string Slug { get; set; }
     public OrganizationSettings Settings { get; set; } = new();
     public bool IsActive { get; set; } = true;
+
+    /// <summary>Firmayı oluşturan platform yöneticisi (M5.1). Bilinçli olarak FK yok (platform yöneticisi başka firmadadır).</summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    /// Oluşturma isteğinin Idempotency-Key'i (M5.1): aynı anahtarla tekrar aynı sonucu döner, ama kurulum bağlantısı
+    /// yalnızca ilk yanıtta gösterildiği için tekrarında bir daha gösterilmez (<see cref="CreationRequestHash"/> ile birlikte).
+    /// </summary>
+    public string? CreationRequestKey { get; set; }
+
+    /// <summary>İstek gövdesinin özeti: aynı anahtarla farklı gövde gelirse <c>IDEMPOTENCY_KEY_REUSED</c> ile reddedilir.</summary>
+    public byte[]? CreationRequestHash { get; set; }
 }
 
 /// <summary>Firma ayarları (JSON sütunu).</summary>
@@ -43,6 +55,13 @@ public sealed class OrganizationSettings
 
     /// <summary>Hazır takım (FASHN) üretim modu: "fast", "balanced" veya "quality". null = sunucu varsayılanı.</summary>
     public string? FashnGenerationMode { get; set; }
+
+    /// <summary>
+    /// Firma ücretli AI kullanabilir mi (M5.1). Varsayılan <c>false</c>: yeni oluşturulan firmalar M5.4 kredi sistemi kurulana kadar
+    /// ücretli AI'ya otomatik yetkili değildir. Yalnızca operatör komutuyla açılır; oluşturma API'si bu alanı ayarlayamaz.
+    /// Gerçek (mock olmayan) modda iş kabulünde ve <c>BudgetGuard</c> sağlayıcı çağrısından önce ikinci kez denetlenir.
+    /// </summary>
+    public bool PaidAiEnabled { get; set; }
 }
 
 /// <summary>Şube. Prova oturumları ve TV cihazları şube seviyesindedir.</summary>

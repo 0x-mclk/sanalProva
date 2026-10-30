@@ -3030,6 +3030,7 @@
           "OutcomeUncertain",
           "BudgetExceeded",
           "ProviderNotConfigured",
+          "PaidAiNotEnabled",
           "Unknown",
           null
         ]

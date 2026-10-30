@@ -155,6 +155,7 @@ case "$action" in
       echo "[asama=harden] $db"
       run_script /sql/harden-migration-history.sql -v Database="$db" || die 31 "harden:$db" "$(fail_message harden-migration-history.sql)"
       run_script /sql/harden-append-only.sql -v Database="$db" || die 31 "harden:$db" "$(fail_message harden-append-only.sql)"
+      run_script /sql/harden-agreement-acceptances.sql -v Database="$db" || die 31 "harden:$db" "$(fail_message harden-agreement-acceptances.sql)"
     done
     echo "harden tamam."
     ;;

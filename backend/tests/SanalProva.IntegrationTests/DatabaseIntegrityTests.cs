@@ -91,6 +91,9 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         //  - Maliyet kayıtları oturum silinse de kalır: iş bağlantısı SET NULL (tek sütunlu FK) + "aynı firmada" kuralı için bileşik NO ACTION eşi (NO_ACTION_COMPANION: bağlantı boşalınca devre dışı).
         //  - Aynı kural TV için: oturum silinince TV bağlantısı boşalır; TV ve oturum aynı şubede/firmada olmalıdır.
         //  - Firma/şube/kullanıcı/katalog: referans edilen ana kayıt silinemez (NO ACTION); ürün silinince varyant, görsel, bileşenler gider; kullanıcı/şube silinince rol satırları gider.
+        //  - M5.1: kurulum token'ı kullanıcıyla birlikte gider (CASCADE, ephemeral); sözleşme kabulü append-only kayıt, kullanıcı silinse de kalır (NO ACTION).
+        ["fk_account_setup_tokens_asp_net_users_user_id_organization_id"] = "CASCADE",
+        ["fk_account_setup_tokens_organizations_organization_id"] = "NO_ACTION",
         ["fk_ai_cost_reconciliations_ai_usage_logs_usage_log_id_organization_id"] = "NO_ACTION",
         ["fk_ai_usage_logs_ai_usage_logs_adjusts_log_id_organization_id"] = "NO_ACTION",
         ["fk_ai_usage_logs_generation_jobs_job_id"] = "SET_NULL",
@@ -114,6 +117,8 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         ["fk_generation_jobs_session_photos_source_photo_id_organization_id"] = "NO_ACTION",
         ["fk_generation_jobs_stores_store_id_organization_id"] = "NO_ACTION",
         ["fk_generation_jobs_try_on_sessions_session_id_store_id_organization_id"] = "CASCADE",
+        ["fk_organization_agreement_acceptances_asp_net_users_user_id_organization_id"] = "NO_ACTION",
+        ["fk_organization_agreement_acceptances_organizations_organization_id"] = "NO_ACTION",
         ["fk_outfit_selection_items_categories_category_id_organization_id"] = "NO_ACTION",
         ["fk_outfit_selection_items_outfit_selections_selection_id_organization_id"] = "CASCADE",
         ["fk_outfit_selection_items_product_variants_variant_id_organization_id"] = "NO_ACTION",
@@ -163,9 +168,11 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             }
 
             // (1) Yetim satır: geçerli bir çocuğun yabancı anahtar sütunu var olmayan bir ebeveyne çevrilemez. (Bileşik FK'larda firma sütunu başka FK'larla ortaktır; bu yüzden
-            //     yalnızca kimlik sütunu değiştirilir ve hata, aynı çocuk tablosundaki aynı kimlik sütununu kullanan FK'lardan biri olmalıdır.)
+            //     yalnızca kimlik sütunu değiştirilir ve hata, aynı çocuk tablosundaki, değişen sütunu KULLANAN (ilk sütun olarak veya bileşik anahtarın bir parçası olarak)
+            //     FK'lardan biri olmalıdır: SQL Server birden fazla kısıt ihlal edilince hangisini bildireceğini constraint object_id sırasına göre seçer, "ilk sütun"
+            //     eşleşmesi tek başına yeterli değildir — ör. account_setup_tokens'ta organization_id hem kendi düz FK'sının hem user_id ile bileşik FK'nın parçasıdır.)
             var valid = await Rows.CreateAsync(fk.Child, null, Ct);
-            var siblingNames = Rows.ForeignKeys.Where(f => f.Child == fk.Child && f.ChildColumns[0] == fk.ChildColumns[0]).Select(f => f.Name).ToList();
+            var siblingNames = Rows.ForeignKeys.Where(f => f.Child == fk.Child && f.ChildColumns.Contains(fk.ChildColumns[0])).Select(f => f.Name).ToList();
             var orphan = await Assert.ThrowsAsync<SqlException>(() => Lab.ExecuteAsync($"UPDATE [{fk.Child}] SET [{fk.ChildColumns[0]}] = '{Guid.NewGuid()}' WHERE {Where(fk.Child, valid)}", ct: Ct));
             if (orphan.Number != 547 || !siblingNames.Any(n => orphan.Message.Contains(n, StringComparison.Ordinal)))
             {
@@ -789,7 +796,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
             SELECT STRING_AGG(t.name, N',') WITHIN GROUP (ORDER BY t.name)
               FROM sys.tables t WHERE EXISTS (SELECT 1 FROM sys.foreign_keys fk WHERE fk.parent_object_id = t.object_id AND fk.referenced_object_id = OBJECT_ID(N'dbo.organizations'))
             """, ct: Ct);
-        Assert.Equal("audit_logs,categories,products,stored_files,stores,user_store_roles,users", roots);
+        Assert.Equal("account_setup_tokens,audit_logs,categories,organization_agreement_acceptances,products,stored_files,stores,user_store_roles,users", roots);
     }
 
     /// <summary>
@@ -805,7 +812,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         // Bileşik tenant FK'ları katalogdan değil BEKLENEN ADLARDAN türetilir: bir FK sessizce tek sütuna düşerse (veya silinirse) liste küçülmez, test kırılır.
         // Adı "_organization_id" ile biten ve organizations'a işaret etmeyen her FK bileşik olmalıdır (kimlik + firma [+ şube]).
         var expectedTenantNames = ExpectedForeignKeys.Keys.Where(n => n.EndsWith("_organization_id", StringComparison.Ordinal) && !n.Contains("_organizations_", StringComparison.Ordinal)).ToList();
-        Assert.Equal(37, expectedTenantNames.Count); // 37 bileşik tenant FK'sı (34 değiştirilen + 3 yeni eş/denetim FK'sı)
+        Assert.Equal(39, expectedTenantNames.Count); // 39 bileşik tenant FK'sı (34 değiştirilen + 3 yeni eş/denetim FK'sı + 2 M5.1 FK'sı: kurulum token'ı, sözleşme kabulü)
         var notComposite = expectedTenantNames.Where(n => Rows.ForeignKeys.SingleOrDefault(f => f.Name == n) is not { } f || f.ChildColumns.Count < 2 || !f.ChildColumns.Contains("organization_id")).ToList();
         Assert.True(notComposite.Count == 0, $"Bileşik olması gereken FK'lar değil/yok: {string.Join(", ", notComposite)}");
         var tenantFks = Rows.ForeignKeys.Where(f => expectedTenantNames.Contains(f.Name) && f.Child != f.Parent).ToList();

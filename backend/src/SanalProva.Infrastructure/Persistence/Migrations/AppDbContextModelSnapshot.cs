@@ -1008,7 +1008,7 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_ai_usage_logs_adjustment", "[is_adjustment] = 0 OR ([adjusts_log_id] IS NOT NULL AND [event_key] IS NOT NULL)");
 
-                            t.HasCheckConstraint("ck_ai_usage_logs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
+                            t.HasCheckConstraint("ck_ai_usage_logs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'PaidAiNotEnabled', N'Unknown')");
 
                             t.HasCheckConstraint("ck_ai_usage_logs_reconciliation_state", "[reconciliation_state] IN (N'Open', N'ConfirmedCharged', N'ConfirmedNotCharged', N'WrittenOff')");
                         });
@@ -1311,7 +1311,7 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_generation_jobs_attempts", "attempt >= 0 AND attempt <= max_attempts");
 
-                            t.HasCheckConstraint("ck_generation_jobs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'Unknown')");
+                            t.HasCheckConstraint("ck_generation_jobs_error_code", "[error_code] IN (N'InvalidInput', N'ContentRejected', N'RateLimited', N'Timeout', N'ProviderUnavailable', N'InvalidOutput', N'MaskQualityLow', N'QuotaExceeded', N'NotImplemented', N'OutcomeUncertain', N'BudgetExceeded', N'ProviderNotConfigured', N'PaidAiNotEnabled', N'Unknown')");
 
                             t.HasCheckConstraint("ck_generation_jobs_job_type", "[job_type] IN (N'OutfitSet', N'FreeCombination', N'Recolor', N'ProductSwap', N'VariantPreview')");
 
@@ -1331,6 +1331,21 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<byte[]>("CreationRequestHash")
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .HasColumnName("creation_request_hash")
+                        .IsFixedLength();
+
+                    b.Property<string>("CreationRequestKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("creation_request_key");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit")
@@ -1359,7 +1374,62 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ix_organizations_slug");
 
+                    b.HasIndex("CreatedByUserId", "CreationRequestKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_organizations_creation_request")
+                        .HasFilter("[creation_request_key] IS NOT NULL");
+
                     b.ToTable("organizations", (string)null);
+                });
+
+            modelBuilder.Entity("SanalProva.Domain.Tenancy.OrganizationAgreementAcceptance", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("AcceptedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("accepted_at");
+
+                    b.Property<string>("AgreementVersion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("agreement_version");
+
+                    b.Property<string>("IpHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("ip_hash");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<byte[]>("TextSha256")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .HasColumnName("text_sha256")
+                        .IsFixedLength();
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_organization_agreement_acceptances");
+
+                    b.HasIndex("OrganizationId", "AgreementVersion")
+                        .IsUnique()
+                        .HasDatabaseName("ux_org_agreement_acceptances_org_version");
+
+                    b.HasIndex("UserId", "OrganizationId")
+                        .HasDatabaseName("ix_organization_agreement_acceptances_user_id_organization_id");
+
+                    b.ToTable("organization_agreement_acceptances", (string)null);
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Tenancy.Store", b =>
@@ -1785,6 +1855,79 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SanalProva.Infrastructure.Identity.AccountSetupToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_user_id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("expires_at");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("organization_id");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("purpose");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("revoked_at");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .HasColumnName("token_hash")
+                        .IsFixedLength();
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("used_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_account_setup_tokens");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_account_setup_tokens_organization_id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_account_setup_tokens_token_hash");
+
+                    b.HasIndex("UserId", "OrganizationId")
+                        .HasDatabaseName("ix_account_setup_tokens_user_id_organization_id");
+
+                    b.HasIndex("UserId", "Purpose")
+                        .HasDatabaseName("ix_account_setup_tokens_user_purpose_open")
+                        .HasFilter("[used_at] IS NULL AND [revoked_at] IS NULL");
+
+                    b.ToTable("account_setup_tokens", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_account_setup_tokens_expires_after_created", "[expires_at] > [created_at]");
+
+                            t.HasCheckConstraint("ck_account_setup_tokens_purpose", "[purpose] IN (N'InitialPassword', N'PasswordReset')");
+                        });
+                });
+
             modelBuilder.Entity("SanalProva.Infrastructure.Identity.AppUser", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1890,7 +2033,9 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasName("ak_users_id_organization_id");
 
                     b.HasIndex("NormalizedEmail")
-                        .HasDatabaseName("EmailIndex");
+                        .IsUnique()
+                        .HasDatabaseName("EmailIndex")
+                        .HasFilter("[normalized_email] IS NOT NULL");
 
                     b.HasIndex("NormalizedUserName")
                         .IsUnique()
@@ -2257,6 +2402,8 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                             b1.Property<int>("MaxGenerationsPerSession");
 
+                            b1.Property<bool>("PaidAiEnabled");
+
                             b1.HasKey("OrganizationId");
 
                             b1.ToTable("organizations");
@@ -2272,6 +2419,24 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Settings")
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("SanalProva.Domain.Tenancy.OrganizationAgreementAcceptance", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_organization_agreement_acceptances_organizations_organization_id");
+
+                    b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_organization_agreement_acceptances_asp_net_users_user_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Tenancy.Store", b =>
@@ -2484,6 +2649,24 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("Draft");
+                });
+
+            modelBuilder.Entity("SanalProva.Infrastructure.Identity.AccountSetupToken", b =>
+                {
+                    b.HasOne("SanalProva.Domain.Tenancy.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_account_setup_tokens_organizations_organization_id");
+
+                    b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId", "OrganizationId")
+                        .HasPrincipalKey("Id", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_account_setup_tokens_asp_net_users_user_id_organization_id");
                 });
 
             modelBuilder.Entity("SanalProva.Infrastructure.Identity.AppUser", b =>

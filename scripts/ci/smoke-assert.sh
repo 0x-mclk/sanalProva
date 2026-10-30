@@ -98,6 +98,8 @@ d="$(sql sanalprova_app SP_APP_PW sanalprova_test "DELETE FROM dbo.__ef_migratio
 if echo "$d" | grep -qi "permission"; then ok "sanalprova_app migration gecmisini SILEMIYOR (DENY etkin)"; else bad "sanalprova_app migration gecmisini silebildi veya beklenen hata alinmadi"; fi
 u="$(sql sanalprova_app SP_APP_PW sanalprova_test "UPDATE dbo.ai_cost_reconciliations SET decision = decision")"
 if echo "$u" | grep -qi "permission"; then ok "sanalprova_app mutabakat kayitlarini GUNCELLEYEMIYOR (append-only DENY etkin)"; else bad "mutabakat tablosunda UPDATE reddedilmedi"; fi
+a="$(sql sanalprova_app SP_APP_PW sanalprova_test "UPDATE dbo.organization_agreement_acceptances SET agreement_version = agreement_version")"
+if echo "$a" | grep -qi "permission"; then ok "sanalprova_app sozlesme kabul kayitlarini GUNCELLEYEMIYOR (append-only DENY etkin)"; else bad "sozlesme kabul tablosunda UPDATE reddedilmedi"; fi
 
 # 7) Uretilen gizli degerler gunluklerde gecmiyor
 logs="$(docker compose logs --no-color 2>&1 || true)"
