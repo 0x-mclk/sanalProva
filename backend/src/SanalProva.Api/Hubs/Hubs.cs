@@ -36,9 +36,40 @@ public sealed record DisplayStatusMessage(Guid DisplayId, bool Online, Guid? Cur
 /// (oturum kimliğinin varlığı sızdırılmaz).
 /// </summary>
 [Authorize]
-public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.AgreementGate agreement) : Hub<IStaffClient>
+public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.AgreementGate agreement, StaffConnectionRegistry connections) : Hub<IStaffClient>
 {
     public const string Path = "/hubs/staff";
+
+    public override async Task OnConnectedAsync()
+    {
+        if (Context.User?.GetUserId() is { } userId)
+        {
+            connections.Add(userId, Context);
+        }
+
+        await base.OnConnectedAsync();
+    }
+
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (Context.User?.GetUserId() is { } userId)
+        {
+            connections.Remove(userId, Context.ConnectionId);
+        }
+
+        await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>Hesap pasife alınmış veya şube pasifse yeni abonelik verilmez (açık bağlantı pasife alma anında ayrıca kesilir).</summary>
+    private async Task<bool> IsAccountAndStoreActiveAsync(Guid userId, Guid organizationId, Guid? storeId)
+    {
+        if (!await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId && u.OrganizationId == organizationId && u.IsActive, Context.ConnectionAborted))
+        {
+            return false;
+        }
+
+        return storeId is null || await db.Stores.IgnoreQueryFilters().AsNoTracking().AnyAsync(s => s.Id == storeId && s.OrganizationId == organizationId && s.IsActive, Context.ConnectionAborted);
+    }
 
     public static string SessionGroup(Guid sessionId) => $"session:{sessionId:N}";
 
@@ -63,7 +94,7 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
         var allowed = await db.TryOnSessions.IgnoreQueryFilters().AsNoTracking()
             .Where(s => s.Id == sessionId && s.OrganizationId == organizationId)
             .AnyAsync(s => db.UserStoreRoles.IgnoreQueryFilters().Any(r => r.UserId == userId && r.StoreId == s.StoreId && r.OrganizationId == organizationId), Context.ConnectionAborted);
-        if (!allowed)
+        if (!allowed || !await IsAccountAndStoreActiveAsync(userId.Value, organizationId.Value, null))
         {
             return false;
         }
@@ -96,7 +127,7 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
 
         var allowed = await db.UserStoreRoles.IgnoreQueryFilters().AsNoTracking()
             .AnyAsync(r => r.UserId == userId && r.StoreId == storeId && r.OrganizationId == organizationId, Context.ConnectionAborted);
-        if (!allowed)
+        if (!allowed || !await IsAccountAndStoreActiveAsync(userId.Value, organizationId.Value, storeId))
         {
             return false;
         }
@@ -260,4 +291,43 @@ public sealed class DiagnosticsHub(TimeProvider clock) : Hub
 
     public DiagnosticsPong Ping(string message) =>
         new(message.Length > 100 ? message[..100] : message, clock.GetUtcNow(), Context.ConnectionId);
+}
+
+/// <summary>
+/// Açık personel SignalR bağlantıları (M5.2): hesap pasife alınınca/parolası sıfırlanınca bağlantılar hemen kesilir (yeniden bağlanma çerez doğrulamasında reddedilir).
+/// Tek sunucu kapsamlıdır (bellek içi); çok sunuculu dağıtımda backplane ile birlikte ele alınmalıdır (bkz. docs/06 §8).
+/// </summary>
+public sealed class StaffConnectionRegistry
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, System.Collections.Concurrent.ConcurrentDictionary<string, HubCallerContext>> _byUser = new();
+
+    public void Add(Guid userId, HubCallerContext context) =>
+        _byUser.GetOrAdd(userId, _ => new()).TryAdd(context.ConnectionId, context);
+
+    public void Remove(Guid userId, string connectionId)
+    {
+        if (_byUser.TryGetValue(userId, out var set))
+        {
+            set.TryRemove(connectionId, out _);
+        }
+    }
+
+    /// <summary>Kullanıcının tüm açık bağlantılarını keser; kesilen bağlantı sayısını döner.</summary>
+    public int AbortUser(Guid userId)
+    {
+        if (!_byUser.TryGetValue(userId, out var set))
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var context in set.Values)
+        {
+            context.Abort();
+            count++;
+        }
+
+        set.Clear();
+        return count;
+    }
 }

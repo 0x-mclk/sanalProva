@@ -111,7 +111,7 @@ public sealed class TenantArchitectureTests
         ["SanalProva.Infrastructure/Retention/SessionRetention.cs"] = (11, 0, 3, "KVKK silmesi, saklama süpürmesi ve yetim dosya/kayıt süpürücüsü: oturum/dosya kimliğiyle (firmalar arası bakım); zincirleme silme veritabanı FK'larındadır."),
         // --- TV: cihaz belirteci kimliği; cihaz kendi şubesine/oturumuna bağlıdır
         ["SanalProva.Infrastructure/Displays/DisplayStateService.cs"] = (6, 0, 1, "TV durumu tek yazma noktası: cihaz kimliğiyle; görsel yalnızca cihazın bağlı oturumuna aitse gösterilir. Süresi dolan eşleştirme temizliği (firmasız tablo)."),
-        ["SanalProva.Api/Hubs/Hubs.cs"] = (7, 0, 2, "SignalR: kimlik doğrulanmış bağlantının oturum/şube rolü açıkça sorgulanır (UserStoreRoles); TV hub'ı cihaz belirtecinden gelen cihaz kimliğini kullanır."),
+        ["SanalProva.Api/Hubs/Hubs.cs"] = (8, 0, 2, "SignalR: kimlik doğrulanmış bağlantının oturum/şube rolü ve şubenin etkinliği (firma kimliğiyle açıkça) sorgulanır; TV hub'ı cihaz belirtecinden gelen cihaz kimliğini kullanır."),
         ["SanalProva.Api/Features/Display/DeviceTokenAuthentication.cs"] = (1, 0, 0, "Cihaz belirteci özeti → cihaz (kiracı henüz bilinmez)."),
         ["SanalProva.Api/Features/Display/DisplayEndpoints.cs"] = (1, 0, 1, "Cihaz belirteci kontrolü; eşleştirme talebi (firmasız bekleyen kayıt) yönetici kimliğiyle."),
         // --- Kimlik/yetki: kiracı bağlamı kurulmadan önce

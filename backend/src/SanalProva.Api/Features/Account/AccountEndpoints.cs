@@ -31,7 +31,7 @@ public static class AccountEndpoints
     /// (<c>SETUP_LINK_INVALID</c>): hangi nedenle reddedildiği dışarıya sızmaz.
     /// </summary>
     private static async Task<IResult> SetupPasswordAsync(
-        SetupPasswordRequest request, AppDbContext db, UserManager<AppUser> users, AccountSetupTokenService tokens, AuditTrail audit, HttpContext http, CancellationToken ct)
+        SetupPasswordRequest request, AppDbContext db, UserManager<AppUser> users, AccountSetupTokenService tokens, AuditTrail audit, SanalProva.Api.Hubs.StaffConnectionRegistry connections, HttpContext http, CancellationToken ct)
     {
         http.Response.Headers.CacheControl = "no-store";
         http.Response.Headers.Pragma = "no-cache";
@@ -92,6 +92,11 @@ public static class AccountEndpoints
         audit.RecordFor(user.OrganizationId, user.Id, isReset ? "Account.PasswordReset" : "Account.PasswordSet", nameof(AppUser), user.Id);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        if (isReset)
+        {
+            connections.AbortUser(user.Id); // eski parolayla açılmış SignalR bağlantıları da kesilir
+        }
+
         return TypedResults.NoContent();
     }
 

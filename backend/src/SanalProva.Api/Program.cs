@@ -106,6 +106,7 @@ builder.Services.AddScoped<SessionReader>();
 builder.Services.AddScoped<AuditTrail>();
 builder.Services.AddScoped<PlatformOnboardingService>();
 builder.Services.AddScoped<StaffManagementService>();
+builder.Services.AddSingleton<StaffConnectionRegistry>();
 builder.Services.AddSingleton<IServiceAgreementSource, StaticServiceAgreementSource>();
 builder.Services.AddSingleton<AgreementGate>();
 builder.Services.AddSingleton<SanalProva.Infrastructure.Generation.IJobNotifier, SignalRJobNotifier>();

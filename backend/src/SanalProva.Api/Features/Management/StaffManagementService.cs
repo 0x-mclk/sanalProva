@@ -48,7 +48,7 @@ public sealed class StaffException(StaffFailure failure) : Exception(failure.ToS
 /// "Owner her şubede" değişmezi eşzamanlı isteklerle bozulamaz. Kişisel veri (e-posta, ad) denetim kaydına yazılmaz; düz token hiçbir yerde saklanmaz.
 /// </summary>
 public sealed class StaffManagementService(
-    AppDbContext db, UserManager<AppUser> users, AccountSetupTokenService tokens, AuditTrail audit, IOptions<SetupTokenOptions> options, TimeProvider clock)
+    AppDbContext db, UserManager<AppUser> users, AccountSetupTokenService tokens, AuditTrail audit, IOptions<SetupTokenOptions> options, TimeProvider clock, SanalProva.Api.Hubs.StaffConnectionRegistry connections)
 {
     /// <summary>Parola sıfırlama bağlantısının ömrü (saat): ilk kurulum bağlantısından kısa.</summary>
     public const int ResetLinkTtlHours = 24;
@@ -211,6 +211,11 @@ public sealed class StaffManagementService(
         }
 
         await transaction.CommitAsync(ct);
+        if (!isActive)
+        {
+            connections.AbortUser(user.Id); // açık SignalR bağlantıları da hemen kesilir
+        }
+
         var stores = await LoadStoresAsync(organizationId, ct);
         return ToDto(user, actor, assignments, stores, null);
     }
