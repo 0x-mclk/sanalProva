@@ -22,7 +22,8 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | 4 Gerçek AI entegrasyonu (FASHN, Gemini) | ✅ kod tamamlandı (mock/sözleşme testleri geçti); **canlı API testi yapılmadı, ücretli çağrılar kapalı** — canlı test ve Aşama 5 için kullanıcı onayı bekleniyor ([docs/11](docs/11-ai-entegrasyon-plani-ve-test.md)) |
 | 4b Tek kaftan modelleri (Seedream 5 Flash, GPT Image 2.5, Pruna) | ✅ kod tamamlandı, mock/sözleşme testleri geçti; **canlı test onay bekliyor** ([docs/12](docs/12-tek-kaftan-model-entegrasyonu.md)) |
 | 5 Revizyon motoru (Gemini edit, SAM 2 + OpenCV) | bekliyor (onay gerekir) |
-| M5.1 Kontrollü onboarding (a–i) | ✅ yerelde tamamlandı ve doğrulandı (birim 266, entegrasyon 324, React 127, Playwright 10/10); **toplu GitHub CI doğrulaması kullanıcıda**; sözleşme metni TASLAK ([docs/13](docs/13-m5-1-kontrollu-onboarding.md), [docs/14](docs/14-platform-operator-komutlari.md)). Sıradaki: M5.2 şube/personel yönetimi (onay bekliyor) |
+| M5.1 Kontrollü onboarding (a–i) | ✅ yerelde tamamlandı ve doğrulandı (birim 266, entegrasyon 324, React 127, Playwright 10/10); **toplu GitHub CI doğrulaması kullanıcıda**; sözleşme metni TASLAK ([docs/13](docs/13-m5-1-kontrollu-onboarding.md), [docs/14](docs/14-platform-operator-komutlari.md)). Sıradaki: M5.2 (aşağıda) |
+| M5.2 Şube ve personel yönetimi (a–e) | ✅ yerelde tamamlandı ve doğrulandı (backend 624 test, React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/15](docs/15-m5-2-sube-personel-yonetimi.md)). Sıradaki: M5.3 (onay bekliyor) |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 
@@ -100,6 +101,14 @@ TV eşleştirme (6 haneli kod, HMAC'li, tek kullanımlık, kullanıcı başına 
 - **Ücretli AI kapısı:** `OrganizationSettings.PaidAiEnabled` (varsayılan false, fail-closed): kabulde (`/generations`, `/retry`) ve `BudgetGuard.ReserveAsync` içinde; mock mod etkilenmez. Test fixture'ı varsayılanı **true** verir (`TestData.CreateTenantAsync(paidAiEnabled:)`).
 - **Fixture'lar:** `TestData.CreateTenantAsync` güncel sözleşmeyi kabul edilmiş yazar (`acceptAgreement:false` ile kapatılır); demo tohumu ve E2E `isolation-seed.sql` de öyle.
 - **Tuzaklar:** (1) ikinci test sunucusu için `ApiTestBase.DerivedHost` kullanın: `WithWebHostBuilder` üretim işçisini bırakırsa başka testlerin işlerini kapıp yarıda bırakır. (2) Aynı Idempotency-Key ile eşzamanlı isteklerde "slug/e-posta alınmış" kararından önce tekrar yeniden değerlendirilir (aksi halde 409). (3) Aynı sekmede ikinci kurulum bağlantısı yalnızca `hashchange` üretir (router yakalamaz): `SetupPasswordPage` bu olayı dinler. (4) Playwright onboarding senaryosu operatör CLI'sini çalıştırır: API'nin önceden derlenmiş olması (`dotnet build backend/src/SanalProva.Api`) ve `SANALPROVA_E2E_SETUP_TOKEN_KEY` gerekir (`e2e-env.ps1 up` ve CI üretir). (5) Süreç testi API dll'ini test yapılandırmasına (Debug/Release) göre arar. (6) Platform yöneticisinin hiçbir firmada mağaza rolü yoktur: katalog/oturum uçları 403.
+
+## M5.2'de gelenler (şube ve personel yönetimi)
+
+- **Şube** (`/management/stores`, yalnızca Owner): ekle/düzenle/pasife al; Owner satırları her şubeye yayılır (değişmez); son etkin şube pasife alınamaz; pasif şubenin TV'leri iptal olur.
+- **Personel** (`/management/users`, Owner + Manager; kurallar `StaffManagementService`'te, her işlemde güncel rollerden, `AppLocks.OrganizationMembers` kilidi altında): davet (parolasız hesap + 72 sa tek kullanımlık bağlantı, yalnızca davet yanıtında), şube/rol ataması, pasife alma, parola sıfırlama bağlantısı (24 sa, `PasswordReset`), bağlantı yenileme/iptal. Manager yalnızca kendi şubelerinde Staff yönetir; son Owner korunur; kimse kendi rolünü/durumunu değiştiremez. Yeni migration yok (`InitialPassword` amacı davette de kullanılır).
+- **Oturum güvenliği:** `ActiveUserCookieValidator` her istekte hesabın etkinliği/firması/güvenlik damgasını doğrular (Identity varsayılanı 30 dk'da bir ve pasifliğe bakmaz); pasife alma ve şifre sıfırlama damgayı yeniler ve `StaffConnectionRegistry` ile açık StaffHub bağlantılarını keser; hub pasif hesap/şubeye abonelik vermez.
+- React: `frontend/src/features/management` (şube ve personel ekranları, Ana sayfa menüsünden), bağlantı `SetupLinkReveal` ile bir kez gösterilir (`useMutation` kullanılmaz). Playwright: `management.spec.ts`.
+- **Tuzak:** `TenantArchitectureTests` envanteri (`Hubs.cs` 8 atlama). Yönetim servisleri `IgnoreQueryFilters` kullanmaz (EF filtresi + açık firma koşulu).
 
 ## Yerel çalıştırma
 

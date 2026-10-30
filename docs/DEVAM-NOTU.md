@@ -1,4 +1,4 @@
-﻿# Devam notu (son güncelleme: M5.1a–i tamamlandı, yerelde doğrulandı; toplu GitHub CI doğrulaması bekliyor — sıradaki aşama M5.2 onay bekliyor)
+﻿# Devam notu (son güncelleme: M5.2a–e tamamlandı, yerelde doğrulandı; push/CI kullanıcıda — sıradaki aşama M5.3 onay bekliyor)
 
 Kısa durum özeti; ayrıntı için `CLAUDE.md` ve commit geçmişi. Kural: her aşama bitince dur, raporla, onay al. **Sıradaki geliştirme aşaması için kullanıcı onayı beklenir (aşağıda \
 
@@ -134,6 +134,11 @@ CI'de lab veritabanı gerektiren testler (`PlatformCommandsTests` lab senaryolar
 7. Platform firması sözleşmeye tabidir (yalnızca `/platform/*` ve muaf uçlar kullanılır); mağaza ekranı gerekiyorsa o firma da kabul etmelidir.
 8. `sanalprova_test`'e `harden-agreement-acceptances.sql` elle uygulandı (DENY); CI/Compose `db-harden` bunu otomatik uygular, üretimde dağıtım adımı olarak çalıştırılmalı.
 9. Mevcut A grubu riskler (yedek/geri yükleme, saklama politikası, DPA, canlı AI/TV denemesi) değişmedi.
+
+## M5.2 sonucu — şube ve personel yönetimi (a–e)
+
+Ayrıntı: [docs/15](15-m5-2-sube-personel-yonetimi.md). Yerelde: backend 624 test (4 beklenen atlama), React 140, Playwright 12/12 (izole `sanalprova_e2e`). CI/push yapılmadı. Commit'ler: a4fce8e (a), d846c2e (b/c), eb7d34a (d), d8d5076 + 1b022c6 (SignalR kesme, belge), 2d60f90 (e).
+**Kalan riskler/eksikler:** e-posta gönderimi yok (bağlantı yönetici aracılığıyla iletilir); davet/yeniden üretimde sunucu idempotency yok; SignalR kesme tek sunucu belleğinde; açık hub grup üyelikleri rol değişikliğinde yeniden bağlanana kadar sürebilir; firma pasifleştirme yok; operatör kimliği denetimde (MFA yok) M5.1 riskleri geçerli. Not: çalışma sırasında iki ayrı Claude oturumu aynı ağaçta çalıştı ve üç dosya kendiliğinden kayboldu (yeniden yazıldı); ortak ağaçta `git checkout/clean/stash` kullanılmamalı.
 
 ## Açık riskler (üç grup)
 
