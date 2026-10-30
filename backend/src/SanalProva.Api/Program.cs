@@ -11,6 +11,7 @@ using SanalProva.Api.Features.Displays;
 using SanalProva.Api.Features.Files;
 using SanalProva.Api.Features.Generation;
 using SanalProva.Api.Features.Health;
+using SanalProva.Api.Features.Management;
 using SanalProva.Api.Features.Platform;
 using SanalProva.Api.Features.TryOn;
 using SanalProva.Api.Hubs;
@@ -57,6 +58,8 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? CookieSecurePolicy.SameAsRequest : CookieSecurePolicy.Always;
     options.ExpireTimeSpan = TimeSpan.FromHours(12);
     options.SlidingExpiration = true;
+    // Pasife alınan / şifresi sıfırlanan kullanıcının açık çerezi bir sonraki istekte düşer (Identity varsayılanı 30 dk'da bir ve pasifliği hiç denetlemez)
+    options.Events.OnValidatePrincipal = ActiveUserCookieValidator.ValidateAsync;
     options.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
     options.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
 });
@@ -155,6 +158,7 @@ api.MapDisplayManagementEndpoints();
 api.MapUsageEndpoints();
 api.MapPlatformCostEndpoints();
 api.MapPlatformOrganizationEndpoints();
+api.MapStoreManagementEndpoints();
 api.MapAiQualityEndpoints();
 api.MapAiModelEndpoints();
 app.MapDisplayDeviceEndpoints();

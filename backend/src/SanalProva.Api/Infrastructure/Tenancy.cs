@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -203,4 +204,39 @@ public static class AccessExtensions
     public static TBuilder RequireOrganizationRole<TBuilder>(this TBuilder builder, StoreRole minimum)
         where TBuilder : IEndpointConventionBuilder =>
         builder.RequireAuthorization().AddEndpointFilter(new OrganizationRoleFilter(minimum));
+}
+
+/// <summary>
+/// Çerez doğrulaması (M5.2a): Identity'nin varsayılan doğrulayıcısı güvenlik damgasını yalnızca 30 dakikada bir denetler ve pasif hesabı hiç denetlemez;
+/// pasife alınan, rolü/şifresi değişen kullanıcının açık oturumu bu yüzden sürerdi. Bu doğrulayıcı HER istekte kullanıcıyı (yalnızca üç alan) okur:
+/// hesap yok/pasif, firma uyuşmuyor veya güvenlik damgası değişmişse çerez reddedilir. Çerezi yeniden yazmaz (başlık/Set-Cookie davranışı değişmez).
+/// </summary>
+public static class ActiveUserCookieValidator
+{
+    public static async Task ValidateAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieValidatePrincipalContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var principal = context.Principal;
+        var userId = principal?.GetUserId();
+        var organizationId = principal?.GetOrganizationId();
+        var stamp = principal?.FindFirstValue(context.HttpContext.RequestServices.GetRequiredService<IOptions<IdentityOptions>>().Value.ClaimsIdentity.SecurityStampClaimType);
+        if (userId is null || organizationId is null || stamp is null)
+        {
+            await RejectAsync(context);
+            return;
+        }
+
+        var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+        var current = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new { u.IsActive, u.SecurityStamp, u.OrganizationId }).SingleOrDefaultAsync(context.HttpContext.RequestAborted);
+        if (current is null || !current.IsActive || current.OrganizationId != organizationId || !string.Equals(current.SecurityStamp, stamp, StringComparison.Ordinal))
+        {
+            await RejectAsync(context);
+        }
+    }
+
+    private static async Task RejectAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieValidatePrincipalContext context)
+    {
+        context.RejectPrincipal();
+        await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+    }
 }

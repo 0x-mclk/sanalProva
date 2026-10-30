@@ -1940,6 +1940,135 @@
         }
       }
     },
+    "/api/v1/management/stores": {
+      "get": {
+        "tags": [
+          "Yönetim"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StoreAdminDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Yönetim"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreAdminDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/management/stores/{id}": {
+      "put": {
+        "tags": [
+          "Yönetim"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreAdminDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/management/stores/{id}/status": {
+      "patch": {
+        "tags": [
+          "Yönetim"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStoreStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoreAdminDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/ai-quality": {
       "get": {
         "tags": [
@@ -3042,6 +3171,45 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "CreateStoreRequest": {
+        "required": [
+          "name",
+          "code",
+          "timezone",
+          "dailyGenerationQuota"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 30,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 60,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dailyGenerationQuota": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -4805,6 +4973,17 @@
           }
         }
       },
+      "SetStoreStatusRequest": {
+        "required": [
+          "isActive"
+        ],
+        "type": "object",
+        "properties": {
+          "isActive": {
+            "type": "boolean"
+          }
+        }
+      },
       "SetupLinkResponse": {
         "required": [
           "organizationId",
@@ -4902,6 +5081,52 @@
           },
           "role": {
             "$ref": "#/components/schemas/StoreRole"
+          }
+        }
+      },
+      "StoreAdminDto": {
+        "required": [
+          "id",
+          "name",
+          "code",
+          "timezone",
+          "dailyGenerationQuota",
+          "isActive",
+          "memberCount",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "dailyGenerationQuota": {
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "memberCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -5113,6 +5338,42 @@
             "items": {
               "$ref": "#/components/schemas/TvImageDto"
             }
+          }
+        }
+      },
+      "UpdateStoreRequest": {
+        "required": [
+          "name",
+          "code",
+          "timezone",
+          "dailyGenerationQuota"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 30,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$",
+            "type": "string"
+          },
+          "timezone": {
+            "maxLength": 60,
+            "minLength": 0,
+            "type": "string"
+          },
+          "dailyGenerationQuota": {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": [
+              "null",
+              "integer"
+            ],
+            "format": "int32"
           }
         }
       },
@@ -5418,6 +5679,9 @@
     },
     {
       "name": "Platform"
+    },
+    {
+      "name": "Yönetim"
     },
     {
       "name": "Dev"

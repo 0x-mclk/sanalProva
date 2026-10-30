@@ -2031,6 +2031,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/management/stores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StoreAdminDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateStoreRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StoreAdminDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/management/stores/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateStoreRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StoreAdminDto"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/management/stores/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetStoreStatusRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["StoreAdminDto"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/admin/ai-quality": {
         parameters: {
             query?: never;
@@ -2559,6 +2699,13 @@ export interface components {
         CreateSessionRequest: {
             customerLabel: null | string;
         };
+        CreateStoreRequest: {
+            name: string;
+            code: string;
+            timezone: null | string;
+            /** Format: int32 */
+            dailyGenerationQuota: null | number;
+        };
         CsrfResponse: {
             token: string;
             headerName: string;
@@ -2991,6 +3138,9 @@ export interface components {
             /** Format: int64 */
             expectedVersion: null | number;
         };
+        SetStoreStatusRequest: {
+            isActive: boolean;
+        };
         SetupLinkResponse: {
             /** Format: uuid */
             organizationId: string;
@@ -3018,6 +3168,20 @@ export interface components {
             name: string;
             code: string;
             role: components["schemas"]["StoreRole"];
+        };
+        StoreAdminDto: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            code: string;
+            timezone: string;
+            /** Format: int32 */
+            dailyGenerationQuota: null | number;
+            isActive: boolean;
+            /** Format: int32 */
+            memberCount: number;
+            /** Format: date-time */
+            createdAt: string;
         };
         /** @enum {unknown} */
         StoreRole: "Staff" | "Manager" | "Owner";
@@ -3072,6 +3236,13 @@ export interface components {
             deviceName: string;
             hasSession: boolean;
             images: components["schemas"]["TvImageDto"][];
+        };
+        UpdateStoreRequest: {
+            name: string;
+            code: string;
+            timezone: string;
+            /** Format: int32 */
+            dailyGenerationQuota: null | number;
         };
         UsageByDay: {
             /** Format: date */

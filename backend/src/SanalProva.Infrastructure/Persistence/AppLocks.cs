@@ -23,6 +23,9 @@ public static class AppLocks
     /// <summary>Firmanın AI bütçe kapısı: harcama + açık rezervasyon hesabı ve yeni rezervasyonun yazılması bu kilit altında, tek transaction'da yapılır.</summary>
     public static string OrganizationBudget(Guid organizationId) => $"sanalprova:org-budget:{organizationId:N}";
 
+    /// <summary>Firmanın şube/üye/rol değişiklikleri (M5.2): son Owner koruması, Owner satırlarının her şubeye yayılması ve rol değişimleri bu kilit altında, tek transaction'da yapılır.</summary>
+    public static string OrganizationMembers(Guid organizationId) => $"sanalprova:org-members:{organizationId:N}";
+
     /// <summary>Açık transaction içinde özel (exclusive) kilit alır; alınamazsa <see cref="NotGrantedError"/> numaralı SqlException fırlatır.</summary>
     public static async Task AcquireExclusiveAsync(AppDbContext db, string resource, TimeSpan timeout, CancellationToken ct)
     {
