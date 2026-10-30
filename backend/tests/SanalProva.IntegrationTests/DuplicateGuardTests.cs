@@ -43,6 +43,7 @@ public sealed class RealModeApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Security:LoginRateLimitPerMinute", "100000");
         builder.UseSetting("Storage:LocalRoot", _storageRoot);
         builder.UseSetting("Storage:SigningKey", new string('t', 48));
+        builder.UseSetting("Security:SetupTokenKey", new string('s', 48));
         builder.UseSetting("ImageWorker:BaseUrl", "http://127.0.0.1:1");
         builder.UseSetting("Generation:UseMockProviders", "false");
         builder.UseSetting("Generation:Budget:AllowPaidCalls", "false");

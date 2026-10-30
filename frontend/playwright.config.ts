@@ -44,6 +44,7 @@ export default defineConfig({
         ConnectionStrings__Main: database,
         Storage__LocalRoot: storage,
         Storage__SigningKey: process.env.SANALPROVA_E2E_SIGNING_KEY ?? '',
+        Security__SetupTokenKey: process.env.SANALPROVA_E2E_SETUP_TOKEN_KEY ?? '',
         Seed__DevPassword: process.env.E2E_PASSWORD ?? '',
         Generation__UseMockProviders: 'true',
         Generation__Budget__AllowPaidCalls: 'false',

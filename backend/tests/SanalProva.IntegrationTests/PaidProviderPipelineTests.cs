@@ -105,6 +105,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
             ["ConnectionStrings:Main"] = Factory.TestConnectionString,
             ["Storage:LocalRoot"] = Factory.StorageRoot,
             ["Storage:SigningKey"] = new string('t', 48),
+            ["Security:SetupTokenKey"] = new string('s', 48),
             ["ImageWorker:BaseUrl"] = "http://127.0.0.1:1",
             ["Generation:UseMockProviders"] = "false",
             ["Generation:RetryBackoffBaseSeconds"] = retryBackoffSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),

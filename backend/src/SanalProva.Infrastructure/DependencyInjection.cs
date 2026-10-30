@@ -10,6 +10,7 @@ using SanalProva.Infrastructure.Ai.Fashn;
 using SanalProva.Infrastructure.Ai.Gemini;
 using SanalProva.Infrastructure.Ai.Mock;
 using SanalProva.Infrastructure.Ai.Pruna;
+using SanalProva.Infrastructure.Identity;
 using SanalProva.Infrastructure.ImageWorker;
 using SanalProva.Infrastructure.Persistence;
 using SanalProva.Infrastructure.Storage;
@@ -45,6 +46,13 @@ public static class DependencyInjection
         services.AddSingleton<FileUrlSigner>();
         services.AddSingleton<IImageStorageService, LocalFileStorage>();
         services.AddSingleton<Images.ImageStore>();
+
+        // Hesap kurulum/parola belirleme token'ları (M5.1b)
+        services.AddOptions<SetupTokenOptions>()
+            .Bind(configuration.GetSection(SetupTokenOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddScoped<AccountSetupTokenService>();
 
         // AI sağlayıcıları — her biri DI anahtarıyla kaydedilir; GenerationStrategy yapılandırmaya göre seçer
         services.AddOptions<GenerationSettings>().Bind(configuration.GetSection(GenerationSettings.Section));

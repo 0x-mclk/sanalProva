@@ -17,6 +17,7 @@ $lines = @(
     "SP_MIGRATOR_PW=$(New-Secret 16)",
     "SP_APP_PW=$(New-Secret 16)",
     "STORAGE_SIGNING_KEY=$(New-Secret 24)",
+    "SETUP_TOKEN_KEY=$(New-Secret 24)",
     "IMAGE_WORKER_KEY=$(New-Secret 16)"
 )
 $rng.Dispose()

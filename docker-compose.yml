@@ -120,6 +120,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${API_ENVIRONMENT:-Development}
       ConnectionStrings__Main: Server=sqlserver,1433;Database=sanalprova_dev;User ID=sanalprova_app;Password=${SP_APP_PW:?};Encrypt=True;TrustServerCertificate=True;Application Name=SanalProva.Api
       Storage__SigningKey: ${STORAGE_SIGNING_KEY:?}
+      Security__SetupTokenKey: ${SETUP_TOKEN_KEY:?}
       ImageWorker__BaseUrl: http://image-worker:8090
       ImageWorker__InternalKey: ${IMAGE_WORKER_KEY:?}
       # Gerçek AI çağrısı yok: mock açık, ücretli çağrılar kapalı, anahtarlar boş

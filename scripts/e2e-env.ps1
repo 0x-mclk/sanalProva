@@ -42,11 +42,14 @@ if ($Action -eq 'up') {
     $env:SANALPROVA_E2E_STORAGE = $storage
     $env:E2E_PASSWORD = "Aa1!" + $secret
     $env:SANALPROVA_E2E_SIGNING_KEY = $secret + $secret
+    $setupBytes = New-Object byte[] 24
+    $setupRng = [System.Security.Cryptography.RandomNumberGenerator]::Create(); $setupRng.GetBytes($setupBytes); $setupRng.Dispose()
+    $env:SANALPROVA_E2E_SETUP_TOKEN_KEY = [Convert]::ToBase64String($setupBytes).Replace('+', 'a').Replace('/', 'b').Replace('=', 'c')
     Write-Host "E2E ortami hazir: $database, depo $storage"
 }
 else {
     if ($env:SANALPROVA_E2E_STORAGE -and $env:SANALPROVA_E2E_STORAGE -like '*sanalprova-e2e*') { Remove-Item -Recurse -Force $env:SANALPROVA_E2E_STORAGE -ErrorAction SilentlyContinue }
     Invoke-Admin "IF DB_ID(N'$database') IS NOT NULL BEGIN ALTER DATABASE [$database] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [$database]; END"
-    foreach ($n in 'SANALPROVA_E2E_DB', 'SANALPROVA_E2E_STORAGE', 'E2E_PASSWORD', 'SANALPROVA_E2E_SIGNING_KEY') { Remove-Item "Env:$n" -ErrorAction SilentlyContinue }
+    foreach ($n in 'SANALPROVA_E2E_DB', 'SANALPROVA_E2E_STORAGE', 'E2E_PASSWORD', 'SANALPROVA_E2E_SIGNING_KEY', 'SANALPROVA_E2E_SETUP_TOKEN_KEY') { Remove-Item "Env:$n" -ErrorAction SilentlyContinue }
     Write-Host "E2E ortami silindi."
 }

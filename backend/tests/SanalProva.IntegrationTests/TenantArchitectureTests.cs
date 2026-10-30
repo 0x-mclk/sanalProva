@@ -106,6 +106,7 @@ public sealed class TenantArchitectureTests
         ["SanalProva.Infrastructure/Generation/BudgetGuard.cs"] = (5, 0, 1, "Bütçe toplamı ve açık rezervasyonlar: sorgular açıkça organization_id ile sınırlı; rezervasyon yazımı iş kimliği + deneme numarası + Running koşuluyla."),
         ["SanalProva.Infrastructure/Persistence/AppLocks.cs"] = (0, 1, 0, "sp_getapplock: veri değil kilit; kaynak adı şube/oturum kimliğidir."),
         ["SanalProva.Infrastructure/Persistence/AppDbContext.cs"] = (1, 0, 0, "Yalnızca belge yorumu (\"IgnoreQueryFilters()\" ile aşılır): kod kullanımı değil."),
+        ["SanalProva.Infrastructure/Identity/AccountSetupTokenService.cs"] = (3, 2, 0, "M5.1b: kurulum token'ları hem platform yöneticisinin (hedef firma kendi bağlamında değil) hem anonim tüketicinin (kiracı bağlamı hiç yok) işlemesi gerekir; satırlar token_hash/kullanıcı+amaç ile aranır, firma sütunu yalnızca FK tutarlılığı içindir. (1 kullanım belge yorumunda.) Tüketim/iptal atomik koşullu UPDATE (ham SQL) ile yapılır."),
         // --- Saklama / KVKK: oturum kimliğiyle silme (süpürücü firmalar arası çalışır)
         ["SanalProva.Infrastructure/Retention/SessionRetention.cs"] = (11, 0, 3, "KVKK silmesi, saklama süpürmesi ve yetim dosya/kayıt süpürücüsü: oturum/dosya kimliğiyle (firmalar arası bakım); zincirleme silme veritabanı FK'larındadır."),
         // --- TV: cihaz belirteci kimliği; cihaz kendi şubesine/oturumuna bağlıdır

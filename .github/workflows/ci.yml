@@ -196,6 +196,7 @@ jobs:
           SANALPROVA_E2E_DB: Server=127.0.0.1,14331;Database=sanalprova_e2e;User ID=sanalprova_app;Password=${{ env.SP_APP_PW }};Encrypt=True;TrustServerCertificate=True
           SANALPROVA_E2E_STORAGE: ${{ runner.temp }}/e2e-storage
           SANALPROVA_E2E_SIGNING_KEY: ${{ env.STORAGE_SIGNING_KEY }}
+          SANALPROVA_E2E_SETUP_TOKEN_KEY: ${{ env.SETUP_TOKEN_KEY }}
         run: npx playwright test
       - name: Artifact klasorunu gizli deger icin tara (iceren dosyalar silinir)
         if: failure()
