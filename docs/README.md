@@ -26,6 +26,7 @@ Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıkt
 | 15 | [Şube ve personel yönetimi](15-m5-2-sube-personel-yonetimi.md) | **M5.2**: şube CRUD, personel daveti, rol/şube ataması, pasife alma, yetki matrisi |
 | 16 | [Firma bazlı bütçe ve mutabakat](16-m5-3-butce-ve-mutabakat.md) | **M5.3**: firma bütçe sınırları (min(tavan, firma)), iptal edilmiş işlerin rezervasyon kapanışı, belirsiz maliyet |
 | 17 | [Firma bazlı kredi sistemi](17-m5-4-kredi-sistemi.md) | **M5.4**: kredi hesabı, değiştirilemez defter, rezervasyon/kapanış, tarife, operatör yüklemesi, kredi ekranı (ödeme yok: M5.5) |
+| 18 | [Pilot hazırlık denetimi](18-pilot-hazirlik-denetimi.md) | Uçtan uca denetim: engelleyici / önemli / sonraya sınıflandırması ve çözüm sırası |
 | 11 | [Aşama 4: AI entegrasyon planı, maliyet sınırları ve kontrollü test planı](11-ai-entegrasyon-plani-ve-test.md) | Doğrulanan API bilgileri, bütçe kapıları, test sonuçları, **onay bekleyen canlı test planı** |
 
 ## Özet: temel mimari kararlar
