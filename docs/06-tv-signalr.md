@@ -145,3 +145,5 @@ Aşama 3'te yukarıdaki tasarıma göre yapılan **sapmalar ve eklemeler** (kod:
 
 **Tek sunucu sınırı / çoklu sunucu gereksinimleri**
 İlk sürüm tek API örneğiyle çalışır. Birden fazla örnek için: (1) SignalR **backplane** (Redis veya Azure SignalR) — aksi halde bir örnekte yapılan değişikliğin bildirimi başka örnekteki TV'ye ulaşmaz (durum veritabanında doğru kalır, TV en geç 15 sn'lik yoklamada alır); (2) `DisplayPresence` (çevrimiçi durumu) ve `ClaimAttemptLimiter` (hatalı kod sayacı) bellek içidir → `last_seen_at` ve paylaşılan depoya taşınmalı; (3) IP hız sınırları örnek başınadır. Sunucu önünde reverse proxy WebSocket/SSE'yi (`/hubs`) ve uzun bağlantıları desteklemelidir.
+
+**Pilot öncesi kapanış (personel hub'ı):** bağlantı/abonelik izleme, anında kesme, periyodik yeniden doğrulama süpürücüsü, kilitli oturumda bağlanma reddi ve çok sunuculu gereksinimler: [docs/21 §3](21-pilot-oncesi-kapanis.md).

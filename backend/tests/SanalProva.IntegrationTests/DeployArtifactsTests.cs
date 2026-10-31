@@ -24,6 +24,32 @@ public sealed class DeployArtifactsTests
     // ---------------------------------------------------------------- Caddy
 
     [Fact]
+    public void Caddy_icerik_guvenlik_politikasi_siki_tanimlidir_ve_satir_ici_betik_gerektirmez()
+    {
+        var site = Read("frontend/caddy/common.caddy");
+        var match = Regex.Match(site, @"Content-Security-Policy\s+""([^""]+)""");
+        Assert.True(match.Success, "common.caddy içinde Content-Security-Policy yok.");
+        var policy = match.Groups[1].Value;
+        foreach (var directive in new[] { "default-src 'self'", "script-src 'self'", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "worker-src 'self'", "connect-src 'self' wss://{http.request.host}" })
+        {
+            Assert.Contains(directive, policy, StringComparison.Ordinal);
+        }
+
+        // Betik kaynağı gevşetilemez: unsafe-inline/unsafe-eval/joker/harici kaynak yok (stil için unsafe-inline Mantine nedeniyle bilinçli istisnadır)
+        var script = Regex.Match(policy, "script-src([^;]*)").Groups[1].Value;
+        Assert.DoesNotContain("unsafe", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("*", policy, StringComparison.Ordinal);
+        Assert.DoesNotContain("http:", policy, StringComparison.Ordinal);
+
+        // Derlenmemiş TV girişinde satır içi betik yok (CSP script-src 'self'); yedek betikler harici dosyadır ve gerçekten vardır
+        var tv = Read("frontend/tv.html");
+        Assert.DoesNotMatch(@"<script(?![^>]*src=)[^>]*>", tv);
+        Assert.True(File.Exists(MigrationLab.RepoFile("frontend/public/tv-nomodule.js")));
+        Assert.True(File.Exists(MigrationLab.RepoFile("frontend/public/tv-watchdog.js")));
+        Assert.DoesNotMatch(@"<script(?![^>]*src=)[^>]*>", Read("frontend/index.html"));
+    }
+
+    [Fact]
     public void Caddy_yonlendirmeleri_api_hubs_files_tv_ve_spa_icin_tanimlidir()
     {
         var site = Read("frontend/caddy/common.caddy");

@@ -104,6 +104,7 @@ public sealed class DatabaseIntegrityTests(IntegrityLab fixture) : IClassFixture
         ["fk_ai_usage_logs_stores_store_id_organization_id"] = "NO_ACTION",
         ["fk_audit_logs_organizations_organization_id"] = "NO_ACTION",
         ["fk_audit_logs_stores_store_id_organization_id"] = "NO_ACTION",
+        ["fk_auth_sessions_asp_net_users_user_id"] = "CASCADE", // oturum satırı kullanıcıya bağlıdır; kullanıcı silinirse gider
         ["fk_categories_organizations_organization_id"] = "NO_ACTION",
         ["fk_consent_records_asp_net_users_recorded_by_user_id_organization_id"] = "NO_ACTION",
         ["fk_consent_records_tryon_sessions_session_id_organization_id"] = "CASCADE",

@@ -225,7 +225,7 @@ Sonrasında: `/maliyet` ve sağlayıcı panelinden gerçek harcamayı çıkarın
 ## 16. Bilinen sınırlar (Faz A sonrası kalanlar)
 
 - Docker ile gerçek dağıtım ve Caddy/TLS davranışı doğrulanmadı (§0); CI `deploy-package` işi yalnızca yapıyı doğrular.
-- CSP başlığı yok (SPA bir tarayıcıda denenmeden katı CSP riskli); diğer güvenlik başlıkları var.
+- **CSP eklendi** ([docs/21 §5](21-pilot-oncesi-kapanis.md)): betik tarafı katı, stil için `unsafe-inline` bilinçli istisna. Gerçek Caddy/TLS ile ve hedef tablet/TV tarayıcılarında denenmedi: ilk prova dağıtımında tarayıcı konsolunda `Content Security Policy` ihlali aranmalı; sorun olursa başlığı `Content-Security-Policy-Report-Only`'ye çevirip düzeltin (kuralı gevşetmeden önce kaynağı belirleyin).
 - `sa` hesabı açıktır (geri yükleme/sertleştirme için gerekli); parolası yalnızca kasadadır ve SQL portu yayımlanmaz.
 - Tek sunucu: SignalR çoklu sunucu yedek düzlemi, S3 depo, otomatik yük devretme yok.
 - Yedek **uzak kopyası** otomatik değildir (operatör kurar); izleme/uyarı otomasyonu yalnızca kontrol listesidir.

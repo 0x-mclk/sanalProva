@@ -141,6 +141,8 @@ export class StaffApi {
       multipart: { file: { name: 'sentetik.png', mimeType: 'image/png', buffer: syntheticPortraitPng(900, 1500, seed) } },
     });
     const photo = await this.json<{ id: string }>(upload);
+    // Üretim kabulü personel fotoğraf onayını sunucuda arar (arayüzdeki üç maddelik onayın API karşılığı)
+    await this.send('POST', `/api/v1/sessions/${session.id}/photos/${photo.id}/approval`, { singlePersonFullBody: true, frontalUprightPose: true, sharpAndWellLit: true });
     return { sessionId: session.id, photoId: photo.id };
   }
 

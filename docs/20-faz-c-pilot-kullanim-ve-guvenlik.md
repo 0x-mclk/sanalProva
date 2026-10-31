@@ -1,5 +1,7 @@
 # 20 — Pilot Hazırlık Faz C: tablet güvenliği, kredi görünürlüğü, platform finansı, katalog başlangıcı, izleme
 
+> **GÜNCELLEME ([docs/21](21-pilot-oncesi-kapanis.md)):** ekran kilidi artık **sunucu tarafında da zorunludur** (oturum satırı + 423) ve fotoğraf onayı **sunucuda zorunludur**; aşağıdaki "arayüz kalkanı / yalnızca arayüz" ifadeleri bu iki konuda geçerliliğini yitirdi.
+
 Kapsam: docs/18 §6 "Faz C". Bu belge ne yapıldığını, güvenlik sınırlarını ve **bilinçli sınırlamaları** anlatır. Ödeme (M5.5) yoktur; AI çağrısı yapılmaz.
 
 ## 1. Ekran kilidi ve PIN
