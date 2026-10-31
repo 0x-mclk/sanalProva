@@ -24,7 +24,8 @@ public sealed record CreateOrganizationResponse(
     Guid OrganizationId, Guid StoreId, Guid OwnerUserId, string? SetupLink, DateTimeOffset? SetupLinkExpiresAt, bool SetupLinkShown);
 
 /// <param name="AgreementAccepted">Firma GÜNCEL hizmet sözleşmesi sürümünü kabul etti mi (müşteri KVKK onayından ayrıdır).</param>
-public sealed record OrganizationListItem(Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, bool OwnerSetupPending, bool AgreementAccepted, DateTimeOffset CreatedAt);
+/// <param name="SettingsCorrupt">Firma ayar JSON'u okunamıyor (bozuk): ücretli AI kapalı sayılır, bütçe alanları boştur. Diğer alanlar güvenle döner.</param>
+public sealed record OrganizationListItem(Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, bool OwnerSetupPending, bool AgreementAccepted, DateTimeOffset CreatedAt, bool SettingsCorrupt = false);
 
 public sealed record OrganizationStoreItem(Guid Id, string Name, string Code, bool IsActive);
 
@@ -32,7 +33,7 @@ public sealed record OrganizationOwnerItem(Guid UserId, string DisplayName, stri
 
 public sealed record OrganizationDetail(
     Guid Id, string Name, string Slug, bool IsActive, bool PaidAiEnabled, DateTimeOffset CreatedAt, bool AgreementAccepted, DateTimeOffset? AgreementAcceptedAt, string AgreementVersion,
-    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners, decimal? DailyBudgetUsd, decimal? MonthlyBudgetUsd, decimal? MaxJobCostUsd, int CreditBalance, int CreditReserved);
+    IReadOnlyList<OrganizationStoreItem> Stores, IReadOnlyList<OrganizationOwnerItem> Owners, decimal? DailyBudgetUsd, decimal? MonthlyBudgetUsd, decimal? MaxJobCostUsd, int CreditBalance, int CreditReserved, bool SettingsCorrupt = false);
 
 public sealed record SetupLinkResponse(Guid OrganizationId, Guid OwnerUserId, string SetupLink, DateTimeOffset SetupLinkExpiresAt);
 
@@ -87,22 +88,32 @@ public static class PlatformOrganizationEndpoints
     private static async Task<IResult> ListAsync(AppDbContext db, AgreementGate gate, CancellationToken ct, int take = 50)
     {
         take = Math.Clamp(take, 1, 200);
-        var organizations = await db.Organizations.AsNoTracking().OrderByDescending(o => o.CreatedAt).Take(take).ToListAsync(ct);
+        // Ayar JSON'u listeyi düşürmesin: skaler sütunlar toplu, ayar firma başına dayanıklı okunur (bozuksa SettingsCorrupt, fail-closed)
+        var organizations = await db.Organizations.AsNoTracking().OrderByDescending(o => o.CreatedAt).Take(take).Select(o => new { o.Id, o.Name, o.Slug, o.IsActive, o.CreatedAt }).ToListAsync(ct);
         var ids = organizations.Select(o => o.Id).ToList();
         var pending = (await PendingOwnersAsync(db, ids, ct)).Select(p => p.OrganizationId).ToHashSet();
         var version = gate.Current.Version;
         var accepted = (await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
             .Where(a => ids.Contains(a.OrganizationId) && a.AgreementVersion == version).Select(a => a.OrganizationId).ToListAsync(ct)).ToHashSet();
-        return TypedResults.Ok(organizations.Select(o => new OrganizationListItem(o.Id, o.Name, o.Slug, o.IsActive, o.Settings.PaidAiEnabled, pending.Contains(o.Id), accepted.Contains(o.Id), o.CreatedAt)).ToList());
+        var items = new List<OrganizationListItem>(organizations.Count);
+        foreach (var o in organizations)
+        {
+            var (settings, corrupt) = await SanalProva.Infrastructure.Monitoring.OrganizationSettingsReader.ReadAsync(db, o.Id, ct);
+            items.Add(new OrganizationListItem(o.Id, o.Name, o.Slug, o.IsActive, !corrupt && settings!.PaidAiEnabled, pending.Contains(o.Id), accepted.Contains(o.Id), o.CreatedAt, corrupt));
+        }
+
+        return TypedResults.Ok(items);
     }
 
     private static async Task<IResult> GetAsync(Guid id, AppDbContext db, AgreementGate gate, CancellationToken ct)
     {
-        var organization = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id, ct);
+        var organization = await db.Organizations.AsNoTracking().Where(o => o.Id == id).Select(o => new { o.Id, o.Name, o.Slug, o.IsActive, o.CreatedAt }).SingleOrDefaultAsync(ct);
         if (organization is null)
         {
             return ApiProblems.NotFound("Firma bulunamadı.");
         }
+
+        var (settings, corrupt) = await SanalProva.Infrastructure.Monitoring.OrganizationSettingsReader.ReadAsync(db, id, ct);
 
         var stores = await db.Stores.IgnoreQueryFilters().AsNoTracking().Where(s => s.OrganizationId == id).OrderBy(s => s.CreatedAt)
             .Select(s => new OrganizationStoreItem(s.Id, s.Name, s.Code, s.IsActive)).ToListAsync(ct);
@@ -113,9 +124,9 @@ public static class PlatformOrganizationEndpoints
         var version = gate.Current.Version;
         var acceptedAt = await db.OrganizationAgreementAcceptances.IgnoreQueryFilters().AsNoTracking()
             .Where(a => a.OrganizationId == id && a.AgreementVersion == version).Select(a => (DateTimeOffset?)a.AcceptedAt).SingleOrDefaultAsync(ct);
-        return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled, organization.CreatedAt,
+        return TypedResults.Ok(new OrganizationDetail(organization.Id, organization.Name, organization.Slug, organization.IsActive, !corrupt && settings!.PaidAiEnabled, organization.CreatedAt,
             acceptedAt is not null, acceptedAt, version, stores, owners,
-            organization.Settings.DailyBudgetUsd, organization.Settings.MonthlyBudgetUsd, organization.Settings.MaxJobCostUsd, credit?.BalanceCredits ?? 0, credit?.ReservedCredits ?? 0));
+            corrupt ? null : settings!.DailyBudgetUsd, corrupt ? null : settings!.MonthlyBudgetUsd, corrupt ? null : settings!.MaxJobCostUsd, credit?.BalanceCredits ?? 0, credit?.ReservedCredits ?? 0, corrupt));
     }
 
     private static async Task<IResult> ReissueAsync(

@@ -59,7 +59,7 @@ public sealed class PilotMonitoring(
         {
             accounts.TryGetValue(organization.Id, out var account);
             var spend = await budget.GetSpendAsync(db, organization.Id, null, ct);
-            var (organizationSettings, corrupt) = await ReadSettingsAsync(db, organization.Id, ct);
+            var (organizationSettings, corrupt) = await OrganizationSettingsReader.ReadAsync(db, organization.Id, ct);
             // Bozuk/okunamayan ayar fail-closed (PaidAiPolicy/BudgetLimits.ForAsync ile aynı kural): ücretli AI kapalı, bütçe sınırları 0
             var limits = corrupt ? new BudgetLimits(0m, 0m, 0m, true, true, true) : BudgetLimits.Resolve(settings.Budget, organizationSettings);
             var open = await BudgetGuard.GetOpenReservedAsync(db, organization.Id, ct);
@@ -73,22 +73,6 @@ public sealed class PilotMonitoring(
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Tek firmanın ayarını okur. JSON bozuk/tür uyumsuzsa EF okuma istisnası fırlatır: <c>corrupt = true</c> döner (fail-closed). Veritabanı/bağlantı hataları ve iptal çağırana
-    /// yayılır (altyapı hatası "ayar bozuk" demek değildir). Kaynak: <c>PaidAiPolicy.IsEnabledForAsync</c> ile aynı ayrım.
-    /// </summary>
-    private static async Task<(OrganizationSettings? Settings, bool Corrupt)> ReadSettingsAsync(AppDbContext db, Guid organizationId, CancellationToken ct)
-    {
-        try
-        {
-            return (await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.Settings).SingleAsync(ct), false);
-        }
-        catch (Exception ex) when (ex is not (OperationCanceledException or System.Data.Common.DbException or DbUpdateException))
-        {
-            return (null, true);
-        }
     }
 
     internal static MonitorLevel BudgetLevel(decimal today, decimal month, decimal open, BudgetLimits limits)
@@ -209,6 +193,27 @@ public sealed class PilotMonitoring(
         catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or NotSupportedException)
         {
             return new MonitorCheck("disk", MonitorLevel.Warning, "Disk doluluğu okunamadı.");
+        }
+    }
+}
+
+/// <summary>
+/// Tek firmanın ayarını DAYANIKLI okur (platform listesi/ayrıntısı, finans ve izleme ortak kullanır). JSON bozuk/tür uyumsuzsa EF okuma istisnası fırlatır:
+/// <c>Corrupt = true</c> döner ve çağıran fail-closed davranır (ücretli AI kapalı, sınırlar 0). Veritabanı/bağlantı hataları ve iptal çağırana yayılır (altyapı hatası
+/// "ayar bozuk" demek değildir). Kaynak: <c>PaidAiPolicy.IsEnabledForAsync</c> ile aynı ayrım. Firma filtresi uygulanmaz: platform yöneticisi uçlarından çağrılır.
+/// </summary>
+public static class OrganizationSettingsReader
+{
+    public static async Task<(OrganizationSettings? Settings, bool Corrupt)> ReadAsync(AppDbContext db, Guid organizationId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        try
+        {
+            return (await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.Settings).SingleAsync(ct), false);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or System.Data.Common.DbException or DbUpdateException))
+        {
+            return (null, true);
         }
     }
 }

@@ -4808,6 +4808,10 @@
           "creditReserved": {
             "type": "integer",
             "format": "int32"
+          },
+          "settingsCorrupt": {
+            "type": "boolean",
+            "default": false
           }
         }
       },
@@ -4947,6 +4951,10 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "settingsCorrupt": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

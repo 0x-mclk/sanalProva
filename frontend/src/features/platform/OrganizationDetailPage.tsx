@@ -67,6 +67,11 @@ export function OrganizationDetailPage() {
         <Badge color={organization.paidAiEnabled ? 'bordo' : 'gray'} variant="light">
           {organization.paidAiEnabled ? 'Ücretli AI: açık' : 'Ücretli AI: kapalı'}
         </Badge>
+        {organization.settingsCorrupt ? (
+          <Badge color="red" variant="light">
+            Ayarlar okunamıyor (bozuk): ücretli AI ve bütçe kapalı sayılıyor
+          </Badge>
+        ) : null}
       </div>
 
       <dl className={classes.definition}>

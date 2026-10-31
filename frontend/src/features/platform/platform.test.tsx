@@ -194,6 +194,7 @@ describe('OrganizationDetailPage', () => {
     maxJobCostUsd: null,
     creditBalance: 12,
     creditReserved: 2,
+    settingsCorrupt: false,
   });
 
   const renderDetail = () => wrap(<OrganizationDetailPage />, new QueryClient(), '/platform/o1');
@@ -208,6 +209,12 @@ describe('OrganizationDetailPage', () => {
     expect(screen.getByText(/yalnızca sunucudaki operatör komutlarıyla/)).toBeInTheDocument();
     expect(screen.getByText(/günlük 2.5 \$ · aylık platform tavanı · iş başı platform tavanı/)).toBeInTheDocument(); // M5.3: firma AI bütçe sınırları (salt okunur)
     expect(screen.getByText(/bakiye 12 · bekleyen 2/)).toBeInTheDocument(); // M5.4: kredi (salt okunur)
+  });
+
+  it('ayarı bozuk firma kırmızı uyarıyla gösterilir (fail-closed), bütçe alanları boş kalır', () => {
+    detail = { ...organization(true), settingsCorrupt: true, dailyBudgetUsd: null };
+    renderDetail();
+    expect(screen.getByText(/Ayarlar okunamıyor \(bozuk\)/)).toBeInTheDocument();
   });
 
   it('yeniden üretme: onay penceresi, çift tıklamada tek istek, bağlantı yalnızca bir kez', async () => {

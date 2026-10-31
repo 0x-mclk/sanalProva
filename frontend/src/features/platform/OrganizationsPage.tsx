@@ -35,6 +35,11 @@ export function OrganizationsPage() {
                 <Badge color={organization.agreementAccepted ? 'green' : 'yellow'} variant="light">
                   {organization.agreementAccepted ? 'Sözleşme: kabul edildi' : 'Sözleşme: bekliyor'}
                 </Badge>
+                {organization.settingsCorrupt ? (
+                  <Badge color="red" variant="light">
+                    Ayarlar okunamıyor (bozuk)
+                  </Badge>
+                ) : null}
                 <Badge color={organization.paidAiEnabled ? 'bordo' : 'gray'} variant="light">
                   {organization.paidAiEnabled ? 'Ücretli AI: açık' : 'Ücretli AI: kapalı'}
                 </Badge>

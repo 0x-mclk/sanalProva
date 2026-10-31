@@ -77,8 +77,31 @@ internal sealed class ScriptedCompose(Func<int, ProviderRequestOptions, Cancella
 /// <b>sahte</b> FASHN/Gemini sağlayıcıları. Her test kendi işlemcisini kurar ve işi "Running" olarak ayırıp doğrudan çalıştırır; böylece
 /// paralel çalışan ana worker'a (mock) karışmaz ve diğer testlerin ayarları değişmez.
 /// </summary>
-public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(factory)
+public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(factory), IAsyncLifetime
 {
+    // Kasıtlı bozulan firma ayarları (fail-closed senaryoları) paylaşılan test veritabanında KALMAZ: sınıf bitince geçerli JSON'a onarılır (CI #16: bozuk satır başka testleri/izlemeyi düşürüyordu)
+    private readonly List<Guid> _corrupted = [];
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_corrupted.Count == 0)
+        {
+            return;
+        }
+
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            const string valid = "{}"; // geçerli (varsayılan) ayar JSON'u
+            foreach (var id in _corrupted)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE organizations SET settings = {valid} WHERE id = {id}", CancellationToken.None);
+            }
+        }
+    }
+
     private static ProviderResult Result(string provider, string model, string requestId, decimal estimated, decimal? credits = null, decimal? actual = null, int seed = 1) =>
         new([new GeneratedOutput(TestImages.Portrait(seed + 100), "image/jpeg")], provider, model, requestId,
             new ProviderUsage(1200, credits, null, null, estimated, actual));
@@ -465,6 +488,7 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
 
     private async Task CorruptSettingsAsync(Guid organizationId, string settingsJson)
     {
+        _corrupted.Add(organizationId); // onarım DisposeAsync'te (test başarısız olsa da)
         var (scope, db) = OpenDb();
         using (scope)
         {
@@ -617,9 +641,11 @@ public sealed class PaidProviderPipelineTests(ApiFactory factory) : ApiTestBase(
         await harness.Processor.ProcessClaimedAsync(jobId, TestContext.Current.CancellationToken);
 
         var (job, logs, images) = await LoadAsync(jobId);
-        Assert.Equal(GenerationJobStatus.Succeeded, job.Status);
-        Assert.Equal(1, job.Attempt); // iş hiç başka worker'a geçmedi
-        Assert.Equal(1, fashn.Calls);
+        // Aralıklı başarısızlıkta kök neden okunabilsin diye tanı mesajı (beklenti ve süre sınırları DEĞİŞMEDİ): kilit yenileme gecikmesi mi (deneme>1, demo çıktı = rakip işçi aldı) yoksa başka bir şey mi
+        var diagnosis = $"durum={job.Status} deneme={job.Attempt} fashnCagri={fashn.Calls} gorsel={images.Count} demo={images.Any(i => i.IsDemo)} hata={job.ErrorCode} bitis-baslangic={(job.FinishedAt - job.StartedAt)?.TotalSeconds:0.0}sn";
+        Assert.True(job.Status == GenerationJobStatus.Succeeded, diagnosis);
+        Assert.True(job.Attempt == 1, $"iş başka worker'a geçti: {diagnosis}"); // iş hiç başka worker'a geçmedi
+        Assert.True(fashn.Calls == 1, diagnosis);
         Assert.False(Assert.Single(images).IsDemo); // sonucu rakip (mock) worker değil bu worker yazdı
         Assert.Equal(0.15m, Assert.Single(logs).EstimatedCostUsd);
     }

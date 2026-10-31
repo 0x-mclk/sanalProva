@@ -424,6 +424,22 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
         Assert.DoesNotContain(TestData.Password, output, StringComparison.Ordinal);
     }
 
+    private readonly List<Guid> _corruptOrganizations = [];
+
+    /// <summary>Kasıtlı bozulan firmalar paylaşılan test veritabanında kalmasın (CI #16): test sonunda geçerli JSON'a onarılır.</summary>
+    private async Task RepairCorruptOrganizationsAsync()
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            const string valid = "{}";
+            foreach (var id in _corruptOrganizations)
+            {
+                await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE organizations SET settings = {valid} WHERE id = {id}", CancellationToken.None);
+            }
+        }
+    }
+
     private async Task<Guid> CorruptOrganizationAsync(string settingsJson)
     {
         var tenant = await TestData.CreateTenantAsync(Services, StoreRole.Owner, credits: 3);
@@ -433,6 +449,7 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
             await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE organizations SET settings = {settingsJson} WHERE id = {tenant.OrganizationId}", Ct);
         }
 
+        _corruptOrganizations.Add(tenant.OrganizationId);
         return tenant.OrganizationId;
     }
 
@@ -450,6 +467,8 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
         ApiFactory.RequireDatabase(Factory);
         var good = await TestData.CreateTenantAsync(Services, StoreRole.Owner, credits: 9);
         var corruptId = await CorruptOrganizationAsync(settingsJson);
+        try
+        {
         var admin = await PlatformAdminClientAsync();
 
         var finance = await admin.GetAsync<List<OrganizationFinance>>("/api/v1/platform/finance"); // eskiden 500
@@ -469,6 +488,58 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
         var exit = await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "status"], writer, Ct); // eskiden JsonException
         Assert.Equal(SanalProva.Api.Features.Platform.PlatformCommands.ExitMonitorCritical, exit);
         Assert.Contains("[KRİTİK] settings:", writer.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await RepairCorruptOrganizationsAsync();
+        }
+    }
+
+    /// <summary>GET /platform/organizations ve ayrıntı: bozuk firma ayarı listeyi düşürmez (eskiden 500); fail-closed işaretlenir, diğer firmalar ve sözleşme aynı kalır.</summary>
+    [Theory]
+    [InlineData("{bozuk json")]
+    [InlineData("{\"PaidAiEnabled\":\"evet\"}")]
+    public async Task Platform_firma_listesi_ve_ayrintisi_bozuk_ayarda_500_vermez_firma_isaretlenir(string settingsJson)
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var good = await TestData.CreateTenantAsync(Services, StoreRole.Owner, credits: 1);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var organization = await db.Organizations.SingleAsync(o => o.Id == good.OrganizationId, Ct);
+            organization.Settings.PaidAiEnabled = true;
+            organization.Settings.DailyBudgetUsd = 1.25m;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var corruptId = await CorruptOrganizationAsync(settingsJson); // en yeni firma: listenin başında
+        try
+        {
+            var admin = await PlatformAdminClientAsync();
+            var list = await admin.GetAsync<List<JsonElement>>("/api/v1/platform/organizations?take=200"); // eskiden 500
+            var bad = Assert.Single(list, o => o.GetProperty("id").GetGuid() == corruptId);
+            Assert.True(bad.GetProperty("settingsCorrupt").GetBoolean());
+            Assert.False(bad.GetProperty("paidAiEnabled").GetBoolean()); // fail-closed
+            var fine = Assert.Single(list, o => o.GetProperty("id").GetGuid() == good.OrganizationId);
+            Assert.False(fine.GetProperty("settingsCorrupt").GetBoolean());
+            Assert.True(fine.GetProperty("paidAiEnabled").GetBoolean()); // geçerli ayar değişmedi
+
+            var detailBad = await admin.GetAsync<JsonElement>($"/api/v1/platform/organizations/{corruptId}");
+            Assert.True(detailBad.GetProperty("settingsCorrupt").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, detailBad.GetProperty("dailyBudgetUsd").ValueKind);
+            Assert.Equal(3, detailBad.GetProperty("creditBalance").GetInt32());
+            var detailGood = await admin.GetAsync<JsonElement>($"/api/v1/platform/organizations/{good.OrganizationId}");
+            Assert.False(detailGood.GetProperty("settingsCorrupt").GetBoolean());
+            Assert.Equal(1.25m, detailGood.GetProperty("dailyBudgetUsd").GetDecimal());
+
+            // Yetkilendirme aynı: platform yöneticisi olmayan 403
+            var staff = await ApiClient.LoginAsync(Factory, good.Email, good.StoreId);
+            Assert.Equal(HttpStatusCode.Forbidden, (await staff.GetAsync("/api/v1/platform/organizations")).StatusCode);
+        }
+        finally
+        {
+            await RepairCorruptOrganizationsAsync();
+        }
     }
 
     /// <summary>EF "decimal precision" uyarısı (OrganizationSettings): alanlar JSON sütunundadır; sayı JSON metni olarak saklanır, SQL decimal kırpması YOKTUR. Kanıt: çok basamaklı değer birebir döner.</summary>

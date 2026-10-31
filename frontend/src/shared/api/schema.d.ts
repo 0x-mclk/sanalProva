@@ -3624,6 +3624,8 @@ export interface components {
             creditBalance: number;
             /** Format: int32 */
             creditReserved: number;
+            /** @default false */
+            settingsCorrupt: boolean;
         };
         OrganizationFinance: {
             /** Format: uuid */
@@ -3670,6 +3672,8 @@ export interface components {
             agreementAccepted: boolean;
             /** Format: date-time */
             createdAt: string;
+            /** @default false */
+            settingsCorrupt: boolean;
         };
         OrganizationOwnerItem: {
             /** Format: uuid */
