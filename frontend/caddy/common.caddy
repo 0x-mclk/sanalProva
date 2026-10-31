@@ -1,0 +1,57 @@
+# Ortak site tanımı (Pilot Faz A). Caddyfile (ACME/Let's Encrypt) ve Caddyfile.internal (yerel CA) bunu içe aktarır.
+# Yönlendirme: /api /hubs /files → API (WebSocket/SignalR dahil); /tv → tv.html; diğer her şey statik SPA (bilinmeyen yollar index.html).
+# ERİŞİM GÜNLÜĞÜ KASITLI OLARAK YOK: imzalı görsel adresleri sorgu dizesinde imza taşır (günlüğe yazılmamalı); uygulama günlüğü yalnızca yolu yazar.
+(sp_site) {
+	root * /srv
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		# Kamera yalnızca kendi kaynağında (müşteri fotoğrafı çekimi)
+		Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+
+	# Sağlık uç noktaları dışarıya kapalı (konteyner sağlık denetimi API'ye doğrudan bakar)
+	@health path /health /health/*
+	handle @health {
+		respond 404
+	}
+
+	@backend path /api/* /hubs/* /files/*
+	handle @backend {
+		request_body {
+			max_size 22MB
+		}
+		reverse_proxy api:8080 {
+			# SignalR/uzun istekler: tamponlama yok; X-Forwarded-For/Proto/Host Caddy tarafından (istemci değerleri ezilerek) eklenir
+			flush_interval -1
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 130s
+			}
+			health_uri /health/live
+			health_interval 10s
+		}
+	}
+
+	# TV girişi: /tv ve /tv/ → tv.html (varlıklar /assets altında ortaktır)
+	@tv path /tv /tv/
+	handle @tv {
+		rewrite * /tv.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+
+	handle {
+		@immutable path /assets/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		@revalidate path / /index.html /tv.html /sw.js /registerSW.js /manifest.webmanifest /workbox-*.js
+		header @revalidate Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

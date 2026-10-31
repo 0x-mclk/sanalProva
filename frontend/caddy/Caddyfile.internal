@@ -1,0 +1,8 @@
+# Yerel/özel ağ: Caddy'nin kendi (iç) CA'sı ile TLS. Tablet/TV'nin bu CA kök sertifikasına güvenmesi gerekir (docs/19 §TLS seçenekleri).
+# SITE_ADDRESS = yerel ad (ör. prova.lan). Genel alan adı mümkünse Caddyfile (ACME) tercih edilir: cihazlara kök sertifika kurmak gerekmez.
+import /etc/caddy/common.caddy
+
+{$SITE_ADDRESS} {
+	tls internal
+	import sp_site
+}

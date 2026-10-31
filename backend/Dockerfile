@@ -31,7 +31,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS api
 WORKDIR /app
 COPY --from=build /out/api ./
 # Dosya deposu ve Data Protection anahtarları (çerez/antiforgery) kalıcı birimlere bağlanır; kullanıcı 'app' (root değil)
-RUN mkdir -p /data/storage /home/app/.aspnet/DataProtection-Keys \
+# Üretim (deploy/docker-compose.prod.yml): depo, anahtar halkası ve silme günlüğü ayrı kalıcı birimlerdir; yolların görüntüde 'app' sahipliğinde bulunması
+# adlandırılmış birimin ilk açılışta yazılabilir olmasını sağlar
+RUN mkdir -p /data/storage /data/dpkeys /data/journal /home/app/.aspnet/DataProtection-Keys \
     && chown -R app:app /data /home/app/.aspnet
 ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_EnableDiagnostics=0 \

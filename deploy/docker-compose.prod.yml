@@ -1,0 +1,211 @@
+# Sanal Prova — ÜRETİM (pilot) Docker Compose (Pilot Faz A). Geliştirme/test compose'undan (../docker-compose.yml) AYRIDIR ve onu etkilemez.
+#
+# Mimari: web (Caddy: TLS + statik SPA + /api /hubs /files vekili + /tv) → api (ASP.NET, yalnızca iç ağ) → sqlserver (yalnızca iç ağ, TLS zorunlu).
+#   - Ana makineye YALNIZCA web'in 80/443 portları açılır. SQL Server ve API portu YAYIMLANMAZ.
+#   - "backend" ağı internal: sqlserver bu ağda ve dış dünyaya çıkışı yoktur. "edge" ağı sabit alt ağlıdır (PROXY_SUBNET): API yalnızca bu alt ağdan gelen
+#     X-Forwarded-* başlıklarına güvenir (ForwardedHeaders__KnownNetworks); edge'de yalnızca Caddy ve API vardır.
+#   - Gizli değerler imajlara YAZILMAZ: .env.prod (git'e girmez, chmod 600) ve secrets/ klasöründen gelir. Üretimi: deploy/scripts/prod-env.sh, make-sql-cert.sh.
+#   - Gerçek sunucuya dağıtım bu dosyayla YAPILMADI; docs/19-uretim-dagitim-runbook.md adımlarıyla yapılır. Docker olmayan makinede bu dosya çalıştırılamadı
+#     (doğrulanmadı: bkz. runbook "Doğrulama durumu").
+#
+# Kullanım (sunucuda, deploy/ klasöründe):
+#   ./scripts/prod-env.sh prova.magaza.com          # .env.prod + secrets/backup_passphrase
+#   ./scripts/make-sql-cert.sh                      # secrets/ca, secrets/sqlserver-tls
+#   ./scripts/preflight.sh                          # ön kontrol (docker compose config dahil)
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+name: sanalprova-prod
+
+x-ops: &ops
+  build:
+    context: .
+    dockerfile: ops/Dockerfile
+  image: sanalprova-ops:prod
+  restart: "no"
+  networks: [backend]
+  environment: &ops-env
+    MSSQL_HOST: sqlserver
+    DB_NAME: ${DB_NAME:?.env.prod eksik - once ./scripts/prod-env.sh calistirin}
+    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?}
+    SP_MIGRATOR_PW: ${SP_MIGRATOR_PW:?}
+    SP_APP_PW: ${SP_APP_PW:?}
+    SP_BACKUP_PW: ${SP_BACKUP_PW:?}
+    # SQL TLS sertifikası özel CA ile DOĞRULANIR (sqlcmd -C kullanılmaz)
+    SSL_CERT_FILE: /certs/ca.crt
+  volumes:
+    - ./secrets/ca:/certs:ro
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2025-latest
+    restart: unless-stopped
+    networks: [backend]
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Express
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?}
+      MSSQL_AGENT_ENABLED: "false"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - sqlserver-backup:/var/opt/mssql/backup
+      - ./sqlserver/mssql.conf:/var/opt/mssql/mssql.conf:ro
+      - ./secrets/sqlserver-tls:/var/opt/mssql/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1433' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 30s
+
+  db-provision:
+    <<: *ops
+    command: ["provision"]
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  db-migrate:
+    build:
+      context: ../backend
+      target: migrator
+    restart: "no"
+    networks: [backend]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        /app/efbundle --connection "Server=sqlserver,1433;Database=$$DB_NAME;User ID=sanalprova_migrator;Password=$$SP_MIGRATOR_PW;Encrypt=True;TrustServerCertificate=False;HostNameInCertificate=sqlserver"
+    environment:
+      DB_NAME: ${DB_NAME:?}
+      SP_MIGRATOR_PW: ${SP_MIGRATOR_PW:?}
+      SSL_CERT_DIR: /etc/ssl/certs:/certs
+    volumes:
+      - ./secrets/ca:/certs:ro
+    depends_on:
+      db-provision:
+        condition: service_completed_successfully
+
+  db-harden:
+    <<: *ops
+    command: ["harden"]
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+
+  api:
+    build:
+      context: ../backend
+      target: api
+    restart: unless-stopped
+    networks: [backend, edge]
+    depends_on:
+      db-harden:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # Üretim başlangıç denetimi (ProductionStartupValidator): bunlardan biri eksik/güvensizse API BAŞLAMAZ
+      ConnectionStrings__Main: Server=sqlserver,1433;Database=${DB_NAME:?};User ID=sanalprova_app;Password=${SP_APP_PW:?};Encrypt=True;TrustServerCertificate=False;HostNameInCertificate=sqlserver;Application Name=SanalProva.Api
+      SSL_CERT_DIR: /etc/ssl/certs:/certs
+      Storage__SigningKey: ${STORAGE_SIGNING_KEY:?}
+      Security__SetupTokenKey: ${SETUP_TOKEN_KEY:?}
+      Storage__LocalRoot: /data/storage
+      DataProtection__KeysPath: /data/dpkeys
+      Retention__DeletionJournalPath: /data/journal/deleted-sessions.log
+      AllowedHosts: ${SITE_ADDRESS:?}
+      ForwardedHeaders__KnownNetworks: ${PROXY_SUBNET:-172.31.250.0/24}
+      ImageWorker__BaseUrl: http://127.0.0.1:1   # image-worker üretimde YOK (Aşama 5 motoru yapılmadı); sağlık "Degraded" olabilir, uygulama durmaz
+      Generation__UseMockProviders: ${USE_MOCK_PROVIDERS:-true}
+      Generation__Budget__AllowPaidCalls: ${ALLOW_PAID_CALLS:-false}
+      Generation__Budget__DailyLimitUsd: ${BUDGET_DAILY_USD:-3}
+      Generation__Budget__MonthlyLimitUsd: ${BUDGET_MONTHLY_USD:-60}
+      Generation__Budget__MaxJobCostUsd: ${BUDGET_MAX_JOB_USD:-0.25}
+      Ai__Fal__ApiKey: ${FAL_API_KEY:-}
+      Ai__Pruna__ApiKey: ${PRUNA_API_KEY:-}
+      Ai__Fashn__ApiKey: ${FASHN_API_KEY:-}
+      Ai__Gemini__ApiKey: ${GEMINI_API_KEY:-}
+      Seed__Enabled: "false"
+    volumes:
+      - api-storage:/data/storage
+      - api-dpkeys:/data/dpkeys
+      - api-journal:/data/journal
+      - ./secrets/ca:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf \"GET /health/live HTTP/1.0\\r\\n\\r\\n\" >&3 && head -n1 <&3 | grep -q \" 200 \"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+
+  web:
+    build:
+      context: ../frontend
+      target: web
+    restart: unless-stopped
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+    command: ["caddy", "run", "--config", "/etc/caddy/${CADDYFILE:-Caddyfile}", "--adapter", "caddyfile"]
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+
+  # İsteğe bağlı operasyon komutları (yedek, doğrulama, geri yükleme): docker compose --profile ops run --rm ops <komut>
+  ops:
+    <<: *ops
+    profiles: ["ops"]
+    environment:
+      <<: *ops-env
+      BACKUP_PASSPHRASE_FILE: /run/secrets/backup_passphrase
+      BACKUP_RETENTION_FULL_DAYS: ${BACKUP_RETENTION_FULL_DAYS:-14}
+      BACKUP_RETENTION_LOG_DAYS: ${BACKUP_RETENTION_LOG_DAYS:-7}
+    secrets:
+      - backup_passphrase
+    volumes:
+      - ./secrets/ca:/certs:ro
+      - sqlserver-backup:/var/opt/mssql/backup
+      - api-storage:/data/storage
+      - api-journal:/data/journal
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+networks:
+  # İç ağ: dış çıkış yok (SQL Server burada)
+  backend:
+    internal: true
+  # Kenar ağı: sabit alt ağ; API yalnızca buradaki vekilden gelen başlıklara güvenir
+  edge:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.31.250.0/24}
+
+secrets:
+  backup_passphrase:
+    file: ./secrets/backup_passphrase
+
+volumes:
+  sqlserver-data:
+  sqlserver-backup:
+  api-storage:
+  api-dpkeys:
+  api-journal:
+  caddy-data:
+  caddy-config:

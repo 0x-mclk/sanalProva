@@ -1,0 +1,6 @@
+# Genel alan adı + otomatik TLS (Let's Encrypt/ACME). SITE_ADDRESS = alan adı (ör. prova.magaza.com); 80 ve 443 internetten bu sunucuya ulaşabilmeli.
+import /etc/caddy/common.caddy
+
+{$SITE_ADDRESS} {
+	import sp_site
+}

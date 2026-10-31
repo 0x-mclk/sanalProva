@@ -45,3 +45,8 @@ testdata/
 
 # Kişisel editör ayarları (yerel SDK yolu içerir)
 .vscode/settings.json
+
+# Üretim dağıtım sırları ve yedekleri (deploy/): ASLA depoya girmez
+deploy/secrets/
+deploy/backups/
+deploy/.env.prod

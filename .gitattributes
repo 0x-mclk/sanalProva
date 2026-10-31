@@ -3,3 +3,6 @@
 Dockerfile text eol=lf
 docker/** text eol=lf
 .dockerignore text eol=lf
+# Üretim dağıtım dosyaları (Linux'ta çalışır/konteynere bağlanır): her zaman LF
+deploy/** text eol=lf
+frontend/caddy/** text eol=lf
