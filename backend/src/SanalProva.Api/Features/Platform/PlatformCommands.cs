@@ -18,7 +18,7 @@ namespace SanalProva.Api.Features.Platform;
 /// Her değiştirici komut <c>--confirm</c> ister; olmadan <b>hiçbir veritabanı yazması yapılmaz</b> (yalnızca okuma ve plan çıktısı). Kurulum bağlantıları yalnızca standart çıktıya
 /// <b>bir kez</b> yazılır; günlüğe, dosyaya, denetim kaydına veya veritabanına düz olarak girmez (veritabanında yalnızca HMAC özeti). Denetim kayıtları kişisel veri içermez.
 /// </para>
-/// Komutlar: <c>bootstrap</c>, <c>reissue-link</c>, <c>revoke</c>, <c>reset-access</c>, <c>paid-ai</c>, <c>budget</c>, <c>credits</c>. Ayrıntı: <c>docs/14-platform-operator-komutlari.md</c>.
+/// Komutlar: <c>bootstrap</c>, <c>reissue-link</c>, <c>revoke</c>, <c>reset-access</c>, <c>paid-ai</c>, <c>budget</c>, <c>credits</c>, <c>reapply-deletions</c>. Ayrıntı: <c>docs/14-platform-operator-komutlari.md</c>.
 /// </summary>
 public static class PlatformCommands
 {
@@ -58,7 +58,9 @@ public static class PlatformCommands
             scope.ServiceProvider.GetRequiredService<AccountSetupTokenService>(), scope.ServiceProvider.GetRequiredService<AuditTrail>(),
             scope.ServiceProvider.GetRequiredService<IOptions<SetupTokenOptions>>().Value, options, output,
             scope.ServiceProvider.GetRequiredService<IOptions<SanalProva.Infrastructure.Ai.GenerationSettings>>().Value.Budget,
-            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Credits.CreditLedgerService>());
+            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Credits.CreditLedgerService>(),
+            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.SessionPurger>(), scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.DeletionJournal>(),
+            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Storage.IImageStorageService>());
 
         // Anahtar yoksa/zayıfsa token üretilmez (web sunucusundaki ValidateOnStart bu yolda çalışmaz)
         if (!Validator.TryValidateObject(context.TokenOptions, new ValidationContext(context.TokenOptions), null, validateAllProperties: true))
@@ -78,6 +80,7 @@ public static class PlatformCommands
                 "paid-ai" => await PaidAiAsync(context, ct),
                 "budget" => await BudgetAsync(context, ct),
                 "credits" => await CreditsAsync(context, ct),
+                "reapply-deletions" => await ReapplyDeletionsAsync(context, ct),
                 _ => await UnknownAsync(output, args[1]),
             };
         }
@@ -104,6 +107,7 @@ public static class PlatformCommands
           reset-access  --email <e-posta> [--base-url <url>] [--confirm]                              Erişim kurtarma: parolayı siler, güvenlik damgasını yeniler, yeni bağlantı üretir
           paid-ai       --org <slug> (--enable | --disable) [--confirm]                               Firmanın ücretli AI yetkisini değiştirir (denetime yazılır)
           credits       --org <slug> [(--grant <n> | --adjust <±n> --note <gerekçe>) --ref <benzersiz-referans>] [--confirm]   Firma kredisi: gösterir / yükler / düzeltir (referans = idempotency)
+          reapply-deletions [--journal <dosya>] [--confirm]   Yedekten geri yükleme sonrası: silme günlüğündeki oturumları yeniden siler (KVKK)
           budget        --org <slug> [--daily <usd|none>] [--monthly <usd|none>] [--job <usd|none>] [--confirm]   Firma AI bütçe sınırları (platform tavanını aşamaz; seçeneksiz: yalnızca gösterir)
         --confirm olmadan hiçbir veritabanı değişikliği yapılmaz (kuru çalışma).
         """;
@@ -473,6 +477,51 @@ public static class PlatformCommands
         return ExitOk;
     }
 
+    // ------------------------------------------------------------------ reapply-deletions
+
+    /// <summary>
+    /// Yedekten geri yükleme sonrası (Pilot Faz A, KVKK): silme günlüğündeki oturumları, veritabanında yeniden belirmişse yeniden siler; veritabanında yoksa depoda kalmış
+    /// dosya önekini siler. Günlük yedeklerin DIŞINDadır (bkz. <c>DeletionJournal</c>). İdempotenttir; <c>--confirm</c> yoksa yalnızca sayar. Günlükte yalnızca kimlikler bulunur.
+    /// </summary>
+    private static async Task<int> ReapplyDeletionsAsync(Context c, CancellationToken ct)
+    {
+        var path = c.Options.Journal ?? c.Journal.Path;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return await UsageErrorAsync(c, "--journal <dosya> verin veya Retention:DeletionJournalPath yapılandırın.");
+        }
+
+        var (entries, skipped) = await SanalProva.Infrastructure.Retention.DeletionJournal.ReadAsync(path, ct);
+        var sessions = entries.GroupBy(e => e.SessionId).Select(g => g.First()).ToList();
+        var present = (await c.Db.TryOnSessions.IgnoreQueryFilters().AsNoTracking().Where(s => sessions.Select(e => e.SessionId).Contains(s.Id)).Select(s => s.Id).ToListAsync(ct)).ToHashSet();
+        await c.Out.WriteLineAsync($"PLAN: günlükte {sessions.Count} benzersiz silinmiş oturum ({skipped} bozuk satır atlandı); veritabanında yeniden belirmiş: {present.Count}; depo önekleri taranacak.");
+        if (!c.Options.Confirm)
+        {
+            await c.Out.WriteLineAsync("KURU ÇALIŞMA: --confirm verilmedi, hiçbir şey silinmedi.");
+            return ExitOk;
+        }
+
+        var purged = 0;
+        var prefixes = 0;
+        foreach (var entry in sessions)
+        {
+            if (present.Contains(entry.SessionId))
+            {
+                await c.Purger.PurgeAsync(c.Db, entry.SessionId, "Session.PurgedByRestoreReapply", null, ct, writeJournal: false);
+                purged++;
+            }
+            else
+            {
+                // Satırı yok ama dosyaları geri yüklenmiş olabilir (eski depo yedeği): öneki sil (yoksa hiçbir şey olmaz)
+                await c.Storage.DeletePrefixAsync(SanalProva.Infrastructure.Storage.StorageKeys.SessionPrefix(entry.OrganizationId, entry.StoreId, entry.SessionId), ct);
+                prefixes++;
+            }
+        }
+
+        await c.Out.WriteLineAsync($"TAMAM: {purged} oturum yeniden silindi, {prefixes} depo öneki temizlendi (denetim kayıtları yazıldı).");
+        return ExitOk;
+    }
+
     // ------------------------------------------------------------------ yardımcılar
 
     private static TimeSpan LinkTtl(Context c) => TimeSpan.FromHours(c.TokenOptions.InitialPasswordTtlHours);
@@ -495,14 +544,15 @@ public static class PlatformCommands
 
     private sealed record Context(
         AppDbContext Db, UserManager<AppUser> Users, AccountSetupTokenService Tokens, AuditTrail Audit, SetupTokenOptions TokenOptions, CommandOptions Options, TextWriter Out,
-        SanalProva.Infrastructure.Ai.BudgetSettings Budget, SanalProva.Infrastructure.Credits.CreditLedgerService Credits);
+        SanalProva.Infrastructure.Ai.BudgetSettings Budget, SanalProva.Infrastructure.Credits.CreditLedgerService Credits,
+        SanalProva.Infrastructure.Retention.SessionPurger Purger, SanalProva.Infrastructure.Retention.DeletionJournal Journal, SanalProva.Infrastructure.Storage.IImageStorageService Storage);
 
     /// <summary>Sayısal bütçe seçeneği: <c>Set</c> seçenek verildi mi; <c>Value</c> null ise "none" (firma değerini sil).</summary>
     private readonly record struct BudgetArg(bool Set, decimal? Value);
 
     private sealed record CommandOptions(
         string? Error, string? Email, string? Name, string? Org, string? BaseUrl, bool Confirm, bool Additional, bool Enable, bool Disable,
-        BudgetArg Daily = default, BudgetArg Monthly = default, BudgetArg Job = default, int? Grant = null, int? Adjust = null, string? Reference = null, string? Note = null)
+        BudgetArg Daily = default, BudgetArg Monthly = default, BudgetArg Job = default, int? Grant = null, int? Adjust = null, string? Reference = null, string? Note = null, string? Journal = null)
     {
         public static CommandOptions Parse(string[] args)
         {
@@ -510,7 +560,7 @@ public static class PlatformCommands
             bool confirm = false, additional = false, enable = false, disable = false;
             BudgetArg daily = default, monthly = default, job = default;
             int? grant = null, adjust = null;
-            string? reference = null, note = null;
+            string? reference = null, note = null, journal = null;
             for (var i = 0; i < args.Length; i++)
             {
                 string Value(string flag) => i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal) ? args[++i] : throw new FormatException($"{flag} bir değer ister.");
@@ -533,6 +583,7 @@ public static class PlatformCommands
                         case "--adjust": adjust = Credits("--adjust", Value("--adjust")); break;
                         case "--ref": reference = Value("--ref").Trim(); break;
                         case "--note": note = Value("--note").Trim(); break;
+                        case "--journal": journal = Value("--journal").Trim(); break;
                         default: return Fail($"bilinmeyen seçenek '{args[i]}'.");
                     }
                 }
@@ -562,7 +613,7 @@ public static class PlatformCommands
                 return Fail("--note en fazla 200 karakter olmalı.");
             }
 
-            return new CommandOptions(null, email, name, org, baseUrl, confirm, additional, enable, disable, daily, monthly, job, grant, adjust, reference, note);
+            return new CommandOptions(null, email, name, org, baseUrl, confirm, additional, enable, disable, daily, monthly, job, grant, adjust, reference, note, journal);
 
             static CommandOptions Fail(string message) => new(message, null, null, null, null, false, false, false, false);
         }

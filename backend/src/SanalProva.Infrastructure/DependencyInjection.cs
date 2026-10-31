@@ -117,6 +117,7 @@ public static class DependencyInjection
         services.AddSingleton<Credits.CreditLedgerService>();
         services.AddHostedService<Generation.GenerationWorker>();
         services.AddOptions<Retention.RetentionSettings>().Bind(configuration.GetSection(Retention.RetentionSettings.Section));
+        services.AddSingleton<Retention.DeletionJournal>();
         services.AddScoped<Retention.SessionPurger>();
         services.AddSingleton<Retention.RetentionSweeper>();
         services.AddSingleton<Retention.OrphanSweeper>();

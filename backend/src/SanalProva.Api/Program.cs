@@ -21,9 +21,25 @@ using SanalProva.Infrastructure;
 using SanalProva.Infrastructure.Identity;
 using SanalProva.Infrastructure.Persistence;
 using SanalProva.Infrastructure.Tenancy;
+using Microsoft.AspNetCore.DataProtection;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Üretimde eksik/güvensiz yapılandırmayla BAŞLAMA (Pilot Faz A). Geliştirme/test ve operatör komutları (platform …) muaftır.
+if (!PlatformCommands.IsCommand(args))
+{
+    ProductionStartupValidator.EnsureValid(builder.Configuration, builder.Environment);
+}
+
+// Ters vekil (Caddy) arkasında: yalnızca güvenilen vekillerden X-Forwarded-For/Proto kabul edilir (yapılandırılmadıysa ara katman yok)
+builder.Services.AddTrustedForwardedHeaders(builder.Configuration);
+
+// Çerez/antiforgery anahtarları kalıcı birimde (üretimde zorunlu; yapılandırılmadıysa ASP.NET varsayılanı)
+if (builder.Configuration["DataProtection:KeysPath"] is { Length: > 0 } dataProtectionKeys)
+{
+    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeys)).SetApplicationName("SanalProva");
+}
 
 builder.Host.UseSerilog((context, logger) => logger.ReadFrom.Configuration(context.Configuration));
 
@@ -132,6 +148,7 @@ if (PlatformCommands.IsCommand(args))
     return await PlatformCommands.RunAsync(app.Services, args, Console.Out, CancellationToken.None);
 }
 
+app.UseTrustedForwardedHeaders(app.Configuration); // boru hattının en başı
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 app.UseApiSecurityHeaders();

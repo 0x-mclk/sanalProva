@@ -434,4 +434,110 @@ public sealed class KvkkDeletionTests(ApiFactory factory) : ApiTestBase(factory)
 
         public override DateTimeOffset GetUtcNow() => base.GetUtcNow() + Offset;
     }
+
+    // ---------------------------------------------------------------- Silme günlüğü (Pilot Faz A): yedekten geri yüklemede silinmiş kişisel verinin yeniden silinmesi
+
+    private static string TempJournal() => Path.Combine(Path.GetTempPath(), $"sanalprova-journal-{Guid.NewGuid():N}", "deleted-sessions.log");
+
+    private static DeletionJournal JournalAt(string? path) =>
+        new(Options.Create(new RetentionSettings { DeletionJournalPath = path }), NullLogger<DeletionJournal>.Instance);
+
+    [Fact]
+    public async Task Silme_gunlugu_oturum_silinmeden_once_yalnizca_kimlikleri_yazar_kisisel_veri_icermez()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (_, client, doomed) = await CompletedSessionAsync();
+        var path = TempJournal();
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var purger = new SessionPurger(Services.GetRequiredService<IImageStorageService>(), scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Displays.DisplayStateService>(),
+            TimeProvider.System, NullLogger<SessionPurger>.Instance, JournalAt(path));
+
+        await purger.PurgeAsync(db, doomed.Session, "Session.PurgedByStaff", null, ct);
+
+        await AssertErasedAsync(doomed, client);
+        var text = await File.ReadAllTextAsync(path, ct);
+        var (entries, skipped) = await DeletionJournal.ReadAsync(path, ct);
+        var entry = Assert.Single(entries);
+        Assert.Equal((doomed.Session, doomed.Organization, doomed.Store, "Session.PurgedByStaff", 0), (entry.SessionId, entry.OrganizationId, entry.StoreId, entry.Reason, skipped));
+        Assert.DoesNotContain("@", text, StringComparison.Ordinal); // e-posta/ad yok
+        Assert.DoesNotContain(".jpg", text, StringComparison.Ordinal); // dosya adı/anahtarı yok
+        Assert.Equal(5, JsonDocumentKeys(text)); // sessionId, organizationId, storeId, at, reason
+
+        // Silinmiş oturumu yeniden silme: günlüğe ikinci satır yazılmaz (oturum yok → erken çıkış)
+        await purger.PurgeAsync(db, doomed.Session, "Session.PurgedByStaff", null, ct);
+        Assert.Single((await DeletionJournal.ReadAsync(path, ct)).Entries);
+    }
+
+    private static int JsonDocumentKeys(string line) => System.Text.Json.JsonDocument.Parse(line.Trim()).RootElement.EnumerateObject().Count();
+
+    [Fact]
+    public async Task Silme_gunlugu_kapaliyken_veya_yazilamiyorsa_silme_yine_de_tamamlanir()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (_, client, off) = await CompletedSessionAsync();
+        var (_, client2, broken) = await CompletedSessionAsync();
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var displays = scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Displays.DisplayStateService>();
+        var storage = Services.GetRequiredService<IImageStorageService>();
+
+        await new SessionPurger(storage, displays, TimeProvider.System, NullLogger<SessionPurger>.Instance, JournalAt(null)).PurgeAsync(db, off.Session, "Session.PurgedByStaff", null, ct); // kapalı
+
+        // Yazılamayan günlük: üst "klasör" aslında bir dosya
+        var blocker = Path.Combine(Path.GetTempPath(), $"sanalprova-blocker-{Guid.NewGuid():N}");
+        await File.WriteAllTextAsync(blocker, "x", ct);
+        await new SessionPurger(storage, displays, TimeProvider.System, NullLogger<SessionPurger>.Instance, JournalAt(Path.Combine(blocker, "journal.log"))).PurgeAsync(db, broken.Session, "Session.PurgedByStaff", null, ct);
+
+        await AssertErasedAsync(off, client);
+        await AssertErasedAsync(broken, client2);
+        File.Delete(blocker);
+    }
+
+    [Fact]
+    public async Task Yedekten_geri_yuklenen_silinmis_oturum_reapply_deletions_ile_yeniden_silinir_kuru_calisma_silmez_idempotenttir()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (_, client, restored) = await CompletedSessionAsync(); // "yedekten geri gelmiş": satırlar ve dosyalar var
+        var (otherTenant, otherClient, survivor) = await CompletedSessionAsync(); // günlükte YOK: dokunulmamalı
+        var (_, _, filesOnly) = await CompletedSessionAsync(); // satırı yok ama dosyaları geri yüklenmiş
+        var path = TempJournal();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var journal = JournalAt(path);
+        await journal.RecordAsync(new DeletionJournalEntry(restored.Session, restored.Organization, restored.Store, DateTimeOffset.UtcNow.AddDays(-1), "Session.PurgedByStaff"), ct);
+        await journal.RecordAsync(new DeletionJournalEntry(restored.Session, restored.Organization, restored.Store, DateTimeOffset.UtcNow, "Session.PurgedByRetention"), ct); // yinelenen satır
+        await journal.RecordAsync(new DeletionJournalEntry(filesOnly.Session, filesOnly.Organization, filesOnly.Store, DateTimeOffset.UtcNow, "Session.PurgedByStaff"), ct);
+        await File.AppendAllTextAsync(path, "bozuk satir\n{\"sessionId\":\"yok\"}\n", ct); // bozuk satırlar atlanır
+        // filesOnly oturumunun satırlarını sil (dosyalar kalır): geri yüklenmiş depo + daha yeni veritabanı durumu
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.TryOnSessions.IgnoreQueryFilters().Where(s => s.Id == filesOnly.Session).ExecuteDeleteAsync(ct);
+        }
+
+        Assert.True(Directory.EnumerateFiles(SessionDir(filesOnly), "*", SearchOption.AllDirectories).Any());
+
+        // Kuru çalışma: hiçbir şey silinmez
+        var dry = new StringWriter();
+        Assert.Equal(0, await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "reapply-deletions", "--journal", path], dry, ct));
+        Assert.Contains("KURU ÇALIŞMA", dry.ToString(), StringComparison.Ordinal);
+        Assert.Contains("2 benzersiz", dry.ToString(), StringComparison.Ordinal);
+        Assert.Equal(restored.Session, (await client.GetAsync<SessionDetail>($"/api/v1/sessions/{restored.Session}")).Id);
+
+        // Gerçek çalıştırma
+        var output = new StringWriter();
+        Assert.Equal(0, await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "reapply-deletions", "--journal", path, "--confirm"], output, ct));
+        Assert.Contains("1 oturum yeniden silindi, 1 depo öneki temizlendi", output.ToString(), StringComparison.Ordinal);
+        await AssertErasedAsync(restored, client);
+        Assert.False(Directory.Exists(SessionDir(filesOnly)) && Directory.EnumerateFiles(SessionDir(filesOnly), "*", SearchOption.AllDirectories).Any());
+        Assert.Equal(survivor.Session, (await otherClient.GetAsync<SessionDetail>($"/api/v1/sessions/{survivor.Session}")).Id); // günlükte olmayan oturum dokunulmadı
+        Assert.True(Directory.EnumerateFiles(SessionDir(survivor), "*", SearchOption.AllDirectories).Any());
+
+        // Tekrar çalıştırma: hata yok, değişiklik yok; günlük büyümedi (reapply günlüğe yazmaz)
+        var lines = (await File.ReadAllLinesAsync(path, ct)).Length;
+        var again = new StringWriter();
+        Assert.Equal(0, await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "reapply-deletions", "--journal", path, "--confirm"], again, ct));
+        Assert.Equal(lines, (await File.ReadAllLinesAsync(path, ct)).Length);
+        _ = otherTenant;
+    }
 }

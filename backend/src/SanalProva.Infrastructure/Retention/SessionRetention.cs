@@ -25,6 +25,12 @@ public sealed class RetentionSettings
     /// bu süreden yeni klasör/kayıtlara dokunulmaz.
     /// </summary>
     public int OrphanGraceMinutes { get; set; } = 60;
+
+    /// <summary>
+    /// Silme günlüğü dosyası (JSONL; bkz. <see cref="DeletionJournal"/>). Veritabanı ve depo yedeklerinin DIŞINDA bir birimde olmalıdır. Boşsa kapalı (geliştirme/test);
+    /// üretimde zorunludur.
+    /// </summary>
+    public string? DeletionJournalPath { get; set; }
 }
 
 /// <summary>
@@ -32,17 +38,24 @@ public sealed class RetentionSettings
 /// oturum öneki tek seferde), sonra veritabanı kayıtları (fotoğraf, seçim, iş, sonuç, onay — DB cascade), en son dosya metadata'sı.
 /// Maliyet kayıtları (<c>ai_usage_logs</c>) kişisel veri içermediği için kalır; oturum bağlantısı koparılır.
 /// </summary>
-public sealed class SessionPurger(IImageStorageService storage, DisplayStateService displays, TimeProvider clock, ILogger<SessionPurger> logger)
+public sealed class SessionPurger(IImageStorageService storage, DisplayStateService displays, TimeProvider clock, ILogger<SessionPurger> logger, DeletionJournal? journal = null)
 {
     private const int DbAttempts = 4;
 
-    public async Task PurgeAsync(AppDbContext db, Guid sessionId, string auditAction, Guid? userId, CancellationToken ct)
+    /// <param name="writeJournal">false yalnızca <c>reapply-deletions</c> içindir (günlükten gelen silme günlüğe yeniden yazılmaz).</param>
+    public async Task PurgeAsync(AppDbContext db, Guid sessionId, string auditAction, Guid? userId, CancellationToken ct, bool writeJournal = true)
     {
         ArgumentNullException.ThrowIfNull(db);
         var session = await db.TryOnSessions.IgnoreQueryFilters().AsNoTracking().SingleOrDefaultAsync(s => s.Id == sessionId, ct);
         if (session is null)
         {
             return;
+        }
+
+        // Silme günlüğü (yedekten geri yükleme koruması): önce-yaz, kişisel veri yok; yazılamazsa silme yine de sürer
+        if (writeJournal && journal is not null)
+        {
+            await journal.RecordAsync(new DeletionJournalEntry(sessionId, session.OrganizationId, session.StoreId, clock.GetUtcNow(), auditAction), ct);
         }
 
         // 0) Önce TV: müşteri görüntüsü ekrandan ve erişimden anında kalkar (dosya silme uzun sürse bile)
