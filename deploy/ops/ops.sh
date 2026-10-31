@@ -254,6 +254,7 @@ post_restore() { # post_restore <veritabanı>
   local db="$1"
   [[ "$db" =~ ^[A-Za-z0-9_]{3,100}$ ]] && ! [[ "$db" =~ $PROTECTED_RE ]] || die 2 "geçersiz/korumalı veritabanı adı"
   need MSSQL_SA_PASSWORD; wait_sql
+  sql_file sa "$MSSQL_SA_PASSWORD" post-restore-fix-users.sql "Database=$db" || die 44 "kullanıcı eşleme betiği başarısız"
   sql_file sa "$MSSQL_SA_PASSWORD" post-restore-quarantine.sql "Database=$db" || die 44 "karantina betiği başarısız"
   sql_file sa "$MSSQL_SA_PASSWORD" post-restore-check.sql "Database=$db" "RunCheckDb=${RUN_CHECKDB:-1}" || die 45 "geri yükleme sonrası tutarlılık denetimi BAŞARISIZ: veritabanı üretime alınmamalı"
 }

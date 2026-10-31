@@ -84,6 +84,30 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest
 
+  # Pilot Faz A: uretim dagitim paketi. Gizli kullanmaz (sirlar her kosuda rastgele uretilir, deploy/.env.prod runner'da kalir); sunucuya dagitim YAPMAZ.
+  deploy-package:
+    name: Uretim dagitim paketi (ops selftest, compose config, Caddy dogrulamasi)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ops betikleri selftest (gpg/tar/openssl gercek, sahte sqlcmd)
+        run: bash deploy/tests/ops-selftest.sh
+      - name: Uretim ortami uret + on kontrol + compose config
+        working-directory: deploy
+        run: |
+          bash scripts/prod-env.sh pilot.example.test
+          bash scripts/make-sql-cert.sh
+          bash scripts/preflight.sh
+      - name: Web imaji (React derleme + Caddy) ve Caddyfile dogrulamasi
+        run: |
+          docker build -t sanalprova-web:ci frontend
+          docker run --rm -e SITE_ADDRESS=pilot.example.test sanalprova-web:ci caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm -e SITE_ADDRESS=pilot.lan sanalprova-web:ci caddy validate --config /etc/caddy/Caddyfile.internal --adapter caddyfile
+          docker run --rm sanalprova-web:ci sh -c 'test -f /srv/index.html && test -f /srv/tv.html'
+      - name: Ops imaji derlenir (sqlcmd + gpg)
+        run: docker build -f deploy/ops/Dockerfile -t sanalprova-ops:ci deploy
+
   compose-smoke:
     name: Docker Compose smoke (SQL Server, migration, API, image-worker)
     runs-on: ubuntu-latest

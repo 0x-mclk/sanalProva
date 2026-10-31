@@ -127,13 +127,14 @@ tn "restore-db: geçersiz ad reddedilir" bash "$OPS" restore-db "$FULL1" --targe
 tn "restore-db: günlük seti tam set yerine verilemez" bash "$OPS" restore-db "$LOG1" --target sanalprova_restore_1 --confirm
 : > "$FAKE_LOG"
 t "restore-db: kuru çalışma SQL çağırmaz" bash -c "bash '$OPS' restore-db '$FULL1' --target sanalprova_restore_1 && [ ! -s '$FAKE_LOG' ]"
-t "restore-db: tam + günlük zinciri doğru sırayla (restore → restore-log → karantina → denetim)" bash -c "bash '$OPS' restore-db '$FULL1' --target sanalprova_restore_1 --log '$LOG1' --stopat 2026-11-01T10:00:00 --confirm"
+t "restore-db: tam + günlük zinciri doğru sırayla (restore → restore-log → kullanıcı eşleme → karantina → denetim)" bash -c "bash '$OPS' restore-db '$FULL1' --target sanalprova_restore_1 --log '$LOG1' --stopat 2026-11-01T10:00:00 --confirm"
 t "restore-db: SQL betik sırası ve değişkenleri" bash -c "
   mapfile -t lines < <(grep -v '^backup' '$FAKE_LOG')
   [[ \"\${lines[0]}\" == restore.sql*Target=sanalprova_restore_1*Recovery=NORECOVERY* ]] &&
   [[ \"\${lines[1]}\" == restore-log.sql*Target=sanalprova_restore_1*Recovery=RECOVERY*StopAt=2026-11-01T10:00:00 ]] &&
-  [[ \"\${lines[2]}\" == post-restore-quarantine.sql*Database=sanalprova_restore_1* ]] &&
-  [[ \"\${lines[3]}\" == post-restore-check.sql*Database=sanalprova_restore_1* ]]"
+  [[ \"\${lines[2]}\" == post-restore-fix-users.sql*Database=sanalprova_restore_1* ]] &&
+  [[ \"\${lines[3]}\" == post-restore-quarantine.sql*Database=sanalprova_restore_1* ]] &&
+  [[ \"\${lines[4]}\" == post-restore-check.sql*Database=sanalprova_restore_1* ]]"
 t "restore-db: geçici açık yedek dosyaları temizlendi" bash -c "[ -z \"\$(ls -A '$SQL_BACKUP_DIR')\" ]"
 tn "post-restore: korumalı veritabanında çalışmaz" bash "$OPS" post-restore --db sanalprova_test
 

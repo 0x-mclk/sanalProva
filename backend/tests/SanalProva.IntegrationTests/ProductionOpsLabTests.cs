@@ -62,7 +62,7 @@ public sealed class ProductionOpsLabTests
             ("Database", "sanalprova"), ("SourceDatabase", "sanalprova"), ("TargetDatabase", "sanalprova_restore_x"), ("BackupFile", "C:\\x\\y.bak"), ("Recovery", "RECOVERY"),
             ("StopAt", ""), ("RunCheckDb", "0"), ("AllowLoginlessUsers", "0"), ("SP_MIGRATOR_PW", "p1"), ("SP_APP_PW", "p2"), ("SP_BACKUP_PW", "p3"));
 
-        foreach (var file in new[] { "provision-production.sql", "harden-production.sql", "verify-production.sql", "backup-full.sql", "backup-log.sql", "restore.sql", "restore-log.sql", "post-restore-quarantine.sql", "post-restore-check.sql" })
+        foreach (var file in new[] { "provision-production.sql", "harden-production.sql", "verify-production.sql", "backup-full.sql", "backup-log.sql", "restore.sql", "restore-log.sql", "post-restore-quarantine.sql", "post-restore-check.sql", "post-restore-fix-users.sql" })
         {
             await RunAsync(admin, file, all, parseOnly: true);
         }
@@ -312,6 +312,8 @@ public sealed class ProductionOpsLabTests
             var check = Vars(("Database", restoredOnlyFull), ("RunCheckDb", "0"));
             Assert.Equal(51350, (await Assert.ThrowsAsync<SqlException>(() => RunAsync(source.AdminCs, "post-restore-check.sql", check))).Number);
 
+            await RunAsync(source.AdminCs, "post-restore-fix-users.sql", Vars(("Database", restoredOnlyFull))); // aynı sunucuda eşleşme sağlam: hiçbir şey değişmez, hata yok
+            await RunAsync(source.AdminCs, "post-restore-fix-users.sql", Vars(("Database", restoredOnlyFull)));
             var stampBefore = await ScalarAsync<string>(cs, $"SELECT security_stamp FROM users WHERE id = '{user}'");
             await RunAsync(source.AdminCs, "post-restore-quarantine.sql", Vars(("Database", restoredOnlyFull)));
             await RunAsync(source.AdminCs, "post-restore-quarantine.sql", Vars(("Database", restoredOnlyFull))); // idempotent
