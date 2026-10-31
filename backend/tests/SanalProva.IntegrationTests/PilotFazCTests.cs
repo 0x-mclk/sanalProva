@@ -347,4 +347,80 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
         Assert.Equal(MonitorLevel.Ok, PilotMonitoring.BudgetLevel(0m, 0m, 0m, closed));
         Assert.Equal(MonitorLevel.Critical, PilotMonitoring.BudgetLevel(0.01m, 0m, 0m, closed));
     }
+
+    private async Task SeedUncertainAsync(TestTenant tenant, DateTimeOffset occurredAt, decimal cost = 0.1m)
+    {
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            db.AiUsageLogs.Add(new SanalProva.Domain.Generation.AiUsageLog
+            {
+                OrganizationId = tenant.OrganizationId, StoreId = tenant.StoreId, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet", Attempt = 1,
+                Success = false, ErrorCode = SanalProva.Domain.Generation.GenerationErrorCode.OutcomeUncertain, EstimatedCostUsd = cost, EventKey = $"uncertain:{Guid.NewGuid()}",
+                ReconciliationState = SanalProva.Domain.Generation.CostReconciliationState.Open, OccurredAt = occurredAt,
+            });
+            await db.SaveChangesAsync(Ct);
+        }
+    }
+
+    [Fact]
+    public async Task Belirsiz_vaka_ve_asilan_butce_finans_ozetinde_ve_izlemede_gorunur()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var org = await TestData.CreateTenantAsync(Services, StoreRole.Owner);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var organization = await db.Organizations.SingleAsync(o => o.Id == org.OrganizationId, Ct);
+            organization.Settings.DailyBudgetUsd = 0.4m;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        await SeedUncertainAsync(org, DateTimeOffset.UtcNow.AddDays(-4));
+        var (spendScope, spendDb) = OpenDb();
+        using (spendScope)
+        {
+            spendDb.AiUsageLogs.Add(new SanalProva.Domain.Generation.AiUsageLog
+            {
+                OrganizationId = org.OrganizationId, StoreId = org.StoreId, Provider = "Fashn", Model = "tryon-max", Operation = "OutfitSet", Attempt = 1,
+                Success = true, EstimatedCostUsd = 0.5m, EventKey = $"spend:{Guid.NewGuid()}", OccurredAt = DateTimeOffset.UtcNow,
+            });
+            await spendDb.SaveChangesAsync(Ct);
+        }
+
+        var admin = await PlatformAdminClientAsync();
+        var row = Assert.Single(await admin.GetAsync<List<OrganizationFinance>>("/api/v1/platform/finance"), f => f.OrganizationId == org.OrganizationId);
+        Assert.Equal(1, row.OpenUncertainCases);
+        Assert.NotNull(row.OldestUncertainAt);
+        Assert.Equal(MonitorLevel.Critical, row.BudgetLevel); // bugünkü 0,50 $ firma günlük sınırını (0,40 $) aştı
+        Assert.Equal(0.4m, row.DailyLimitUsd);
+    }
+
+    [Fact]
+    public async Task Uc_gunu_asan_belirsiz_vaka_izlemede_kritiktir()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var org = await TestData.CreateTenantAsync(Services, StoreRole.Owner);
+        await SeedUncertainAsync(org, DateTimeOffset.UtcNow.AddDays(-4));
+        var admin = await PlatformAdminClientAsync();
+        var checks = await admin.GetAsync<List<MonitorCheck>>("/api/v1/platform/monitoring");
+        var uncertain = Assert.Single(checks, c => c.Name == "uncertain-cases");
+        Assert.Equal(MonitorLevel.Critical, uncertain.Level);
+        Assert.Contains("mutabakat", uncertain.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Operator_status_komutu_salt_okunur_calisir_ve_cikis_kodu_en_kotu_seviyeyi_yansitir()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var org = await TestData.CreateTenantAsync(Services, StoreRole.Owner);
+        await SeedUncertainAsync(org, DateTimeOffset.UtcNow.AddDays(-4));
+        var writer = new StringWriter();
+        var exit = await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "status"], writer, Ct);
+        var output = writer.ToString();
+        Assert.Equal(SanalProva.Api.Features.Platform.PlatformCommands.ExitMonitorCritical, exit);
+        Assert.Contains("[TAMAM ] database", output, StringComparison.Ordinal);
+        Assert.Contains("[KRİTİK] uncertain-cases", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(TestData.Password, output, StringComparison.Ordinal);
+    }
 }

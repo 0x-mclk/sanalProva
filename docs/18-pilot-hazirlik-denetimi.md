@@ -93,7 +93,7 @@ M5.5 ödeme entegrasyonu (manuel kredi yeterli) · QR ile TV eşleştirme · rev
 7. **E5** pilot mağazanın TV modeli/tablet/ağı bilgisi + gerçek TV denemesi (gerekirse yedek donanım).
 8. Ticari kararlar: pilot kredi kotası/fiyat politikası (M2), sonucun müşteriye teslimi (U3).
 
-**Faz C — Pilot öncesi küçük kod (~3–5 gün):**
+**Faz C — Pilot öncesi küçük kod (~3–5 gün):** ✅ **Yerelde uygulandı** ([docs/20](20-faz-c-pilot-kullanim-ve-guvenlik.md)); sunucu tarafı foto onayı ve dış uyarı iletimi yapılmadı.
 9. Boşta kilit + PIN (U1); fotoğraf çekim rehberi ve personel onayı (M1); kalan kredi göstergesi + düşük kredi uyarısı (M5); basit platform ekranları: mutabakat ve kredi/bütçe özeti (M3, O1); çıktı üzerinde "AI üretimi" ibaresi kararı (§3.5).
 10. Katalog başlangıç paketi ve ürün çekim kılavuzu (U2); izleme/uyarı asgari seti (O2).
 

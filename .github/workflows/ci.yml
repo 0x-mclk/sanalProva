@@ -93,6 +93,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Ops betikleri selftest (gpg/tar/openssl gercek, sahte sqlcmd)
         run: bash deploy/tests/ops-selftest.sh
+      - name: Izleme betigi selftest (sahte docker/df, cikis kodu esleme)
+        run: bash deploy/tests/monitor-selftest.sh
       - name: Uretim ortami uret + on kontrol + compose config
         working-directory: deploy
         run: |

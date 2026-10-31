@@ -45,7 +45,7 @@ public sealed class MigrationValidationTests
         Assert.Equal(migrations.Order(StringComparer.Ordinal).ToArray(), migrations);
         Assert.Equal(migrations.Length, migrations.Distinct().Count());
         Assert.All(migrations, m => Assert.Matches(@"^\d{14}_[A-Za-z0-9]+$", m));
-        Assert.EndsWith("_CreditSystem", migrations[^1], StringComparison.Ordinal);
+        Assert.EndsWith("_PinLockout", migrations[^1], StringComparison.Ordinal);
 
         await lab.MigrateAsync(Ct);
         await using (var db = lab.OpenMigrator())

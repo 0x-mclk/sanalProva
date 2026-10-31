@@ -27,6 +27,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | M5.3 Firma bazlı bütçe ve AI mutabakatı | ✅ yerelde tamamlandı ve doğrulandı (backend 639 test (4 beklenen atlama), React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/16](docs/16-m5-3-butce-ve-mutabakat.md)). Sıradaki: M5.4 kredi sistemi (onay bekliyor) |
 | M5.4 Firma bazlı kredi sistemi | ✅ yerelde tamamlandı ve doğrulandı (backend 693 test (4 beklenen atlama), React 147, Playwright 13/13); **CI/push kullanıcıda**; fiyat/paket kararı BEKLİYOR (varsayılan 1 kredi/üretim); ödeme yok ([docs/17](docs/17-m5-4-kredi-sistemi.md)). Sıradaki: M5.5 ödeme (onay bekliyor) |
 | Pilot Faz A Üretim dağıtımı ve operasyon | ✅ yerelde tamamlandı (`deploy/`, [docs/19](docs/19-uretim-dagitim-runbook.md)); **Docker/Caddy/TLS fiilen çalıştırılmadı** (bu makinede Docker yok; CI `deploy-package` + prova dağıtımı gerekir); push kullanıcıda. Sıradaki: Faz B/C (onay bekliyor) |
+| Pilot Faz C Tablet güvenliği, kredi görünürlüğü, platform finansı, izleme | ✅ yerelde tamamlandı ([docs/20](docs/20-faz-c-pilot-kullanim-ve-guvenlik.md)); PIN/ekran kilidi (arayüz kalkanı, sunucuda PIN doğrulama), foto onayı (yalnızca arayüz), `GET /credits/balance|quote`, `/platform/finans|mutabakat`, `platform status` + `deploy/scripts/monitor.sh`; yeni migration `PinLockout`; **push yapılmadı** |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 

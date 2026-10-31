@@ -100,6 +100,17 @@ test('platform yöneticisi → işletme oluşturma → ayrı tarayıcıda şifre
   await a.page.goto('/'); // mağaza ekranı yerine panele döner
   await a.page.waitForURL('**/platform');
 
+  // Faz C: finans/izleme ve mutabakat ekranları (yalnızca platform yöneticisi)
+  await a.page.getByRole('link', { name: 'Finans ve izleme' }).click();
+  await expect(a.page.getByRole('heading', { name: 'Finans ve izleme' })).toBeVisible();
+  await expect(a.page.getByTestId('check-database')).toBeVisible();
+  await expect(a.page.getByTestId('check-disk')).toBeVisible();
+  await expect(a.page.getByTestId('check-uncertain-cases')).toBeVisible();
+  await a.page.getByRole('link', { name: 'Mutabakat' }).click();
+  await expect(a.page.getByRole('heading', { name: 'Mutabakat' })).toBeVisible();
+  await a.page.getByRole('link', { name: 'İşletmeler' }).click();
+  await expect(a.page.getByRole('heading', { name: 'İşletmeler' })).toBeVisible();
+
   // --- 3) İşletme oluştur → kurulum bağlantısı yalnızca bir kez
   await a.page.getByRole('link', { name: 'Yeni işletme' }).click();
   await a.page.waitForURL('**/platform/yeni');

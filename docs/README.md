@@ -28,6 +28,7 @@ Bu klasör, yapay zekâ destekli sanal kıyafet prova sisteminin Aşama 0 çıkt
 | 17 | [Firma bazlı kredi sistemi](17-m5-4-kredi-sistemi.md) | **M5.4**: kredi hesabı, değiştirilemez defter, rezervasyon/kapanış, tarife, operatör yüklemesi, kredi ekranı (ödeme yok: M5.5) |
 | 18 | [Pilot hazırlık denetimi](18-pilot-hazirlik-denetimi.md) | Uçtan uca denetim: engelleyici / önemli / sonraya sınıflandırması ve çözüm sırası |
 | 19 | [Üretim dağıtımı ve operasyon runbook'u](19-uretim-dagitim-runbook.md) | **Pilot Faz A**: Caddy/TLS + prod Compose, yedek/geri yükleme, KVKK silme günlüğü, açılış, kredi/bütçe/AI sırası, acil durdurma, izleme listesi, doğrulama durumu |
+| 20 | [Faz C: pilot kullanım ve güvenlik](20-faz-c-pilot-kullanim-ve-guvenlik.md) | **Pilot Faz C**: ekran kilidi/PIN, foto rehberi ve onayı, kredi görünürlüğü, platform finans/mutabakat ekranları, katalog başlangıcı, izleme |
 | 11 | [Aşama 4: AI entegrasyon planı, maliyet sınırları ve kontrollü test planı](11-ai-entegrasyon-plani-ve-test.md) | Doğrulanan API bilgileri, bütçe kapıları, test sonuçları, **onay bekleyen canlı test planı** |
 
 ## Özet: temel mimari kararlar

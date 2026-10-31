@@ -161,9 +161,18 @@ dc up -d api web                                    # db-harden yeniden çalış
 ```
 Eski veritabanı en az 7 gün silinmeden saklanır (geri dönüş: adları tersine çevirmek). Silmek (`DROP DATABASE`) ayrı, bilinçli bir karardır.
 
-## 11. Asgari izleme kontrol listesi
+## 11. Asgari izleme (Faz C: betik + ekran + kontrol listesi)
 
-Günlük (5 dk) ve/veya otomatik uyarı:
+**Otomatik kontrol (`deploy/scripts/monitor.sh`, salt okunur):** servis durumu, disk doluluğu (≥%80 uyarı, ≥%90 kritik), yedek yaşı (tam set ≥26 sa uyarı/≥50 sa kritik; günlük seti ≥30 dk uyarı/≥3 sa kritik), site erişimi ve uygulamanın kendi kontrolleri (`platform status`: veritabanı bağlantısı, depo diski, takılı iş, bekleyen belirsiz maliyet, firma bütçesi %80/%100, düşük kredi). Çıkış kodu **0 sorun yok / 10 uyarı / 11 kritik**; sır yazdırmaz. Cron örneği (uyarı iletimi — e-posta/Telegram/UptimeRobot "heartbeat" — sizin kuracağınız dış sistemdir, uygulamada YOKTUR):
+
+```cron
+*/10 * * * *  cd /opt/sanalprova/deploy && ./scripts/monitor.sh >> /var/log/sanalprova-monitor.log 2>&1 || /usr/local/bin/sizin-uyari-komutunuz "$?"
+```
+Ekran: platform yöneticisi **/platform/finans** sayfasında aynı uygulama kontrollerini ve işletme bazlı kredi/bütçe/açık rezervasyon özetini görür; **/platform/mutabakat** sayfasında belirsiz maliyet vakalarına karar verir (mevcut güvenli API: idempotent, `expectedSequence` çakışma denetimli, değiştirilemez defter). Elle kontrol: `dc run --rm --no-deps api platform status`.
+
+Eşikler sabittir (pilot): belirsiz vaka 24 sa uyarı / 72 sa kritik; takılı iş: kuyrukta 15 dk, çalışırken 20 dk; kredi uyarı eşiği `Credits:LowBalanceThreshold` (varsayılan 10). **Doğrulama:** betik mantığı `deploy/tests/monitor-selftest.sh` ile (sahte docker/df), uygulama kontrolleri backend testleriyle doğrulandı; gerçek Docker ortamında çalıştırılmadı.
+
+Günlük (5 dk) elle kontrol listesi (otomasyon kurulana kadar veya ek olarak):
 - [ ] **Servis sağlığı:** `dc ps` (hepsi healthy; `web`, `api`, `sqlserver`); dışarıdan `https://SITE/` 200. (Harici bir çalışma süresi izleyicisi — örn. UptimeRobot — sitenin ana sayfasına bakacak şekilde kurun; `/health/*` dışarıya kapalıdır.)
 - [ ] **Disk:** `df -h` — Docker birimleri ve `backups/` < %80. (`docker system df`)
 - [ ] **Yedek yaşı:** `ops list` — son günlük seti < 30 dk, son tam set < 26 saat; cron günlüğünde (`/var/log/sanalprova-backup.log`) hata yok; uzak kopya güncel.

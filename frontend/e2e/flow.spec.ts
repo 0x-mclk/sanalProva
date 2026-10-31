@@ -31,6 +31,9 @@ async function startSessionViaUi(page: Page, seed: number): Promise<string> {
 
   await page.locator('input[type="file"]').nth(1).setInputFiles({ name: 'sentetik.png', mimeType: 'image/png', buffer: syntheticPortraitPng(900, 1500, seed) });
   await expect(page.getByText('Fotoğraf hazır')).toBeVisible();
+  // Faz C: personel fotoğraf uygunluğunu onaylamadan devam edilemez
+  await expect(page.getByRole('button', { name: 'Devam Et' })).toBeDisabled();
+  for (const box of await page.getByRole('checkbox').all()) await box.check();
   await page.getByRole('button', { name: 'Devam Et' }).click();
   await page.getByRole('button', { name: /Hazır Takım veya Kaftan/ }).click();
   await page.waitForURL(/\/takim$/);

@@ -303,7 +303,7 @@ public sealed class AgreementTests(ApiFactory factory) : ApiTestBase(factory)
         "POST /api/v1/display/pairing", "GET /api/v1/display/pairing/status", // TV eşleştirme kodu: anonim (cihaz henüz kimliksiz)
         // --- Gerekçeli muaf (AgreementExemptMetadata): giriş/çıkış/oturum bilgisi, sözleşme görüntüleme/kabul, platform yönetimi, TV cihazı
         "POST /api/v1/auth/logout", "GET /api/v1/auth/me", "GET /api/v1/agreement/current", "POST /api/v1/organization/agreement-acceptance",
-        "GET /api/v1/platform/cost-cases/", "GET /api/v1/platform/cost-cases/{id:guid}", "POST /api/v1/platform/cost-cases/{id:guid}/decisions",
+        "GET /api/v1/platform/cost-cases/", "GET /api/v1/platform/finance", "GET /api/v1/platform/monitoring", "GET /api/v1/account/lock", "POST /api/v1/account/unlock", "GET /api/v1/platform/cost-cases/{id:guid}", "POST /api/v1/platform/cost-cases/{id:guid}/decisions",
         "POST /api/v1/platform/organizations/", "GET /api/v1/platform/organizations/", "GET /api/v1/platform/organizations/{id:guid}", "POST /api/v1/platform/organizations/{id:guid}/owner/setup-link",
         "GET /api/v1/display/state", "ANY /hubs/display", "ANY /hubs/display/negotiate",
     };
