@@ -57,11 +57,17 @@ public static class StaffManagementEndpoints
     private static Task<IResult> SetStatusAsync(Guid id, SetStaffStatusRequest request, StaffManagementService service, CurrentUser user, CancellationToken ct) =>
         Run(async () => TypedResults.Ok(await service.SetActiveAsync(user.UserId, user.OrganizationId, id, request.IsActive, ct)));
 
-    private static Task<IResult> IssueLinkAsync(Guid id, StaffManagementService service, CurrentUser user, HttpContext http, CancellationToken ct) =>
+    private static Task<IResult> IssueLinkAsync(
+        Guid id, [Microsoft.AspNetCore.Mvc.FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, StaffManagementService service, CurrentUser user, HttpContext http, CancellationToken ct) =>
         Run(async () =>
         {
             PlatformOrganizationEndpoints.NoStore(http);
-            return TypedResults.Ok(await service.IssueLinkAsync(user.UserId, user.OrganizationId, id, ct));
+            if (idempotencyKey is not null && idempotencyKey.Length is < 8 or > 64)
+            {
+                return ApiProblems.BadRequest("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key 8–64 karakter olmalı.");
+            }
+
+            return TypedResults.Ok(await service.IssueLinkAsync(user.UserId, user.OrganizationId, id, ct, idempotencyKey));
         });
 
     private static Task<IResult> RevokeLinksAsync(Guid id, StaffManagementService service, CurrentUser user, CancellationToken ct) =>
@@ -90,6 +96,7 @@ public static class StaffManagementEndpoints
                 StaffFailure.StoreInactive => ApiProblems.Conflict("STORE_INACTIVE", "Pasif şubeye yeni atama yapılamaz."),
                 StaffFailure.NoAssignment => ApiProblems.BadRequest("ASSIGNMENT_REQUIRED", "En az bir şube ataması gerekli."),
                 StaffFailure.LastOwner => ApiProblems.Conflict("LAST_OWNER", "Firmadaki son etkin Owner'ın yetkisi kaldırılamaz veya hesabı pasife alınamaz."),
+                StaffFailure.LinkAlreadyIssued => ApiProblems.Conflict("SETUP_LINK_ALREADY_ISSUED", "Bu istekle bağlantı zaten üretildi ve bir daha gösterilemez. Yeni bir bağlantı gerekiyorsa yeniden üretin (öncekini iptal eder)."),
                 StaffFailure.UserInactive => ApiProblems.Conflict("USER_INACTIVE", "Pasif hesap için bağlantı üretilemez; önce hesabı etkinleştirin."),
                 _ => ApiProblems.Create(StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "Beklenmeyen bir hata oluştu."),
             };

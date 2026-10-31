@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SanalProva.Api.Features.Agreement;
+using SanalProva.Api.Hubs;
+using SanalProva.Api.Infrastructure;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Infrastructure.Identity;
 using SanalProva.Infrastructure.Persistence;
@@ -33,19 +35,28 @@ public static class AuthEndpoints
 
         group.MapPost("/login", LoginAsync).RequireRateLimiting(LoginRateLimitPolicy).Produces<MeResponse>();
 
-        group.MapPost("/logout", async (SignInManager<AppUser> signIn) =>
+        group.MapPost("/logout", async (SignInManager<AppUser> signIn, ClaimsPrincipal principal, AppDbContext db, StaffConnectionRegistry connections) =>
         {
+            // Sunucu tarafı oturum satırı silinir (aynı çerez bir daha kullanılamaz) ve bu oturumun açık hub bağlantıları kesilir
+            if (Guid.TryParse(principal.FindFirstValue(AppClaims.SessionId), out var sessionId))
+            {
+                await db.AuthSessions.Where(s => s.Id == sessionId).ExecuteDeleteAsync();
+                connections.AbortSession(sessionId);
+            }
+
             await signIn.SignOutAsync();
             return TypedResults.NoContent();
-        }).RequireAuthorization().AllowWithoutAgreement("Çıkış: kabul edilmemiş firmanın kullanıcısı da oturumu kapatabilmeli");
+        }).RequireAuthorization().AllowWithoutAgreement("Çıkış: kabul edilmemiş firmanın kullanıcısı da oturumu kapatabilmeli")
+            .AllowWhileLocked("Çıkış: kilitli ekrandan da çıkış yapılabilmeli");
 
-        group.MapGet("/me", GetMeAsync).RequireAuthorization().AllowWithoutAgreement("Oturum bilgisi: arayüz sözleşme yönlendirmesini buradan alır").Produces<MeResponse>();
+        group.MapGet("/me", GetMeAsync).RequireAuthorization().AllowWithoutAgreement("Oturum bilgisi: arayüz sözleşme yönlendirmesini buradan alır")
+            .AllowWhileLocked("Kimlik bilgisi (ad, şube listesi): müşteri verisi içermez; arayüz kilit ekranını çizmek için kullanır").Produces<MeResponse>();
 
         return api;
     }
 
     private static async Task<IResult> LoginAsync(
-        LoginRequest request, UserManager<AppUser> users, SignInManager<AppUser> signIn, AppDbContext db, AgreementGate gate, CancellationToken ct)
+        LoginRequest request, UserManager<AppUser> users, SignInManager<AppUser> signIn, AppDbContext db, AgreementGate gate, TimeProvider clock, CancellationToken ct)
     {
         // Hangi alanın yanlış olduğu söylenmez (kullanıcı adı tahmini engellenir)
         var invalid = Results.Problem(
@@ -64,7 +75,7 @@ public static class AuthEndpoints
             return invalid;
         }
 
-        var result = await signIn.PasswordSignInAsync(user, request.Password, request.RememberMe, lockoutOnFailure: true);
+        var result = await signIn.CheckPasswordSignInAsync(user, request.Password, lockoutOnFailure: true);
         if (result.IsLockedOut)
         {
             return Results.Problem(
@@ -77,6 +88,14 @@ public static class AuthEndpoints
         {
             return invalid;
         }
+
+        // Sunucu tarafı oturum satırı (ekran kilidi durumu burada): çerezin sp_sid claim'i bu satıra bağlanır. Eski satırlar temizlenir (çerez ömrü 12 sa).
+        var now = clock.GetUtcNow();
+        await db.AuthSessions.Where(s => s.UserId == user.Id && s.LastInteractionAt < now.AddDays(-3)).ExecuteDeleteAsync(ct);
+        var session = new AuthSession { UserId = user.Id, CreatedAt = now, LastInteractionAt = now };
+        db.AuthSessions.Add(session);
+        await db.SaveChangesAsync(ct);
+        await signIn.SignInWithClaimsAsync(user, request.RememberMe, [new Claim(AppClaims.SessionId, session.Id.ToString())]);
 
         return TypedResults.Ok(await BuildMeAsync(db, gate, user, ct));
     }

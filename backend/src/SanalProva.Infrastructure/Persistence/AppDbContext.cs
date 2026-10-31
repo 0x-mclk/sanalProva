@@ -34,6 +34,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options, ITenant
     public DbSet<Store> Stores => Set<Store>();
     public DbSet<UserStoreRole> UserStoreRoles => Set<UserStoreRole>();
     public DbSet<AccountSetupToken> AccountSetupTokens => Set<AccountSetupToken>();
+    public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
     public DbSet<OrganizationAgreementAcceptance> OrganizationAgreementAcceptances => Set<OrganizationAgreementAcceptance>();
 
     public DbSet<Category> Categories => Set<Category>();

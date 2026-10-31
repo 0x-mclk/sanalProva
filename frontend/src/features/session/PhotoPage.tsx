@@ -22,7 +22,6 @@ import {
 } from '../../shared/ui';
 import { CameraView, type CameraHandle, type CameraStatus } from './CameraView';
 import { PhotoApproval, PhotoGuide } from './PhotoGuide';
-import { isPhotoApproved } from './photoApproval';
 import classes from './PhotoPage.module.css';
 
 /** Müşteri fotoğrafı çekme/yükleme (referans: "Müşteri fotoğrafı"). */
@@ -40,7 +39,6 @@ export function PhotoPage() {
   const [retaking, setRetaking] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [approvedState, setApprovedState] = useState<{ photoId: string; approved: boolean } | null>(null);
 
   if (session.isLoading) {
     return (
@@ -102,7 +100,7 @@ export function PhotoPage() {
   };
 
   const warnings = photo?.quality.warnings ?? [];
-  const approved = photo ? (approvedState?.photoId === photo.id ? approvedState.approved : isPhotoApproved(photo.id)) : false;
+  const approved = Boolean(photo?.staffApprovedAt); // onay sunucuda kayıtlı (yeniden çekim yeni fotoğraf = onaysız)
 
   return (
     <main className="sp-page">
@@ -185,7 +183,7 @@ export function PhotoPage() {
           ) : null}
           {photo ? <p className={classes.checkNote}>Kontrol edilenler: yön, çözünürlük ve netlik. Kişi sayısı ve tam boy otomatik denetlenmez.</p> : null}
 
-          {photo && !retaking ? <PhotoApproval key={photo.id} photoId={photo.id} approved={approved} onChange={(value) => setApprovedState({ photoId: photo.id, approved: value })} /> : null}
+          {photo && !retaking ? <PhotoApproval key={photo.id} sessionId={data.id} photoId={photo.id} approved={approved} /> : null}
 
           {photo && !retaking ? (
             <div className={classes.footerActions}>

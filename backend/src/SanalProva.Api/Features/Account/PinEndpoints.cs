@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SanalProva.Api.Features.Agreement;
+using SanalProva.Api.Hubs;
 using SanalProva.Api.Infrastructure;
 using SanalProva.Infrastructure.Identity;
 using SanalProva.Infrastructure.Persistence;
@@ -11,7 +12,8 @@ namespace SanalProva.Api.Features.Account;
 
 /// <param name="HasPin">Kullanıcının PIN'i var mı (yoksa kilit parolayla açılır).</param>
 /// <param name="IdleLockSeconds">Bu kadar süre işlem yapılmazsa arayüz kilitlenir (sunucu yapılandırması).</param>
-public sealed record LockStatusDto(bool HasPin, int IdleLockSeconds);
+/// <param name="Locked">Bu çerez oturumu SUNUCUDA kilitli mi (sayfa yenileme/ikinci sekme de bu değeri okur).</param>
+public sealed record LockStatusDto(bool HasPin, int IdleLockSeconds, bool Locked);
 
 /// <param name="CurrentPassword">PIN belirlemek/değiştirmek hesap parolasını gerektirir: açık bırakılmış bir tablet PIN'i değiştiremez.</param>
 public sealed record SetPinRequest(
@@ -55,24 +57,58 @@ public static class PinEndpoints
     public static RouteGroupBuilder MapPinEndpoints(this RouteGroupBuilder api)
     {
         var group = api.MapGroup("/account").WithTags("Account");
-        group.MapGet("/lock", GetStatusAsync).RequireAuthorization().AllowWithoutAgreement("Kilit durumu: sözleşmesi kabul edilmemiş firmanın kullanıcısı da kilidini açabilmeli").Produces<LockStatusDto>();
+        group.MapGet("/lock", GetStatusAsync).RequireAuthorization().AllowWithoutAgreement("Kilit durumu: sözleşmesi kabul edilmemiş firmanın kullanıcısı da kilidini açabilmeli")
+            .AllowWhileLocked("Kilit durumu: kilit ekranı ve diğer sekmeler sunucudaki durumu buradan okur").Produces<LockStatusDto>();
+        // Kilitleme (boşta veya elle): sunucu bu çerez oturumunu kilitler ve açık hub bağlantılarını keser
+        group.MapPost("/lock", LockAsync).RequireAuthorization().AllowWithoutAgreement("Kilitleme: sözleşmesi kabul edilmemiş firmanın kullanıcısı da kilitleyebilmeli")
+            .AllowWhileLocked("Kilitleme tekrar edilebilir (zaten kilitliyken de güvenli)").Produces(StatusCodes.Status204NoContent);
+        // Etkileşim sinyali: boşta süresini sıfırlar. Kilitliyken ÇAĞRILAMAZ (423): kilit yalnızca PIN/parola ile açılır.
+        group.MapPost("/activity", ActivityAsync).RequireAuthorization().AllowWithoutAgreement("Etkileşim sinyali: ekran kilidi sözleşme kabulünden bağımsızdır").Produces(StatusCodes.Status204NoContent);
         group.MapPut("/pin", SetPinAsync).RequireAuthorization().RequireRateLimiting(PinPolicy.UnlockRateLimit).Produces(StatusCodes.Status204NoContent);
         group.MapPost("/unlock", UnlockAsync).RequireAuthorization().RequireRateLimiting(PinPolicy.UnlockRateLimit)
-            .AllowWithoutAgreement("Kilit açma: kilit ekranı sözleşme kabulünden bağımsız çalışmalı").Produces(StatusCodes.Status204NoContent);
+            .AllowWithoutAgreement("Kilit açma: kilit ekranı sözleşme kabulünden bağımsız çalışmalı")
+            .AllowWhileLocked("Kilit açma: kilitliyken çalışabilmesi gereken tek yol (PIN/parola sunucuda doğrulanır, hız sınırlı)").Produces(StatusCodes.Status204NoContent);
         return api;
     }
 
-    private static async Task<IResult> GetStatusAsync(ClaimsPrincipal principal, AppDbContext db, IConfiguration configuration, CancellationToken ct)
+    private static async Task<IResult> GetStatusAsync(ClaimsPrincipal principal, AppDbContext db, IConfiguration configuration, HttpContext http, CancellationToken ct)
     {
         var userId = principal.GetUserId();
         var hasPin = userId is { } id && await db.Users.AsNoTracking().AnyAsync(u => u.Id == id && u.PinHash != null, ct);
-        return TypedResults.Ok(new LockStatusDto(hasPin, IdleSeconds(configuration)));
+        return TypedResults.Ok(new LockStatusDto(hasPin, IdleSeconds(configuration), ScreenLockState.IsLocked(http)));
+    }
+
+    private static Guid? SessionOf(ClaimsPrincipal principal) => Guid.TryParse(principal.FindFirstValue(AppClaims.SessionId), out var id) ? id : null;
+
+    private static async Task<IResult> LockAsync(ClaimsPrincipal principal, AppDbContext db, StaffConnectionRegistry connections, TimeProvider clock, CancellationToken ct)
+    {
+        if (SessionOf(principal) is not { } sessionId)
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        var now = clock.GetUtcNow();
+        await db.AuthSessions.Where(s => s.Id == sessionId && s.LockedAt == null).ExecuteUpdateAsync(u => u.SetProperty(s => s.LockedAt, now), ct);
+        connections.AbortSession(sessionId); // müşteri/TV bildirimleri bu cihaza akmaz; kilit açılınca istemci yeniden bağlanır
+        return TypedResults.NoContent();
+    }
+
+    private static async Task<IResult> ActivityAsync(ClaimsPrincipal principal, AppDbContext db, TimeProvider clock, CancellationToken ct)
+    {
+        if (SessionOf(principal) is not { } sessionId)
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        var now = clock.GetUtcNow();
+        await db.AuthSessions.Where(s => s.Id == sessionId && s.LockedAt == null).ExecuteUpdateAsync(u => u.SetProperty(s => s.LastInteractionAt, now), ct);
+        return TypedResults.NoContent();
     }
 
     public static int IdleSeconds(IConfiguration configuration) => Math.Clamp(configuration.GetValue("Security:IdleLockSeconds", 300), 60, 3600);
 
     private static async Task<IResult> SetPinAsync(
-        SetPinRequest request, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, CancellationToken ct)
+        SetPinRequest request, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, StaffConnectionRegistry connections, CancellationToken ct)
     {
         var user = await users.GetUserAsync(principal);
         if (user is null || !user.IsActive)
@@ -88,7 +124,7 @@ public static class PinEndpoints
         // Yanlış parola da aynı sayaca girer: PIN değiştirme yoluyla parola denenemez
         if (!await users.CheckPasswordAsync(user, request.CurrentPassword))
         {
-            return await FailAsync(user, users, db, audit, "INVALID_PASSWORD", ct);
+            return await FailAsync(user, users, db, audit, connections, "INVALID_PASSWORD", ct);
         }
 
         user.PinHash = users.PasswordHasher.HashPassword(user, request.Pin);
@@ -101,7 +137,7 @@ public static class PinEndpoints
     }
 
     private static async Task<IResult> UnlockAsync(
-        UnlockRequest request, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, CancellationToken ct)
+        UnlockRequest request, ClaimsPrincipal principal, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, StaffConnectionRegistry connections, TimeProvider clock, CancellationToken ct)
     {
         var user = await users.GetUserAsync(principal);
         if (user is null || !user.IsActive)
@@ -122,7 +158,7 @@ public static class PinEndpoints
             : user.PinHash is null && await users.CheckPasswordAsync(user, request.Password!);
         if (!ok)
         {
-            return await FailAsync(user, users, db, audit, usePin ? "INVALID_PIN" : "INVALID_PASSWORD", ct);
+            return await FailAsync(user, users, db, audit, connections, usePin ? "INVALID_PIN" : "INVALID_PASSWORD", ct);
         }
 
         if (user.PinFailedAttempts != 0)
@@ -131,10 +167,17 @@ public static class PinEndpoints
             await users.UpdateAsync(user);
         }
 
+        // Sunucu tarafı kilit açılır (yalnızca BU çerez oturumu) ve boşta süresi baştan başlar
+        if (SessionOf(principal) is { } sessionId)
+        {
+            var now = clock.GetUtcNow();
+            await db.AuthSessions.Where(s => s.Id == sessionId && s.UserId == user.Id).ExecuteUpdateAsync(u => u.SetProperty(s => s.LockedAt, (DateTimeOffset?)null).SetProperty(s => s.LastInteractionAt, now), ct);
+        }
+
         return TypedResults.NoContent();
     }
 
-    private static async Task<IResult> FailAsync(AppUser user, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, string code, CancellationToken ct)
+    private static async Task<IResult> FailAsync(AppUser user, UserManager<AppUser> users, AppDbContext db, AuditTrail audit, StaffConnectionRegistry connections, string code, CancellationToken ct)
     {
         // Atomik artış: paralel denemeler sayacı atlatamaz
         await users.Users.Where(u => u.Id == user.Id).ExecuteUpdateAsync(s => s.SetProperty(u => u.PinFailedAttempts, u => u.PinFailedAttempts + 1), ct);
@@ -146,6 +189,8 @@ public static class PinEndpoints
             {
                 fresh.PinFailedAttempts = 0;
                 await users.UpdateSecurityStampAsync(fresh); // tüm oturumlar bir sonraki istekte düşer (ActiveUserCookieValidator)
+                connections.AbortUser(fresh.Id); // açık hub bağlantıları da hemen kesilir (damga yalnızca bağlanırken denetlenir)
+                await db.AuthSessions.Where(a => a.UserId == fresh.Id).ExecuteDeleteAsync(ct);
                 audit.RecordFor(fresh.OrganizationId, fresh.Id, "Account.PinLockout", nameof(AppUser), fresh.Id);
                 await db.SaveChangesAsync(ct);
             }

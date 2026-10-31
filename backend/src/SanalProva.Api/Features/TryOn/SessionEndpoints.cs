@@ -48,6 +48,8 @@ public static class SessionEndpoints
         group.MapDelete("/{id:guid}/consent", WithdrawConsentAsync).Produces(StatusCodes.Status204NoContent);
         group.MapPost("/{id:guid}/photos", UploadPhotoAsync).DisableAntiforgery().Produces<PhotoDto>(StatusCodes.Status201Created);
         group.MapDelete("/{id:guid}/photos/{photoId:guid}", DeletePhotoAsync).Produces<SessionDetail>();
+        group.MapPost("/{id:guid}/photos/{photoId:guid}/approval", ApprovePhotoAsync).Produces<PhotoDto>();
+        group.MapDelete("/{id:guid}/photos/{photoId:guid}/approval", RevokePhotoApprovalAsync).Produces<PhotoDto>();
         group.MapPut("/{id:guid}/draft", SaveDraftAsync).Produces<DraftDto>();
         group.MapPost("/{id:guid}/close", CloseAsync).Produces<SessionDetail>();
         group.MapDelete("/{id:guid}", DeleteAsync).Produces(StatusCodes.Status204NoContent);
@@ -258,6 +260,73 @@ public static class SessionEndpoints
 
         await DeleteFilesAsync(db, images, replaced.Select(p => p.FileId), ct);
         return TypedResults.Created($"/api/v1/sessions/{id}", reader.ToPhotoDto(photo, links.Customer(saved.File)));
+    }
+
+    /// <summary>
+    /// Personelin fotoğraf uygunluk onayı (Pilot öncesi kapanış): ücretli üretim kabulü bu kaydı SUNUCUDA arar. Onay yalnızca bu oturumdaki bu fotoğraf satırına yazılır
+    /// (başka oturum/şube fotoğrafı bulunamaz: 404), kapalı oturumda ve müşteri onayı yokken verilemez; üç beyanın hepsi gerekir. Yeniden çekim yeni satır üretir: onay taşınmaz.
+    /// </summary>
+    private static async Task<IResult> ApprovePhotoAsync(
+        Guid id, Guid photoId, PhotoApprovalRequest request, AppDbContext db, CurrentUser user, SessionReader reader, ImageLinks links, AuditTrail audit, TimeProvider clock, CancellationToken ct)
+    {
+        var session = await reader.LoadAsync(id, ct);
+        var photo = session?.Photos.SingleOrDefault(p => p.Id == photoId);
+        if (session is null || photo is null)
+        {
+            return ApiProblems.NotFound("Fotoğraf bulunamadı.");
+        }
+
+        if (session.Status != SessionStatus.Open)
+        {
+            return ApiProblems.Conflict("SESSION_CLOSED", "Bu prova kapatılmış.");
+        }
+
+        if (session.Consent?.AllowsProcessing != true)
+        {
+            return ApiProblems.Conflict("CONSENT_REQUIRED", "Fotoğraf onayından önce müşteri onayı alınmalı.");
+        }
+
+        if (!request.SinglePersonFullBody || !request.FrontalUprightPose || !request.SharpAndWellLit)
+        {
+            return ApiProblems.BadRequest("APPROVAL_INCOMPLETE", "Üç madde de onaylanmalı: tek kişi/tam boy, dik ve önden duruş, net ve aydınlık görüntü.");
+        }
+
+        if (photo.StaffApprovedAt is null)
+        {
+            photo.StaffApprovedAt = clock.GetUtcNow();
+            photo.StaffApprovedByUserId = user.UserId;
+            audit.Record("Photo.StaffApproved", nameof(SessionPhoto), photo.Id);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return TypedResults.Ok(await ToDtoAsync(db, reader, links, photo, ct));
+    }
+
+    private static async Task<IResult> RevokePhotoApprovalAsync(
+        Guid id, Guid photoId, AppDbContext db, SessionReader reader, ImageLinks links, AuditTrail audit, CancellationToken ct)
+    {
+        var session = await reader.LoadAsync(id, ct);
+        var photo = session?.Photos.SingleOrDefault(p => p.Id == photoId);
+        if (session is null || photo is null)
+        {
+            return ApiProblems.NotFound("Fotoğraf bulunamadı.");
+        }
+
+        if (photo.StaffApprovedAt is not null)
+        {
+            photo.StaffApprovedAt = null;
+            photo.StaffApprovedByUserId = null;
+            audit.Record("Photo.StaffApprovalRevoked", nameof(SessionPhoto), photo.Id);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return TypedResults.Ok(await ToDtoAsync(db, reader, links, photo, ct));
+    }
+
+    private static async Task<PhotoDto> ToDtoAsync(AppDbContext db, SessionReader reader, ImageLinks links, SessionPhoto photo, CancellationToken ct)
+    {
+        var file = await db.StoredFiles.AsNoTracking().SingleAsync(f => f.Id == photo.FileId, ct);
+        return reader.ToPhotoDto(photo, links.Customer(file));
     }
 
     private static async Task<IResult> DeletePhotoAsync(Guid id, Guid photoId, AppDbContext db, SessionReader reader, ImageStore images, DisplayStateService displays, AuditTrail audit, CancellationToken ct)

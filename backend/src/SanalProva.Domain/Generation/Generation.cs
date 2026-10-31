@@ -104,6 +104,13 @@ public sealed class GenerationJob : Entity, IStoreOwned
     /// </summary>
     public int? CreditCost { get; init; }
 
+    /// <summary>
+    /// İş kabul edildiğinde sağlayıcı modu: <c>true</c> = gerçek (ücretli kapılar, bütçe/kredi rezervasyonu uygulandı), <c>false</c> = mock. İşçi YALNIZCA kendi moduyla eşleşen işi alır:
+    /// mock modda kabul edilmiş iş (ücretli kapıdan geçmemiş) sonradan gerçek sağlayıcıya, gerçek modda kabul edilmiş iş (kredi/bütçe ayrılmış) mock'a (DEMO çıktıya kredi düşürerek) gitmez.
+    /// <c>null</c> = bu alandan önce kabul edilmiş eski satır (her iki mod alabilir).
+    /// </summary>
+    public bool? AdmittedLive { get; init; }
+
     public GenerationStage? Stage { get; set; }
 
     /// <summary>Aynı fotoğraf + aynı seçim + aynı iş tipi için özet. Gerçek sağlayıcıda aynı isteğin ikinci kez ücretlendirilmesini önler.</summary>

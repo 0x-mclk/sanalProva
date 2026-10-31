@@ -77,11 +77,16 @@ public abstract class ApiTestBase(ApiFactory factory)
     internal static Task<SessionDetail> ConsentAsync(ApiClient client, Guid sessionId, bool extended = false) =>
         client.PostAsync<SessionDetail>($"/api/v1/sessions/{sessionId}/consent", FullConsent(extended));
 
-    internal static async Task<PhotoDto> UploadPhotoAsync(ApiClient client, Guid sessionId, byte[]? bytes = null)
+    /// <summary>Fotoğrafı yükler ve (varsayılan) personel uygunluk onayını gerçek uç noktadan verir: üretim kabulü sunucuda onay arar. Onaysız senaryolar <c>approve: false</c> kullanır.</summary>
+    internal static async Task<PhotoDto> UploadPhotoAsync(ApiClient client, Guid sessionId, byte[]? bytes = null, bool approve = true)
     {
         var response = await client.UploadAsync($"/api/v1/sessions/{sessionId}/photos", bytes ?? TestImages.Portrait());
-        return await ApiClient.ReadAsync<PhotoDto>(response, HttpStatusCode.Created);
+        var photo = await ApiClient.ReadAsync<PhotoDto>(response, HttpStatusCode.Created);
+        return approve ? await ApprovePhotoAsync(client, sessionId, photo.Id) : photo;
     }
+
+    internal static Task<PhotoDto> ApprovePhotoAsync(ApiClient client, Guid sessionId, Guid photoId) =>
+        client.PostAsync<PhotoDto>($"/api/v1/sessions/{sessionId}/photos/{photoId}/approval", new { singlePersonFullBody = true, frontalUprightPose = true, sharpAndWellLit = true });
 
     /// <summary>Onaylı, fotoğraflı oturum.</summary>
     internal static async Task<(SessionDetail Session, PhotoDto Photo)> PreparedSessionAsync(ApiClient client)

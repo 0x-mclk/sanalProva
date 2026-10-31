@@ -131,6 +131,7 @@ public sealed class IdempotencyTests(ApiFactory factory) : ApiTestBase(factory),
         // Aynı açıdaki yeni fotoğraf eskisini değiştirir ("yeniden çek"): ikinci fotoğraf farklı açıda
         var secondResponse = await client.UploadAsync($"/api/v1/sessions/{session.Id}/photos", TestImages.Portrait(seed: 3802), fields: new Dictionary<string, string> { ["angle"] = "Back" });
         var second = await ApiClient.ReadAsync<PhotoDto>(secondResponse, HttpStatusCode.Created);
+        await ApprovePhotoAsync(client, session.Id, second.Id);
         var original = await client.PostAsync<JobDto>($"/api/v1/sessions/{session.Id}/generations", new { photoId = first.Id }, HttpStatusCode.Accepted, r => r.Headers.Add("Idempotency-Key", "icerik-1"));
 
         // Aynı içerik: aynı iş. Farklı içerik (başka fotoğraf): açık hata, istemci yanlış işi kendi isteği sanmaz

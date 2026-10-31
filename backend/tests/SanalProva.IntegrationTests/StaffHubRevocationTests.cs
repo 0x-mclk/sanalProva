@@ -15,7 +15,7 @@ public sealed class StaffHubRevocationTests(ApiFactory factory) : ApiTestBase(fa
     private sealed record InviteDto(MemberDto Member, string SetupLink);
     private sealed record LinkDto(string SetupLink);
 
-    private static HubConnection ConnectHub(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host, string authCookie) =>
+    internal static HubConnection ConnectHub(Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host, string authCookie) =>
         new HubConnectionBuilder()
             .WithUrl(new Uri(host.Server.BaseAddress, SanalProva.Api.Hubs.StaffHub.Path), options =>
             {
@@ -31,7 +31,7 @@ public sealed class StaffHubRevocationTests(ApiFactory factory) : ApiTestBase(fa
             })
             .Build();
 
-    private static async Task WaitDisconnectedAsync(HubConnection connection)
+    internal static async Task WaitDisconnectedAsync(HubConnection connection)
     {
         for (var i = 0; i < 100 && connection.State == HubConnectionState.Connected; i++)
         {
@@ -114,7 +114,12 @@ public sealed class StaffHubRevocationTests(ApiFactory factory) : ApiTestBase(fa
 
         await owner.PatchAsync<System.Text.Json.JsonElement>($"/api/v1/management/stores/{second}/status", new { isActive = false });
 
-        Assert.False(await connection.InvokeAsync<bool>("JoinStore", second, Ct));
-        Assert.True(await connection.InvokeAsync<bool>("JoinStore", tenant.StoreId, Ct));
+        // Pasif şubeye abone açık bağlantı SUNUCUDA kesilir (eski grup üyeliği üzerinden bildirim sürmez); yeniden bağlanan istemci pasif şubeye abone olamaz
+        await WaitDisconnectedAsync(connection);
+        Assert.NotEqual(HubConnectionState.Connected, connection.State);
+        await using var again = ConnectHub(host, owner.AuthCookie);
+        await again.StartAsync(Ct);
+        Assert.False(await again.InvokeAsync<bool>("JoinStore", second, Ct));
+        Assert.True(await again.InvokeAsync<bool>("JoinStore", tenant.StoreId, Ct));
     }
 }

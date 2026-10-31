@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, unwrap } from './client';
 import { apiFetch } from './http';
+import { newIdempotencyKey } from './idempotency';
 import type { InviteStaffResponse, StaffAssignmentRequest, StaffMemberDto, StaffSetupLinkDto, StoreAdminDto } from './types';
 
 /**
@@ -87,7 +88,8 @@ export function inviteStaff(body: { email: string; displayName: string; assignme
 
 /** Bekleyen davet için yeni bağlantı veya şifre sıfırlama bağlantısı (önceki açık bağlantı iptal olur). */
 export function issueStaffLink(id: string): Promise<StaffSetupLinkDto> {
-  return apiFetch<StaffSetupLinkDto>(`/api/v1/management/users/${id}/setup-link`, { method: 'POST', json: {} });
+  // Her tıklama kendi anahtarını taşır: sunucu aynı anahtarla tekrar gelen isteği (otomatik yeniden deneme/çift gönderim) ikinci bağlantı üretip ilkini iptal etmek yerine 409 SETUP_LINK_ALREADY_ISSUED ile reddeder
+  return apiFetch<StaffSetupLinkDto>(`/api/v1/management/users/${id}/setup-link`, { method: 'POST', json: {}, headers: { 'Idempotency-Key': newIdempotencyKey() } });
 }
 
 export type { StaffMemberDto, StoreAdminDto };

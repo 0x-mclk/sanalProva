@@ -89,6 +89,15 @@ public sealed class SessionPhoto : Entity, ISessionOwned
     public int Height { get; init; }
     public PhotoQualityFlags QualityFlags { get; set; } = new();
     public bool IsPrimary { get; set; }
+
+    /// <summary>
+    /// Personelin "bu fotoğraf prova için uygun" onayı (Pilot öncesi kapanış; sunucuda zorunlu). Onay BU fotoğraf satırına bağlıdır: yeniden çekim yeni satır üretir (eskisi silinir),
+    /// dolayısıyla önceki onay yeni fotoğrafa geçmez. Otomatik kişi sayısı/tam boy analizi DEĞİLDİR: yalnızca personelin sorumluluk beyanıdır.
+    /// </summary>
+    public DateTimeOffset? StaffApprovedAt { get; set; }
+
+    /// <summary>Onaylayan kullanıcı (bilgi amaçlı; bilinçli olarak FK yok, kullanıcı silinse onay kaydı kalır).</summary>
+    public Guid? StaffApprovedByUserId { get; set; }
 }
 
 /// <summary>

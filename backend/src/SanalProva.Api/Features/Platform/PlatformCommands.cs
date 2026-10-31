@@ -103,6 +103,23 @@ public static class PlatformCommands
         return ExitUsage;
     }
 
+    /// <summary>
+    /// Operatör komutlarının denetim izi: kim (OS kullanıcısı@makine), hangi hedef firma, miktar ve referans. SIR/TOKEN/BAĞLANTI/E-POSTA/NOT yazılmaz
+    /// (yalnızca bu allowlist alanları); komut adı denetim kaydının eylem alanındadır.
+    /// </summary>
+    private static string OperatorDetail(Context c)
+    {
+        static string Budget(BudgetArg a) => !a.Set ? "-" : a.Value is { } v ? v.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none";
+        var o = c.Options;
+        var parts = new List<string> { $"cli op={Environment.UserName}@{Environment.MachineName}" };
+        if (o.Org is not null) parts.Add($"org={o.Org}");
+        if (o.Reference is not null) parts.Add($"ref={o.Reference}");
+        if (o.Grant is { } g) parts.Add($"grant={g}");
+        if (o.Adjust is { } a) parts.Add($"adjust={a}");
+        if (o.Daily.Set || o.Monthly.Set || o.Job.Set) parts.Add($"budget d={Budget(o.Daily)} m={Budget(o.Monthly)} j={Budget(o.Job)}");
+        return string.Join(' ', parts);
+    }
+
     private const string Usage = """
         Kullanım: dotnet SanalProva.Api.dll platform <komut> [seçenekler]
           status                                                                                      Pilot izleme (salt okunur): veritabanı, disk, takılı iş, belirsiz maliyet, bütçe, kredi. Çıkış 0=tamam, 10=uyarı, 11=kritik
@@ -167,8 +184,8 @@ public static class PlatformCommands
         }
 
         var (token, entity) = await c.Tokens.IssueAsync(admin.Id, platformOrganization.Id, AccountSetupTokenPurpose.InitialPassword, LinkTtl(c), null, ct);
-        c.Audit.RecordFor(platformOrganization.Id, null, "Platform.AdminBootstrapped", nameof(AppUser), admin.Id);
-        c.Audit.RecordFor(platformOrganization.Id, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id);
+        c.Audit.RecordFor(platformOrganization.Id, null, "Platform.AdminBootstrapped", nameof(AppUser), admin.Id, OperatorDetail(c));
+        c.Audit.RecordFor(platformOrganization.Id, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 
@@ -224,7 +241,7 @@ public static class PlatformCommands
     {
         await using var transaction = await c.Db.Database.BeginTransactionAsync(ct);
         var (token, entity) = await c.Tokens.IssueAsync(admin.Id, admin.OrganizationId, AccountSetupTokenPurpose.InitialPassword, LinkTtl(c), null, ct);
-        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id);
+        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         await PrintLinkAsync(c, token, entity.ExpiresAt);
@@ -247,7 +264,7 @@ public static class PlatformCommands
 
         await using var transaction = await c.Db.Database.BeginTransactionAsync(ct);
         var revoked = await c.Tokens.RevokeOpenAsync(admin.Id, AccountSetupTokenPurpose.InitialPassword, ct);
-        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkRevoked", nameof(AppUser), admin.Id);
+        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkRevoked", nameof(AppUser), admin.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         await c.Out.WriteLineAsync($"TAMAM: {revoked} açık bağlantı iptal edildi.");
@@ -285,8 +302,8 @@ public static class PlatformCommands
 
         await c.Users.UpdateSecurityStampAsync(admin);
         var (token, entity) = await c.Tokens.IssueAsync(admin.Id, admin.OrganizationId, AccountSetupTokenPurpose.InitialPassword, LinkTtl(c), null, ct);
-        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.AccessReset", nameof(AppUser), admin.Id);
-        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id);
+        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.AccessReset", nameof(AppUser), admin.Id, OperatorDetail(c));
+        c.Audit.RecordFor(admin.OrganizationId, null, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         await PrintLinkAsync(c, token, entity.ExpiresAt);
@@ -326,7 +343,7 @@ public static class PlatformCommands
 
         // Bu sınıf, PaidAiEnabled'ı yazan TEK yerdir (kaynak taraması testi: PaidAiGateTests)
         organization.Settings.PaidAiEnabled = target;
-        c.Audit.RecordFor(organization.Id, null, target ? "Platform.PaidAiEnabled" : "Platform.PaidAiDisabled", nameof(Organization), organization.Id);
+        c.Audit.RecordFor(organization.Id, null, target ? "Platform.PaidAiEnabled" : "Platform.PaidAiDisabled", nameof(Organization), organization.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await c.Out.WriteLineAsync($"TAMAM: '{organization.Slug}' ücretli AI {(target ? "AÇILDI" : "KAPATILDI")} (denetim kaydı yazıldı).");
         return ExitOk;
@@ -391,7 +408,7 @@ public static class PlatformCommands
         settings.DailyBudgetUsd = daily;
         settings.MonthlyBudgetUsd = monthly;
         settings.MaxJobCostUsd = job;
-        c.Audit.RecordFor(organization.Id, null, "Platform.BudgetChanged", nameof(Organization), organization.Id);
+        c.Audit.RecordFor(organization.Id, null, "Platform.BudgetChanged", nameof(Organization), organization.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await c.Out.WriteLineAsync($"TAMAM: '{organization.Slug}' bütçe sınırları güncellendi (denetim kaydı yazıldı).");
         return ExitOk;
@@ -476,7 +493,7 @@ public static class PlatformCommands
         }
 
         // Denetim kaydı (kişisel veri yok; tutar ve referans defterde de değiştirilemez biçimde durur). Uygulama başarılı olduktan sonra yazılır; yinelenen çalıştırmada yazılmaz.
-        c.Audit.RecordFor(organization.Id, null, adjusting ? "Platform.CreditAdjusted" : "Platform.CreditGranted", nameof(Organization), organization.Id);
+        c.Audit.RecordFor(organization.Id, null, adjusting ? "Platform.CreditAdjusted" : "Platform.CreditGranted", nameof(Organization), organization.Id, OperatorDetail(c));
         await c.Db.SaveChangesAsync(ct);
         await c.Out.WriteLineAsync($"TAMAM: '{organization.Slug}' {(adjusting ? "düzeltme" : "yükleme")} uygulandı; bakiye {result.BalanceAfter}, rezerve {result.ReservedAfter} (denetim kaydı yazıldı).");
         return ExitOk;

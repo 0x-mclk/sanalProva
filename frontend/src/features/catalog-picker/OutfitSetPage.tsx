@@ -4,7 +4,6 @@ import { Navigate, useNavigate, useParams } from 'react-router';
 import { useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
 import { useCreditQuote } from '../../shared/api/credits';
 import { CreditQuoteNotice } from '../credits/CreditNotices';
-import { isPhotoApproved } from '../session/photoApproval';
 import { newIdempotencyKey } from '../../shared/api/idempotency';
 import type { DraftDto, ProductListItem } from '../../shared/api/types';
 import { ApiError } from '../../shared/api/http';
@@ -55,6 +54,7 @@ export function OutfitSetPage() {
       label={session.data.customerLabel}
       serverDraft={session.data.draft}
       photoId={session.data.photos[0]?.id}
+      photoApproved={Boolean(session.data.photos[0]?.staffApprovedAt)}
       items={products.data?.items ?? []}
       loadError={products.error}
       demo={me?.demoCatalog ?? false}
@@ -69,13 +69,14 @@ type ContentProps = {
   label: string | null;
   serverDraft: DraftDto | null;
   photoId: string | undefined;
+  photoApproved: boolean;
   items: ProductListItem[];
   loadError: unknown;
   demo: boolean;
   onBack: () => void;
 };
 
-function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items, loadError, demo, onBack }: ContentProps) {
+function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, photoApproved, items, loadError, demo, onBack }: ContentProps) {
   const navigate = useNavigate();
   const { entries, setEntries, warnings, flush, saveError } = useDraftItems(sessionId, 'OutfitSet', serverDraft);
   const start = useStartGeneration(sessionId);
@@ -90,7 +91,6 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
   const picked = options.data ? resolvePick(options.data, model) : null;
   const quote = useCreditQuote('OutfitSet', picked?.model.key, picked?.quality?.key);
   const overBudget = picked?.quality?.exceedsJobLimit === true;
-  const photoApproved = isPhotoApproved(photoId);
 
   const chips = useMemo(() => categoryChips(items), [items]);
   const visible = useMemo(() => filterProducts(items, deferredQuery, categoryId, sort), [items, deferredQuery, categoryId, sort]);

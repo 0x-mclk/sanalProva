@@ -37,8 +37,9 @@ export function RequireAuth() {
   }
   return (
     <>
-      <DisplaySync />
       <IdleLock>
+        {/* DisplaySync kilit içinde: kilitliyken SignalR bağlantısı da kapanır (sunucu da keser) */}
+        <DisplaySync />
         <Outlet />
       </IdleLock>
     </>

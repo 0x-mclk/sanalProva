@@ -35,6 +35,7 @@ public enum StaffFailure
     ManagerLimit,
     LastOwner,
     UserInactive,
+    LinkAlreadyIssued,
 }
 
 public sealed class StaffException(StaffFailure failure) : Exception(failure.ToString())
@@ -173,6 +174,8 @@ public sealed class StaffManagementService(
         audit.RecordFor(organizationId, actorId, "User.RolesChanged", nameof(AppUser), user.Id);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        // Rol/şube ataması değişti: eski gruplar üzerinden bildirim sürmesin. Bağlantılar kesilir; istemci yeniden bağlanıp abonelikleri sunucuda yeniden doğrulatır.
+        connections.AbortUser(user.Id);
         return ToDto(user, actor, final, stores, null);
     }
 
@@ -226,7 +229,7 @@ public sealed class StaffManagementService(
     }
 
     /// <summary>Şifresini hiç belirlememiş hesap için yeni davet bağlantısı, şifresi olan hesap için parola sıfırlama bağlantısı üretir (önceki açık bağlantılar iptal olur).</summary>
-    public async Task<StaffSetupLinkDto> IssueLinkAsync(Guid actorId, Guid organizationId, Guid userId, CancellationToken ct)
+    public async Task<StaffSetupLinkDto> IssueLinkAsync(Guid actorId, Guid organizationId, Guid userId, CancellationToken ct, string? requestKey = null)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await AppLocks.AcquireExclusiveAsync(db, AppLocks.OrganizationMembers(organizationId), LockTimeout, ct);
@@ -246,7 +249,17 @@ public sealed class StaffManagementService(
         var pending = user.PasswordHash is null;
         var purpose = pending ? AccountSetupTokenPurpose.InitialPassword : AccountSetupTokenPurpose.PasswordReset;
         var ttl = pending ? TimeSpan.FromHours(options.Value.InitialPasswordTtlHours) : TimeSpan.FromHours(ResetLinkTtlHours);
-        var (token, entity) = await tokens.IssueAsync(user.Id, organizationId, purpose, ttl, actorId, ct);
+        (string Token, AccountSetupToken Entity) issued;
+        try
+        {
+            issued = await tokens.IssueAsync(user.Id, organizationId, purpose, ttl, actorId, ct, requestKey);
+        }
+        catch (SetupLinkAlreadyIssuedException)
+        {
+            throw new StaffException(StaffFailure.LinkAlreadyIssued);
+        }
+
+        var (token, entity) = issued;
         audit.RecordFor(organizationId, actorId, "User.SetupLinkIssued", nameof(AccountSetupToken), entity.Id);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

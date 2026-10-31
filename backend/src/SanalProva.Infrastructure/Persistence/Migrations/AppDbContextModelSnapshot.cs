@@ -126,6 +126,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("created_at");
 
+                    b.Property<string>("Detail")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)")
+                        .HasColumnName("detail");
+
                     b.Property<Guid?>("DeviceId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("device_id");
@@ -1245,6 +1250,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("id");
 
+                    b.Property<bool?>("AdmittedLive")
+                        .HasColumnType("bit")
+                        .HasColumnName("admitted_live");
+
                     b.Property<int>("Attempt")
                         .IsConcurrencyToken()
                         .HasColumnType("int")
@@ -1882,6 +1891,14 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("session_id");
 
+                    b.Property<DateTimeOffset?>("StaffApprovedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("staff_approved_at");
+
+                    b.Property<Guid?>("StaffApprovedByUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("staff_approved_by_user_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("updated_at");
@@ -2014,6 +2031,12 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(40)")
                         .HasColumnName("purpose");
 
+                    b.Property<byte[]>("RequestKeyHash")
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .HasColumnName("request_key_hash")
+                        .IsFixedLength();
+
                     b.Property<DateTimeOffset?>("RevokedAt")
                         .HasColumnType("datetimeoffset")
                         .HasColumnName("revoked_at");
@@ -2049,6 +2072,11 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                     b.HasIndex("UserId", "Purpose")
                         .HasDatabaseName("ix_account_setup_tokens_user_purpose_open")
                         .HasFilter("[used_at] IS NULL AND [revoked_at] IS NULL");
+
+                    b.HasIndex("UserId", "RequestKeyHash")
+                        .IsUnique()
+                        .HasDatabaseName("ix_account_setup_tokens_user_request_key")
+                        .HasFilter("[request_key_hash] IS NOT NULL");
 
                     b.ToTable("account_setup_tokens", null, t =>
                         {
@@ -2180,6 +2208,38 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_users_organization_id");
 
                     b.ToTable("users", (string)null);
+                });
+
+            modelBuilder.Entity("SanalProva.Infrastructure.Identity.AuthSession", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset>("LastInteractionAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("last_interaction_at");
+
+                    b.Property<DateTimeOffset?>("LockedAt")
+                        .HasColumnType("datetimeoffset")
+                        .HasColumnName("locked_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auth_sessions");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_auth_sessions_user_id");
+
+                    b.ToTable("auth_sessions", (string)null);
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
@@ -2837,6 +2897,16 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_users_organizations_organization_id");
+                });
+
+            modelBuilder.Entity("SanalProva.Infrastructure.Identity.AuthSession", b =>
+                {
+                    b.HasOne("SanalProva.Infrastructure.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_auth_sessions_asp_net_users_user_id");
                 });
 
             modelBuilder.Entity("SanalProva.Domain.Catalog.Product", b =>

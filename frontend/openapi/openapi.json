@@ -128,6 +128,28 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/account/activity": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
       }
     },
     "/api/v1/account/pin": {
@@ -1167,6 +1189,92 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/photos/{photoId}/approval": {
+      "post": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "photoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "TryOn"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "photoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/draft": {
       "put": {
         "tags": [
@@ -2031,6 +2139,13 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2441,6 +2556,13 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -4467,7 +4589,8 @@
       "LockStatusDto": {
         "required": [
           "hasPin",
-          "idleLockSeconds"
+          "idleLockSeconds",
+          "locked"
         ],
         "type": "object",
         "properties": {
@@ -4477,6 +4600,9 @@
           "idleLockSeconds": {
             "type": "integer",
             "format": "int32"
+          },
+          "locked": {
+            "type": "boolean"
           }
         }
       },
@@ -4978,6 +5104,25 @@
           }
         }
       },
+      "PhotoApprovalRequest": {
+        "required": [
+          "singlePersonFullBody",
+          "frontalUprightPose",
+          "sharpAndWellLit"
+        ],
+        "type": "object",
+        "properties": {
+          "singlePersonFullBody": {
+            "type": "boolean"
+          },
+          "frontalUprightPose": {
+            "type": "boolean"
+          },
+          "sharpAndWellLit": {
+            "type": "boolean"
+          }
+        }
+      },
       "PhotoDto": {
         "required": [
           "id",
@@ -5013,6 +5158,13 @@
           },
           "urls": {
             "$ref": "#/components/schemas/ImageUrls"
+          },
+          "staffApprovedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },

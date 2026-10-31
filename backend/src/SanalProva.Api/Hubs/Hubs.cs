@@ -36,17 +36,21 @@ public sealed record DisplayStatusMessage(Guid DisplayId, bool Online, Guid? Cur
 /// (oturum kimliğinin varlığı sızdırılmaz).
 /// </summary>
 [Authorize]
-public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.AgreementGate agreement, StaffConnectionRegistry connections) : Hub<IStaffClient>
+public sealed class StaffHub(
+    AppDbContext db, SanalProva.Api.Features.Agreement.AgreementGate agreement, StaffConnectionRegistry connections, TimeProvider clock, IConfiguration configuration) : Hub<IStaffClient>
 {
     public const string Path = "/hubs/staff";
 
     public override async Task OnConnectedAsync()
     {
-        if (Context.User?.GetUserId() is { } userId)
+        var userId = Context.User?.GetUserId();
+        if (userId is null || !await IsSessionUsableAsync(userId.Value))
         {
-            connections.Add(userId, Context);
+            Context.Abort(); // kilitli/geçersiz oturum bağlanamaz (ara katman negotiate'i zaten reddeder; bu ikinci kapıdır)
+            return;
         }
 
+        connections.Add(userId.Value, Guid.Parse(Context.User!.FindFirst(AppClaims.SessionId)!.Value), Context);
         await base.OnConnectedAsync();
     }
 
@@ -58,6 +62,17 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
         }
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>Çerez oturumu hâlâ geçerli ve KİLİTLİ DEĞİL mi (her abonelik isteğinde; bağlantı açıkken kilitlenmiş/çıkış yapılmış olabilir).</summary>
+    private async Task<bool> IsSessionUsableAsync(Guid userId)
+    {
+        if (!Guid.TryParse(Context.User?.FindFirst(AppClaims.SessionId)?.Value, out var sessionId))
+        {
+            return false;
+        }
+
+        return await ScreenLockState.EvaluateAsync(db, userId, sessionId, clock.GetUtcNow(), SanalProva.Api.Features.Account.PinEndpoints.IdleSeconds(configuration), Context.ConnectionAborted) == SessionCheck.Ok;
     }
 
     /// <summary>Hesap pasife alınmış veya şube pasifse yeni abonelik verilmez (açık bağlantı pasife alma anında ayrıca kesilir).</summary>
@@ -85,6 +100,12 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
             return false;
         }
 
+        if (!await IsSessionUsableAsync(userId.Value))
+        {
+            Context.Abort();
+            return false;
+        }
+
         // Sözleşmenin yeni sürümü yayımlandıysa yeni abonelik verilmez (bağlantı açıkken sürüm değişmiş olabilir; ara katman yalnızca bağlanmayı denetler)
         if (!await agreement.IsAcceptedAsync(db, organizationId.Value, Context.ConnectionAborted))
         {
@@ -100,10 +121,19 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, SessionGroup(sessionId), Context.ConnectionAborted);
+        connections.Track(Context.ConnectionId, userId.Value, sessionId: sessionId, storeId: null, join: true);
         return true;
     }
 
-    public Task LeaveSession(Guid sessionId) => Groups.RemoveFromGroupAsync(Context.ConnectionId, SessionGroup(sessionId), Context.ConnectionAborted);
+    public Task LeaveSession(Guid sessionId)
+    {
+        if (Context.User?.GetUserId() is { } userId)
+        {
+            connections.Track(Context.ConnectionId, userId, sessionId: sessionId, storeId: null, join: false);
+        }
+
+        return Groups.RemoveFromGroupAsync(Context.ConnectionId, SessionGroup(sessionId), Context.ConnectionAborted);
+    }
 
     /// <summary>
     /// Şubenin TV olaylarına (<see cref="IStaffClient.DisplayStatusChanged"/>) abone olur. Kullanıcının o şubede rolü yoksa sessizce reddedilir.
@@ -116,6 +146,12 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
         var organizationId = Context.User?.GetOrganizationId();
         if (userId is null || organizationId is null)
         {
+            return false;
+        }
+
+        if (!await IsSessionUsableAsync(userId.Value))
+        {
+            Context.Abort();
             return false;
         }
 
@@ -133,10 +169,19 @@ public sealed class StaffHub(AppDbContext db, SanalProva.Api.Features.Agreement.
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, StoreGroup(storeId), Context.ConnectionAborted);
+        connections.Track(Context.ConnectionId, userId.Value, sessionId: null, storeId: storeId, join: true);
         return true;
     }
 
-    public Task LeaveStore(Guid storeId) => Groups.RemoveFromGroupAsync(Context.ConnectionId, StoreGroup(storeId), Context.ConnectionAborted);
+    public Task LeaveStore(Guid storeId)
+    {
+        if (Context.User?.GetUserId() is { } userId)
+        {
+            connections.Track(Context.ConnectionId, userId, sessionId: null, storeId: storeId, join: false);
+        }
+
+        return Groups.RemoveFromGroupAsync(Context.ConnectionId, StoreGroup(storeId), Context.ConnectionAborted);
+    }
 }
 
 /// <summary>Üretim worker'ının iş durumunu oturum grubuna iletir. Gönderim hatası işi etkilemez (worker yakalar).</summary>
@@ -294,40 +339,171 @@ public sealed class DiagnosticsHub(TimeProvider clock) : Hub
 }
 
 /// <summary>
-/// Açık personel SignalR bağlantıları (M5.2): hesap pasife alınınca/parolası sıfırlanınca bağlantılar hemen kesilir (yeniden bağlanma çerez doğrulamasında reddedilir).
-/// Tek sunucu kapsamlıdır (bellek içi); çok sunuculu dağıtımda backplane ile birlikte ele alınmalıdır (bkz. docs/06 §8).
+/// Açık personel SignalR bağlantıları (M5.2; Pilot öncesi kapanış ile genişletildi). Her bağlantı için kullanıcı, çerez oturumu (<c>sp_sid</c>) ve ABONE OLUNAN şube/oturum
+/// grupları izlenir: yetki değişince (pasife alma, rol/şube ataması, şube pasifleşmesi, kilitleme, çıkış, parola sıfırlama) bağlantı kesilir; yeniden bağlanan istemci
+/// abonelikleri sunucuda yeniden doğrulatır. Başka bir SÜREÇTE yapılan değişiklikler (operatör komutları) için <see cref="StaffConnectionSweeper"/> periyodik doğrular.
+/// Tek sunucu kapsamlıdır (bellek içi): çok sunuculu dağıtımda backplane ve ortak kayıt gerekir (bkz. docs/06 §8, docs/21).
 /// </summary>
 public sealed class StaffConnectionRegistry
 {
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, System.Collections.Concurrent.ConcurrentDictionary<string, HubCallerContext>> _byUser = new();
-
-    public void Add(Guid userId, HubCallerContext context) =>
-        _byUser.GetOrAdd(userId, _ => new()).TryAdd(context.ConnectionId, context);
-
-    public void Remove(Guid userId, string connectionId)
+    public sealed class Entry(Guid userId, Guid sessionId, HubCallerContext context)
     {
-        if (_byUser.TryGetValue(userId, out var set))
+        public Guid UserId { get; } = userId;
+        public Guid SessionId { get; } = sessionId;
+        public HubCallerContext Context { get; } = context;
+        public System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> Stores { get; } = new();
+        public System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> Sessions { get; } = new();
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Entry> _byConnection = new();
+
+    public void Add(Guid userId, Guid sessionId, HubCallerContext context) => _byConnection[context.ConnectionId] = new Entry(userId, sessionId, context);
+
+    public void Remove(Guid userId, string connectionId) => _byConnection.TryRemove(connectionId, out _);
+
+    /// <summary>Gruba katılma/ayrılma kaydı (süpürücü yalnızca gerçekten abone olunan gruplar için rol doğrular).</summary>
+    public void Track(string connectionId, Guid userId, Guid? sessionId, Guid? storeId, bool join)
+    {
+        if (!_byConnection.TryGetValue(connectionId, out var entry) || entry.UserId != userId)
         {
-            set.TryRemove(connectionId, out _);
+            return;
+        }
+
+        if (storeId is { } store)
+        {
+            _ = join ? entry.Stores.TryAdd(store, 0) : entry.Stores.TryRemove(store, out _);
+        }
+
+        if (sessionId is { } session)
+        {
+            _ = join ? entry.Sessions.TryAdd(session, 0) : entry.Sessions.TryRemove(session, out _);
         }
     }
 
+    public IReadOnlyList<Entry> Snapshot() => [.. _byConnection.Values];
+
     /// <summary>Kullanıcının tüm açık bağlantılarını keser; kesilen bağlantı sayısını döner.</summary>
-    public int AbortUser(Guid userId)
+    public int AbortUser(Guid userId) => Abort(e => e.UserId == userId);
+
+    /// <summary>Tek çerez oturumunun (kilitlenen/çıkış yapan cihaz) bağlantılarını keser; kullanıcının diğer cihazlarına dokunmaz.</summary>
+    public int AbortSession(Guid sessionId) => Abort(e => e.SessionId == sessionId);
+
+    /// <summary>Verilen şubede abone olan TÜM bağlantıları keser (şube pasife alındı / erişim kaldırıldı).</summary>
+    public int AbortStore(Guid storeId) => Abort(e => e.Stores.ContainsKey(storeId));
+
+    public void AbortConnection(string connectionId)
     {
-        if (!_byUser.TryGetValue(userId, out var set))
+        if (_byConnection.TryRemove(connectionId, out var entry))
         {
-            return 0;
+            entry.Context.Abort();
         }
+    }
 
+    private int Abort(Func<Entry, bool> match)
+    {
         var count = 0;
-        foreach (var context in set.Values)
+        foreach (var entry in _byConnection.Values.Where(match))
         {
-            context.Abort();
-            count++;
+            if (_byConnection.TryRemove(entry.Context.ConnectionId, out _))
+            {
+                entry.Context.Abort();
+                count++;
+            }
         }
 
-        set.Clear();
         return count;
+    }
+}
+
+/// <summary>
+/// Açık personel bağlantılarını periyodik yeniden doğrular (varsayılan 30 sn, <c>Security:HubRevalidateSeconds</c>; 0 = kapalı). Çerez doğrulayıcısı yalnızca bağlanırken çalışır;
+/// bu süpürücü bağlantı AÇIKKEN olan değişiklikleri (özellikle başka süreçte çalışan operatör komutları: erişim sıfırlama, veritabanı elle düzeltmesi) en geç bir periyotta yakalar.
+/// Kontroller: hesap etkin ve güvenlik damgası aynı, oturum satırı var ve kilitli değil, abone olunan her şubede rol var ve şube etkin, abone olunan her oturum için şubede rol var.
+/// </summary>
+public sealed class StaffConnectionSweeper(IServiceScopeFactory scopes, StaffConnectionRegistry registry, IConfiguration configuration, TimeProvider clock, ILogger<StaffConnectionSweeper> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var seconds = configuration.GetValue("Security:HubRevalidateSeconds", 30);
+        if (seconds <= 0)
+        {
+            return;
+        }
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(seconds));
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await SweepAsync(stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Hub yeniden doğrulaması başarısız oldu; bir sonraki periyotta denenecek.");
+            }
+        }
+    }
+
+    /// <summary>Tek tur; testler doğrudan çağırır. Kesilen bağlantı sayısını döner.</summary>
+    public async Task<int> SweepAsync(CancellationToken ct)
+    {
+        var aborted = 0;
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var stampType = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Identity.IdentityOptions>>().Value.ClaimsIdentity.SecurityStampClaimType;
+        var idle = SanalProva.Api.Features.Account.PinEndpoints.IdleSeconds(configuration);
+        foreach (var entry in registry.Snapshot())
+        {
+            if (!await IsStillValidAsync(db, entry, stampType, idle, ct))
+            {
+                registry.AbortConnection(entry.Context.ConnectionId);
+                aborted++;
+            }
+        }
+
+        return aborted;
+    }
+
+    private async Task<bool> IsStillValidAsync(AppDbContext db, StaffConnectionRegistry.Entry entry, string stampType, int idleSeconds, CancellationToken ct)
+    {
+        var user = await db.Users.AsNoTracking().Where(u => u.Id == entry.UserId).Select(u => new { u.IsActive, u.SecurityStamp, u.OrganizationId }).SingleOrDefaultAsync(ct);
+        if (user is null || !user.IsActive || !string.Equals(user.SecurityStamp, entry.Context.User?.FindFirst(stampType)?.Value, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (await ScreenLockState.EvaluateAsync(db, entry.UserId, entry.SessionId, clock.GetUtcNow(), idleSeconds, ct) != SessionCheck.Ok)
+        {
+            return false;
+        }
+
+        var stores = entry.Stores.Keys.ToList();
+        if (stores.Count > 0)
+        {
+            var allowed = await db.UserStoreRoles.IgnoreQueryFilters().AsNoTracking()
+                .Where(r => r.UserId == entry.UserId && r.OrganizationId == user.OrganizationId && stores.Contains(r.StoreId) && db.Stores.IgnoreQueryFilters().Any(s => s.Id == r.StoreId && s.IsActive))
+                .Select(r => r.StoreId).Distinct().CountAsync(ct);
+            if (allowed != stores.Count)
+            {
+                return false;
+            }
+        }
+
+        var sessions = entry.Sessions.Keys.ToList();
+        if (sessions.Count > 0)
+        {
+            var ok = await db.TryOnSessions.IgnoreQueryFilters().AsNoTracking()
+                .Where(s => sessions.Contains(s.Id) && s.OrganizationId == user.OrganizationId
+                    && db.UserStoreRoles.IgnoreQueryFilters().Any(r => r.UserId == entry.UserId && r.StoreId == s.StoreId && r.OrganizationId == user.OrganizationId)
+                    && db.Stores.IgnoreQueryFilters().Any(st => st.Id == s.StoreId && st.IsActive))
+                .CountAsync(ct);
+            // Silinmiş oturum (KVKK) abonelik sayısını düşürür: bağlantı kesilir, istemci yeniden bağlanıp yalnızca geçerli oturuma abone olur
+            if (ok != sessions.Count)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

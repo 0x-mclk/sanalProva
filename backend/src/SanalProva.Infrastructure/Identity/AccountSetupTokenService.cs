@@ -65,11 +65,22 @@ public sealed class AccountSetupTokenService(AppDbContext db, IOptions<SetupToke
     /// Düz token yalnızca dönüş değerindedir; çağıran bunu kalıcı hiçbir yere yazmamalı, günlüğe geçirmemelidir.
     /// </summary>
     public async Task<(string Token, AccountSetupToken Entity)> IssueAsync(
-        Guid userId, Guid organizationId, AccountSetupTokenPurpose purpose, TimeSpan ttl, Guid? createdByUserId, CancellationToken ct)
+        Guid userId, Guid organizationId, AccountSetupTokenPurpose purpose, TimeSpan ttl, Guid? createdByUserId, CancellationToken ct, string? requestKey = null)
     {
         if (ttl <= TimeSpan.Zero || ttl > TimeSpan.FromHours(MaxTtlHours))
         {
             throw new ArgumentOutOfRangeException(nameof(ttl), ttl, $"Süre 0'dan büyük ve en fazla {MaxTtlHours} saat olmalı.");
+        }
+
+        // Aynı Idempotency-Key ile tekrar gelen istek ikinci bir bağlantı üretip birincisini iptal ETMEZ (düz token bir daha gösterilemez): açık hata
+        byte[]? requestKeyHash = null;
+        if (requestKey is not null)
+        {
+            requestKeyHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{userId:N}:{requestKey}"));
+            if (await db.AccountSetupTokens.IgnoreQueryFilters().AnyAsync(t => t.UserId == userId && t.RequestKeyHash == requestKeyHash, ct))
+            {
+                throw new SetupLinkAlreadyIssuedException();
+            }
         }
 
         await RevokeOpenAsync(userId, purpose, ct);
@@ -85,9 +96,18 @@ public sealed class AccountSetupTokenService(AppDbContext db, IOptions<SetupToke
             CreatedAt = now,
             ExpiresAt = now.Add(ttl),
             CreatedByUserId = createdByUserId,
+            RequestKeyHash = requestKeyHash,
         };
         db.AccountSetupTokens.Add(entity);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (requestKeyHash is not null && DbErrors.IsUniqueViolation(ex))
+        {
+            throw new SetupLinkAlreadyIssuedException(); // eşzamanlı aynı anahtar: benzersiz indeks ikincisini engeller
+        }
+
         return (plainToken, entity);
     }
 
@@ -148,5 +168,14 @@ public sealed class AccountSetupTokenService(AppDbContext db, IOptions<SetupToke
         var purposeText = purpose.ToString();
         return await db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE dbo.account_setup_tokens SET revoked_at = {now} WHERE user_id = {userId} AND purpose = {purposeText} AND used_at IS NULL AND revoked_at IS NULL", ct);
+    }
+}
+
+/// <summary>Aynı Idempotency-Key ile bu kullanıcı için bağlantı zaten üretilmişti (ikinci üretim ilkini iptal ederdi).</summary>
+public sealed class SetupLinkAlreadyIssuedException : Exception
+{
+    public SetupLinkAlreadyIssuedException()
+        : base("Bu istek anahtarıyla bağlantı zaten üretildi.")
+    {
     }
 }

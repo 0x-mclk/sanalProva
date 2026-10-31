@@ -3,13 +3,40 @@ import { api, unwrap } from './client';
 import type { Schemas } from './client';
 import { problemToApiError } from './http';
 
-/** Ekran kilidi (Faz C). PIN/parola düz metni yalnızca istek gövdesindedir; önbelleğe yazılmaz (mutation değişkenleri kilit açılınca sıfırlanır). */
+/**
+ * Ekran kilidi (Faz C + sunucu tarafı zorlama). Kilit durumu SUNUCUDAKİ oturum satırındadır: `locked` sayfa yenilemeden/ikinci sekmeden bağımsız okunur.
+ * PIN/parola düz metni yalnızca istek gövdesindedir; önbelleğe yazılmaz (mutation değişkenleri kilit açılınca sıfırlanır).
+ */
 export type LockStatus = Schemas['LockStatusDto'];
 
 export const lockKeys = { status: ['lock', 'status'] as const };
 
+/** Sunucudaki kilit durumunu yoklama aralığı: başka sekmede kilitlenen/açılan oturum bu sekmeye en geç bu kadar sürede yansır. */
+export const LOCK_POLL_MS = 15_000;
+
 export function useLockStatus(enabled = true) {
-  return useQuery({ queryKey: lockKeys.status, queryFn: () => unwrap(api.GET('/api/v1/account/lock')), enabled, staleTime: 5 * 60_000, retry: false });
+  return useQuery({ queryKey: lockKeys.status, queryFn: () => unwrap(api.GET('/api/v1/account/lock')), enabled, staleTime: 0, refetchInterval: LOCK_POLL_MS, retry: false });
+}
+
+/** Sunucuyu kilitler (idempotent). Hata durumunda çağıran yerel kilidi korur ve tekrar dener. */
+export async function sendLock(): Promise<boolean> {
+  try {
+    const { response } = await api.POST('/api/v1/account/lock');
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Etkileşim sinyali (boşta süresini sıfırlar). 423 dönerse oturum başka yerde kilitlenmiştir. */
+export async function sendActivity(): Promise<'ok' | 'locked' | 'failed'> {
+  try {
+    const { response } = await api.POST('/api/v1/account/activity');
+    if (response.status === 423) return 'locked';
+    return response.ok ? 'ok' : 'failed';
+  } catch {
+    return 'failed';
+  }
 }
 
 export function useUnlock() {

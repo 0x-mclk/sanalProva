@@ -2,7 +2,8 @@ import { Checkbox } from '@mantine/core';
 import { useState } from 'react';
 import { CheckIcon } from '../../shared/ui';
 import { BodyGuide } from './BodyGuide';
-import { PHOTO_CHECKS, setPhotoApproved } from './photoApproval';
+import { useApprovePhoto, useRevokePhotoApproval } from '../../shared/api/hooks';
+import { PHOTO_CHECKS } from './photoApproval';
 import classes from './PhotoPage.module.css';
 
 const TIPS = [
@@ -32,23 +33,32 @@ export function PhotoGuide() {
   );
 }
 
-/** Personel onayı: üç madde de işaretlenince onaylanır; onay fotoğraf kimliğine bağlıdır. */
-export function PhotoApproval({ photoId, approved, onChange }: { photoId: string; approved: boolean; onChange: (approved: boolean) => void }) {
+/**
+ * Personel onayı: üç madde de işaretlenince SUNUCUYA kaydedilir (onay fotoğraf satırına bağlıdır); bir madde geri alınırsa onay sunucuda da kaldırılır.
+ * Görünen durum sunucudaki kayıttır (`approved`), yerel kutular yalnızca giriş alanıdır.
+ */
+export function PhotoApproval({ sessionId, photoId, approved }: { sessionId: string; photoId: string; approved: boolean }) {
+  const approve = useApprovePhoto(sessionId);
+  const revoke = useRevokePhotoApproval(sessionId);
   const [checked, setChecked] = useState<boolean[]>(() => PHOTO_CHECKS.map(() => approved));
+  const busy = approve.isPending || revoke.isPending;
   const update = (index: number, value: boolean) => {
     const next = checked.map((c, i) => (i === index ? value : c));
     setChecked(next);
     const all = next.every(Boolean);
-    setPhotoApproved(photoId, all);
-    onChange(all);
+    if (all && !approved) approve.mutate(photoId);
+    else if (!all && approved) revoke.mutate(photoId);
   };
+  const failed = approve.isError || revoke.isError;
   return (
     <section className={classes.approval} aria-label="Fotoğraf uygunluk onayı">
       <h2 className={classes.guideTitle}>Üretimden önce kontrol edin</h2>
       {PHOTO_CHECKS.map((label, index) => (
-        <Checkbox key={label} label={label} checked={checked[index] ?? false} onChange={(e) => update(index, e.currentTarget.checked)} />
+        <Checkbox key={label} label={label} checked={checked[index] ?? false} disabled={busy} onChange={(e) => update(index, e.currentTarget.checked)} />
       ))}
-      <p className={classes.checkNote}>{approved ? 'Fotoğraf uygun bulundu; kıyafet seçimine geçebilirsiniz.' : 'Üç maddeyi de onaylamadan devam edilemez.'}</p>
+      <p className={classes.checkNote}>
+        {failed ? 'Onay kaydedilemedi; tekrar deneyin.' : approved ? 'Fotoğraf uygun bulundu ve kaydedildi; kıyafet seçimine geçebilirsiniz.' : 'Üç maddeyi de onaylamadan devam edilemez. Sistem kişi sayısını veya tam boyu kendisi ölçmez; onay sizin kontrolünüzdür.'}
+      </p>
     </section>
   );
 }

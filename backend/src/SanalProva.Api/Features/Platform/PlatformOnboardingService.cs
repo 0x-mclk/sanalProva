@@ -26,6 +26,7 @@ public enum ReissueOutcome
     Issued,
     OrganizationNotFound,
     NoPendingOwner,
+    AlreadyIssued,
 }
 
 public sealed record ReissuedLink(Guid OrganizationId, Guid OwnerUserId, string SetupLink, DateTimeOffset ExpiresAt);
@@ -152,7 +153,7 @@ public sealed class PlatformOnboardingService(
         return new CreatedOrganization(organization.Id, store.Id, owner.Id, BuildLink(token), entity.ExpiresAt);
     }
 
-    public async Task<(ReissueOutcome Outcome, ReissuedLink? Result)> ReissueOwnerLinkAsync(Guid adminUserId, Guid organizationId, CancellationToken ct)
+    public async Task<(ReissueOutcome Outcome, ReissuedLink? Result)> ReissueOwnerLinkAsync(Guid adminUserId, Guid organizationId, CancellationToken ct, string? requestKey = null)
     {
         if (!await db.Organizations.AnyAsync(o => o.Id == organizationId, ct))
         {
@@ -170,8 +171,18 @@ public sealed class PlatformOnboardingService(
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var (token, entity) = await tokens.IssueAsync(
-            owner.Id, organizationId, AccountSetupTokenPurpose.InitialPassword, TimeSpan.FromHours(options.Value.InitialPasswordTtlHours), adminUserId, ct);
+        (string Token, AccountSetupToken Entity) issued;
+        try
+        {
+            issued = await tokens.IssueAsync(
+                owner.Id, organizationId, AccountSetupTokenPurpose.InitialPassword, TimeSpan.FromHours(options.Value.InitialPasswordTtlHours), adminUserId, ct, requestKey);
+        }
+        catch (SetupLinkAlreadyIssuedException)
+        {
+            return (ReissueOutcome.AlreadyIssued, null);
+        }
+
+        var (token, entity) = issued;
         audit.RecordFor(organizationId, adminUserId, "Platform.SetupLinkIssued", nameof(AccountSetupToken), entity.Id);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

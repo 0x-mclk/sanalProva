@@ -40,6 +40,13 @@ test('PIN belirle → ekranı kilitle → içerik gizli → yanlış PIN reddedi
   await expect(page.getByText('Devam Eden Provalar')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Hesap menüsü' })).toHaveCount(0);
 
+  // SUNUCU tarafı zorlama: aynı çerezle doğrudan API çağrısı kilitliyken 423 alır; ikinci sekme de kilitli açılır
+  expect((await page.request.get('/api/v1/sessions')).status()).toBe(423);
+  const second = await page.context().newPage();
+  await second.goto('/gecmis');
+  await expect(second.getByTestId('lock-screen')).toBeVisible();
+  await second.close();
+
   // Yanlış PIN: kalan hak gösterilir, kilit açılmaz
   await page.getByLabel('PIN').fill('9999');
   await page.getByRole('button', { name: 'Kilidi aç' }).click();
@@ -60,4 +67,5 @@ test('PIN belirle → ekranı kilitle → içerik gizli → yanlış PIN reddedi
   await page.getByRole('button', { name: 'Kilidi aç' }).click();
   await expect(page.getByTestId('lock-screen')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: /Prova Geçmişi|Geçmiş/ }).first()).toBeVisible();
+  expect((await page.request.get('/api/v1/auth/me')).status()).toBe(200);
 });

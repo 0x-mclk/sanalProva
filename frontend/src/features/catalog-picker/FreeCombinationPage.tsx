@@ -4,7 +4,6 @@ import { Navigate, useNavigate, useParams } from 'react-router';
 import { useCategories, useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
 import { useCreditQuote } from '../../shared/api/credits';
 import { CreditQuoteNotice } from '../credits/CreditNotices';
-import { isPhotoApproved } from '../session/photoApproval';
 import { newIdempotencyKey } from '../../shared/api/idempotency';
 import { ApiError } from '../../shared/api/http';
 import type { CategoryDto, DraftDto, ProductListItem } from '../../shared/api/types';
@@ -56,6 +55,7 @@ export function FreeCombinationPage() {
       label={session.data.customerLabel}
       serverDraft={session.data.draft}
       photoId={session.data.photos[0]?.id}
+      photoApproved={Boolean(session.data.photos[0]?.staffApprovedAt)}
       products={products.data?.items ?? []}
       categories={categories.data ?? []}
       loadError={products.error ?? categories.error}
@@ -71,6 +71,7 @@ type ContentProps = {
   label: string | null;
   serverDraft: DraftDto | null;
   photoId: string | undefined;
+  photoApproved: boolean;
   products: ProductListItem[];
   categories: CategoryDto[];
   loadError: unknown;
@@ -78,12 +79,11 @@ type ContentProps = {
   onBack: () => void;
 };
 
-function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, products, categories, loadError, demo, onBack }: ContentProps) {
+function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, photoApproved, products, categories, loadError, demo, onBack }: ContentProps) {
   const navigate = useNavigate();
   const { entries, setEntries, warnings, flush, saveError } = useDraftItems(sessionId, 'FreeCombination', serverDraft);
   const start = useStartGeneration(sessionId);
   const quote = useCreditQuote('FreeCombination');
-  const photoApproved = isPhotoApproved(photoId);
   const [error, setError] = useState<string | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 

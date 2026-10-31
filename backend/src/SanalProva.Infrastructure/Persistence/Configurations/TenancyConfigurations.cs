@@ -58,6 +58,8 @@ internal sealed class AccountSetupTokenConfiguration : IEntityTypeConfiguration<
     public void Configure(EntityTypeBuilder<AccountSetupToken> builder)
     {
         builder.Property(x => x.TokenHash).HasMaxLength(32).IsFixedLength();
+        builder.Property(x => x.RequestKeyHash).HasMaxLength(32).IsFixedLength();
+        builder.HasIndex(x => new { x.UserId, x.RequestKeyHash }).IsUnique().HasDatabaseName("ix_account_setup_tokens_user_request_key").HasFilter("[request_key_hash] IS NOT NULL");
         builder.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("ux_account_setup_tokens_token_hash");
         // Kullanıcının açık (henüz tüketilmemiş/iptal edilmemiş) token'ını bulmak için: yeniden üretimde öncekiler bu indeksle aranıp iptal edilir.
         builder.HasIndex(x => new { x.UserId, x.Purpose })

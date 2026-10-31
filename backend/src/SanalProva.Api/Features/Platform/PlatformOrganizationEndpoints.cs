@@ -118,13 +118,20 @@ public static class PlatformOrganizationEndpoints
             organization.Settings.DailyBudgetUsd, organization.Settings.MonthlyBudgetUsd, organization.Settings.MaxJobCostUsd, credit?.BalanceCredits ?? 0, credit?.ReservedCredits ?? 0));
     }
 
-    private static async Task<IResult> ReissueAsync(Guid id, PlatformOnboardingService service, CurrentUser user, HttpContext http, CancellationToken ct)
+    private static async Task<IResult> ReissueAsync(
+        Guid id, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, PlatformOnboardingService service, CurrentUser user, HttpContext http, CancellationToken ct)
     {
-        var (outcome, result) = await service.ReissueOwnerLinkAsync(user.UserId, id, ct);
+        if (idempotencyKey is not null && idempotencyKey.Length is < 8 or > 64)
+        {
+            return ApiProblems.BadRequest("IDEMPOTENCY_KEY_INVALID", "Idempotency-Key 8–64 karakter olmalı.");
+        }
+
+        var (outcome, result) = await service.ReissueOwnerLinkAsync(user.UserId, id, ct, idempotencyKey);
         NoStore(http);
         return outcome switch
         {
             ReissueOutcome.OrganizationNotFound => ApiProblems.NotFound("Firma bulunamadı."),
+            ReissueOutcome.AlreadyIssued => ApiProblems.Conflict("SETUP_LINK_ALREADY_ISSUED", "Bu istekle bağlantı zaten üretildi ve bir daha gösterilemez. Yeni bir bağlantı gerekiyorsa yeniden üretin (öncekini iptal eder)."),
             ReissueOutcome.NoPendingOwner => ApiProblems.Conflict("OWNER_ALREADY_ACTIVATED", "Owner şifresini zaten belirlemiş (veya bekleyen Owner yok); yeni bağlantı üretilemez."),
             _ => TypedResults.Ok(new SetupLinkResponse(result!.OrganizationId, result.OwnerUserId, result.SetupLink, result.ExpiresAt)),
         };

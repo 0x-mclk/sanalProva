@@ -268,6 +268,8 @@ public sealed class GenerationProcessor(
                     SELECT TOP (1) id, status, attempt, stage, started_at, lease_until, updated_at, reserved_cost_usd, provider_request_id, provider_submit_started_at
                       FROM generation_jobs WITH (UPDLOCK, READPAST, ROWLOCK)
                      WHERE status = N'Queued' AND next_attempt_at <= @now
+                       -- işçi yalnızca kendi modunda kabul edilmiş işi alır (admitted_live NULL = eski satır: her iki mod)
+                       AND (admitted_live IS NULL OR admitted_live = @live)
                      ORDER BY next_attempt_at, created_at)
                 UPDATE next_job
                    SET status = N'Running', attempt = attempt + 1, stage = N'Preparing',
@@ -277,6 +279,10 @@ public sealed class GenerationProcessor(
                 OUTPUT inserted.id;
                 """;
             AddParameter(command, "now", now);
+            var liveParameter = command.CreateParameter();
+            liveParameter.ParameterName = "live";
+            liveParameter.Value = !settings.CurrentValue.UseMockProviders;
+            command.Parameters.Add(liveParameter);
             AddParameter(command, "lease", now.AddSeconds(settings.CurrentValue.LeaseSeconds));
             return await command.ExecuteScalarAsync(ct) as Guid?;
         }

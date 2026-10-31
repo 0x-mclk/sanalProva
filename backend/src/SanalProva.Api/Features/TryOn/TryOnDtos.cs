@@ -19,7 +19,13 @@ public sealed record ConsentDto(string NoticeVersion, bool ProcessingConsent, bo
 
 public sealed record PhotoQualityDto(bool Blurry, bool LowResolution, bool NotPortrait, bool HasWarnings, IReadOnlyList<string> Warnings);
 
-public sealed record PhotoDto(Guid Id, ImageAngle Angle, int Width, int Height, bool IsPrimary, PhotoQualityDto Quality, ImageUrls Urls);
+/// <param name="StaffApprovedAt">Personelin "fotoğraf prova için uygun" onayı (sunucuda kayıtlı; ücretli üretim bu onay olmadan kabul edilmez). Yeniden çekimde yeni fotoğraf onaysız başlar.</param>
+public sealed record PhotoDto(Guid Id, ImageAngle Angle, int Width, int Height, bool IsPrimary, PhotoQualityDto Quality, ImageUrls Urls, DateTimeOffset? StaffApprovedAt = null);
+
+/// <summary>
+/// Üç beyanın HEPSİ true olmalıdır (aksi halde 400). Bu bir otomatik analiz değildir: sistem kişi sayısını veya tam boyu ölçmez; onay, personelin sorumluluk beyanıdır.
+/// </summary>
+public sealed record PhotoApprovalRequest(bool SinglePersonFullBody, bool FrontalUprightPose, bool SharpAndWellLit);
 
 public sealed class PhotoUploadForm
 {

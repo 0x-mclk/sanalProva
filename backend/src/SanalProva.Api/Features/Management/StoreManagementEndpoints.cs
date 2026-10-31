@@ -130,7 +130,7 @@ public static class StoreManagementEndpoints
     /// Firmadaki son etkin şube pasife alınamaz. Veri silinmez; yeniden etkinleştirince TV'ler yeniden eşleştirilmelidir.
     /// </summary>
     private static async Task<IResult> SetStatusAsync(
-        Guid id, SetStoreStatusRequest request, AppDbContext db, CurrentUser user, AuditTrail audit, DisplayStateService display, TenantContext tenant, TimeProvider clock, CancellationToken ct)
+        Guid id, SetStoreStatusRequest request, AppDbContext db, CurrentUser user, AuditTrail audit, DisplayStateService display, TenantContext tenant, TimeProvider clock, SanalProva.Api.Hubs.StaffConnectionRegistry connections, CancellationToken ct)
     {
         List<Guid> deviceIds = [];
         Store store;
@@ -161,6 +161,9 @@ public static class StoreManagementEndpoints
 
         if (!request.IsActive)
         {
+            // Pasif şubenin TV/oturum bildirimlerine abone açık personel bağlantıları kesilir (yeniden bağlanan istemci pasif şubeye abone olamaz)
+            connections.AbortStore(id);
+
             // TV'ler şube kapsamıyla (IStoreOwned filtresi) bulunur; durum yalnızca DisplayStateService üzerinden değişir
             tenant.StoreId = id;
             deviceIds = await db.DisplayDevices.AsNoTracking().Where(d => d.StoreId == id && d.RevokedAt == null).Select(d => d.Id).ToListAsync(ct);

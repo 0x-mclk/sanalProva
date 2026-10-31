@@ -10,6 +10,11 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"
 		X-Frame-Options "DENY"
+		# İçerik güvenlik politikası (Pilot öncesi kapanış). Her şey aynı kaynaktan (SPA + API + imzalı görseller + SignalR WebSocket); harici betik/stil/yazı tipi YOK.
+		# script-src 'self': satır içi betik yok (TV yedek betikleri harici dosyadır). style-src 'unsafe-inline': Mantine/React stil öznitelikleri ve satır içi <style> için gerekli (betik çalıştırmaz).
+		# img/media blob: ve data: (fotoğraf önizleme/sıkıştırma, küçük SVG). connect-src: aynı kaynak + WebSocket (eski tarayıcılarda 'self' ws/wss'yi kapsamaz).
+		# Gerçek tarayıcıda doğrulama: frontend/e2e/csp.spec.ts bu satırı okuyup Playwright ile ihlal arar (Caddy'nin kendisi bu makinede çalıştırılmadı).
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://{http.request.host}; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		# Kamera yalnızca kendi kaynağında (müşteri fotoğrafı çekimi)
 		Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()"
 		-Server

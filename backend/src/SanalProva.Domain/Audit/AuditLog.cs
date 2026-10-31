@@ -15,5 +15,11 @@ public sealed class AuditLog
     public required string EntityType { get; init; }
     public Guid? EntityId { get; init; }
     public string? IpHash { get; init; }
+
+    /// <summary>
+    /// Kısa, SIR İÇERMEYEN izlenebilirlik bilgisi (≤300 karakter). Operatör komutlarında: kim (işletim sistemi kullanıcısı@makine), hangi komut ve hangi hedef/miktar/referans.
+    /// Token, parola, e-posta, bağlantı veya serbest metin notu ASLA yazılmaz.
+    /// </summary>
+    public string? Detail { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }

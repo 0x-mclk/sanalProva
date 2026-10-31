@@ -126,6 +126,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
         builder.UseSetting("Generation:RetryBackoffBaseSeconds", "0.02");
         builder.UseSetting("Retention:SweepIntervalSeconds", "0");
         builder.UseSetting("Display:SweepIntervalSeconds", "0"); // boşta temizleme testlerde elle tetiklenir
+        builder.UseSetting("Security:HubRevalidateSeconds", "0"); // hub süpürücüsü testlerde elle tetiklenir (StaffConnectionSweeper.SweepAsync)
         builder.UseSetting("Security:DisplayPairingRateLimitPerMinute", "100000");
         builder.UseSetting("Security:DisplayPairingStatusRateLimitPerMinute", "100000");
         builder.UseSetting("Security:DisplayClaimRateLimitPerMinute", "100000");

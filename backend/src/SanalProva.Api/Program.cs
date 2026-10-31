@@ -128,6 +128,8 @@ builder.Services.AddScoped<AuditTrail>();
 builder.Services.AddScoped<PlatformOnboardingService>();
 builder.Services.AddScoped<StaffManagementService>();
 builder.Services.AddSingleton<StaffConnectionRegistry>();
+builder.Services.AddSingleton<StaffConnectionSweeper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StaffConnectionSweeper>());
 builder.Services.AddSingleton<IServiceAgreementSource, StaticServiceAgreementSource>();
 builder.Services.AddSingleton<AgreementGate>();
 builder.Services.AddSingleton<SanalProva.Infrastructure.Generation.IJobNotifier, SignalRJobNotifier>();
@@ -167,6 +169,7 @@ app.UseRateLimiter(); // kimlikten sonra: kullanıcı başına bölümlü politi
 app.UseTenantContext();
 app.UseAuthorization();
 app.UseAgreementEnforcement();
+app.UseScreenLockEnforcement();
 
 app.MapAppHealthChecks();
 app.MapFileEndpoints();

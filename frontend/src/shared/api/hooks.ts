@@ -171,6 +171,29 @@ export function useUploadPhoto(sessionId: string) {
   });
 }
 
+/** Personel fotoğraf uygunluk onayı (sunucuda kayıtlı; ücretli üretim bunsuz kabul edilmez). Üç beyanın hepsi gönderilir; sunucu hepsini ister. */
+export function useApprovePhoto(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (photoId: string) =>
+      unwrap(
+        api.POST('/api/v1/sessions/{id}/photos/{photoId}/approval', {
+          params: { path: { id: sessionId, photoId } },
+          body: { singlePersonFullBody: true, frontalUprightPose: true, sharpAndWellLit: true },
+        }),
+      ),
+    onSuccess: () => void client.invalidateQueries({ queryKey: qk.session(sessionId) }),
+  });
+}
+
+export function useRevokePhotoApproval(sessionId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (photoId: string) => unwrap(api.DELETE('/api/v1/sessions/{id}/photos/{photoId}/approval', { params: { path: { id: sessionId, photoId } } })),
+    onSuccess: () => void client.invalidateQueries({ queryKey: qk.session(sessionId) }),
+  });
+}
+
 export function useDeletePhoto(sessionId: string) {
   const client = useQueryClient();
   return useMutation({

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SanalProva.Domain.Tenancy;
 using SanalProva.Infrastructure.Identity;
+using SanalProva.Api.Features.Account;
 using SanalProva.Infrastructure.Persistence;
 using SanalProva.Infrastructure.Tenancy;
 
@@ -13,6 +14,9 @@ namespace SanalProva.Api.Infrastructure;
 public static class AppClaims
 {
     public const string OrganizationId = "org_id";
+
+    /// <summary>Sunucu tarafı oturum (<c>auth_sessions</c>) kimliği; girişte çereze yazılır.</summary>
+    public const string SessionId = "sp_sid";
 }
 
 /// <summary>Girişte kullanıcının firma kimliğini çereze claim olarak ekler.</summary>
@@ -226,11 +230,31 @@ public static class ActiveUserCookieValidator
             return;
         }
 
+        // Sunucu tarafı oturum: sp_sid claim'i olmayan (eski) çerez geçersizdir; satır yoksa (çıkış yapılmış) çerez düşer; kilitliyse istek kilitli işaretlenir
+        if (!Guid.TryParse(principal!.FindFirstValue(AppClaims.SessionId), out var sessionId))
+        {
+            await RejectAsync(context);
+            return;
+        }
+
         var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
         var current = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new { u.IsActive, u.SecurityStamp, u.OrganizationId }).SingleOrDefaultAsync(context.HttpContext.RequestAborted);
         if (current is null || !current.IsActive || current.OrganizationId != organizationId || !string.Equals(current.SecurityStamp, stamp, StringComparison.Ordinal))
         {
             await RejectAsync(context);
+            return;
+        }
+
+        var services = context.HttpContext.RequestServices;
+        var check = await ScreenLockState.EvaluateAsync(db, userId.Value, sessionId, services.GetRequiredService<TimeProvider>().GetUtcNow(),
+            PinEndpoints.IdleSeconds(services.GetRequiredService<IConfiguration>()), context.HttpContext.RequestAborted);
+        if (check == SessionCheck.Invalid)
+        {
+            await RejectAsync(context);
+        }
+        else if (check == SessionCheck.Locked)
+        {
+            context.HttpContext.Items[ScreenLockState.ItemKey] = true;
         }
     }
 

@@ -88,6 +88,7 @@ public sealed class DisplayTests(ApiFactory factory) : ApiTestBase(factory)
         await ConsentAsync(client, session.Id);
         var photoResponse = await client.UploadAsync($"/api/v1/sessions/{session.Id}/photos", TestImages.Portrait(seed));
         var photo = await ApiClient.ReadAsync<PhotoDto>(photoResponse, HttpStatusCode.Created);
+        photo = await ApprovePhotoAsync(client, session.Id, photo.Id); // üretim kabulü personel onayını sunucuda arar
         await SaveDraftAsync(client, session.Id, OutfitMode.OutfitSet, setup.Catalog.SetProduct);
         var job = await WaitForJobAsync(client, (await StartGenerationAsync(client, session.Id)).Id);
         Assert.Equal(Domain_Succeeded, job.Status);

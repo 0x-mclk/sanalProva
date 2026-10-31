@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, unwrap } from './client';
 import type { Schemas } from './client';
 import { apiFetch } from './http';
+import { newIdempotencyKey } from './idempotency';
 import { qk } from './hooks';
 import type { CreateOrganizationRequest, CreateOrganizationResponse, SetupLinkResponse } from './types';
 
@@ -44,7 +45,7 @@ export function createOrganization(body: CreateOrganizationRequest, idempotencyK
  * arayüzdeki çift tıklama kilidi (bkz. OrganizationDetailPage) yalnızca istemci tarafı korumadır; ağ yeniden denemesi veya iki sekme yine iki bağlantı üretip birincisini iptal edebilir.
  */
 export function reissueOwnerLink(organizationId: string): Promise<SetupLinkResponse> {
-  return apiFetch<SetupLinkResponse>(`/api/v1/platform/organizations/${organizationId}/owner/setup-link`, { method: 'POST', json: {} });
+  return apiFetch<SetupLinkResponse>(`/api/v1/platform/organizations/${organizationId}/owner/setup-link`, { method: 'POST', json: {}, headers: { 'Idempotency-Key': newIdempotencyKey() } });
 }
 
 /** Tek kullanımlık bağlantıyla şifre belirleme (anonim). Token yalnızca istek gövdesindedir; URL'e yazılmaz. */

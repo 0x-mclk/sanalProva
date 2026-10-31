@@ -46,4 +46,10 @@ public sealed class AccountSetupToken : ITenantOwned
     /// — aynı çapraz-firma gerekçesiyle FK'sız bırakılan mevcut örnek).
     /// </summary>
     public Guid? CreatedByUserId { get; init; }
+
+    /// <summary>
+    /// Bağlantı üretme isteğinin Idempotency-Key özeti (SHA-256; anahtar düz saklanmaz). Aynı anahtarla tekrar gelen istek ikinci bir bağlantı üretip birincisini iptal
+    /// ETMEZ: <c>409 SETUP_LINK_ALREADY_ISSUED</c> alır (düz token bir daha gösterilemez). Anahtarsız istekler eskisi gibi çalışır.
+    /// </summary>
+    public byte[]? RequestKeyHash { get; init; }
 }

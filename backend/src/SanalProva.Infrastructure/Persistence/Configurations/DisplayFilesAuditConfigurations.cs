@@ -70,6 +70,7 @@ internal sealed class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(x => x.Action).HasMaxLength(60);
         builder.Property(x => x.EntityType).HasMaxLength(60);
         builder.Property(x => x.IpHash).HasMaxLength(64);
+        builder.Property(x => x.Detail).HasMaxLength(300);
         builder.HasIndex(x => new { x.OrganizationId, x.CreatedAt });
 
         // Denetim kaydı firmaya ve (varsa) o firmanın şubesine bağlıdır. Kullanıcıya bağlanmaz: platform yöneticisi başka firma adına kayıt bırakır.

@@ -2,6 +2,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { RouterProvider } from 'react-router';
 import { ApiError } from '../shared/api/http';
 import { qk } from '../shared/api/hooks';
+import { SCREEN_LOCKED_EVENT } from '../features/lock/IdleLock';
 import { AuthProvider } from '../shared/auth/AuthContext';
 import { ThemeProvider } from '../shared/theme/ThemeProvider';
 import { router } from './router';
@@ -13,6 +14,10 @@ import { router } from './router';
 function syncAgreementGate(error: unknown) {
   if (error instanceof ApiError && error.code === 'AGREEMENT_ACCEPTANCE_REQUIRED') {
     void queryClient.invalidateQueries({ queryKey: qk.me });
+  }
+  // Sunucu oturumu kilitli (başka sekme/cihaz kilitledi veya boşta süresi doldu): arayüz kilit ekranına geçer
+  if (error instanceof ApiError && error.code === 'SCREEN_LOCKED') {
+    window.dispatchEvent(new Event(SCREEN_LOCKED_EVENT));
   }
 }
 

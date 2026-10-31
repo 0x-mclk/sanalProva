@@ -5,15 +5,21 @@ import { ApiError } from '../../shared/api/http';
 import { readLocked, writeLocked } from '../../shared/auth/lockState';
 import { ThemeProvider } from '../../shared/theme/ThemeProvider';
 import { CreditQuoteNotice } from '../credits/CreditNotices';
-import { IdleLock } from './IdleLock';
+import { IdleLock, SCREEN_LOCKED_EVENT } from './IdleLock';
 
-let status: { hasPin: boolean; idleLockSeconds: number };
+let status: { hasPin: boolean; idleLockSeconds: number; locked: boolean };
+let statusLoading = false;
 const unlockFn = vi.fn<(body: { pin?: string; password?: string }) => Promise<void>>();
+const sendLockFn = vi.fn(async () => true);
+const sendActivityFn = vi.fn(async (): Promise<'ok' | 'locked' | 'failed'> => 'ok');
 
 vi.mock('../../shared/api/lock', async () => {
   const query = await import('@tanstack/react-query');
   return {
-    useLockStatus: () => ({ data: status }),
+    useLockStatus: () => ({ data: statusLoading ? undefined : status, isLoading: statusLoading, dataUpdatedAt: 1 }),
+    sendLock: () => sendLockFn(),
+    sendActivity: () => sendActivityFn(),
+    lockKeys: { status: ['lock', 'status'] },
     useUnlock: () => query.useMutation({ mutationFn: (body: { pin?: string; password?: string }) => unlockFn(body) }),
   };
 });
@@ -34,8 +40,11 @@ function renderLock(client = new QueryClient()) {
 }
 
 beforeEach(() => {
-  status = { hasPin: true, idleLockSeconds: 300 };
+  status = { hasPin: true, idleLockSeconds: 300, locked: false };
+  statusLoading = false;
   unlockFn.mockReset();
+  sendLockFn.mockClear();
+  sendActivityFn.mockClear();
   window.sessionStorage.clear();
 });
 
@@ -52,6 +61,7 @@ describe('ekran kilidi: boşta kilitlenme', () => {
     expect(screen.queryByText(/GIZLI-ICERIK/)).not.toBeInTheDocument();
     expect(screen.getByTestId('lock-screen')).toBeInTheDocument();
     expect(readLocked()).toBe(true);
+    expect(sendLockFn).toHaveBeenCalled(); // kilit SUNUCUYA da iletilir (sunucu tarafı zorlama)
   });
 
   it('etkileşim süreyi sıfırlar: kilit yalnızca sürekli boşta kalınca devreye girer', () => {
@@ -81,6 +91,57 @@ describe('ekran kilidi: boşta kilitlenme', () => {
     act(() => void vi.advanceTimersByTime(301_000));
     expect(client.getQueryData(['sessions', 'open'])).toBeUndefined();
     expect(client.getQueryData(['me'])).toEqual({ id: 'u1' });
+  });
+});
+
+describe('ekran kilidi: sunucu tarafı durum', () => {
+  it('sayfa yenilemede sunucu kilitliyse (yerel bayrak olmasa da) içerik hiç çizilmez', () => {
+    status = { ...status, locked: true };
+    renderLock();
+    expect(screen.getByTestId('lock-screen')).toBeInTheDocument();
+    expect(screen.queryByText(/GIZLI-ICERIK/)).not.toBeInTheDocument();
+  });
+
+  it('sunucu durumu henüz bilinmiyorken içerik çizilmez (kilitli oturumda bir an bile müşteri verisi görünmez)', () => {
+    statusLoading = true;
+    renderLock();
+    expect(screen.queryByText(/GIZLI-ICERIK/)).not.toBeInTheDocument();
+    expect(screen.getByText('Oturum doğrulanıyor…')).toBeInTheDocument();
+  });
+
+  it('başka bir istek 423 SCREEN_LOCKED alırsa (başka sekme kilitledi) kilit ekranına geçer ve önbelleği temizler', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
+    client.setQueryData(['sessions', 'open'], { items: ['müşteri'] });
+    renderLock(client);
+    expect(screen.getByText(/GIZLI-ICERIK/)).toBeInTheDocument();
+    act(() => void window.dispatchEvent(new Event(SCREEN_LOCKED_EVENT)));
+    expect(screen.getByTestId('lock-screen')).toBeInTheDocument();
+    expect(client.getQueryData(['sessions', 'open'])).toBeUndefined();
+  });
+
+  it('başka sekmede kilit açılınca (sunucu artık kilitli değil) bu sekme de açılır', () => {
+    status = { ...status, locked: true };
+    const view = renderLock();
+    expect(screen.getByTestId('lock-screen')).toBeInTheDocument();
+    status = { ...status, locked: false };
+    view.rerender(
+      <ThemeProvider>
+        <QueryClientProvider client={view.client}>
+          <IdleLock>
+            <p>GIZLI-ICERIK müşteri fotoğrafı</p>
+          </IdleLock>
+        </QueryClientProvider>
+      </ThemeProvider>,
+    );
+    expect(screen.getByText(/GIZLI-ICERIK/)).toBeInTheDocument();
+  });
+
+  it('etkileşim sunucuya düzenli iletilir; sunucu 423 derse kilide geçilir', async () => {
+    sendActivityFn.mockResolvedValue('locked');
+    renderLock();
+    fireEvent.pointerDown(window);
+    await waitFor(() => expect(sendActivityFn).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('lock-screen')).toBeInTheDocument());
   });
 });
 
@@ -118,7 +179,7 @@ describe('ekran kilidi: açma', () => {
   });
 
   it('PIN’i olmayan hesap parolayla açar (PIN yerine parola alanı)', async () => {
-    status = { hasPin: false, idleLockSeconds: 300 };
+    status = { hasPin: false, idleLockSeconds: 300, locked: false };
     unlockFn.mockResolvedValue();
     renderLock();
     fireEvent.change(screen.getByLabelText('Parola'), { target: { value: 'gizli-parola' } });

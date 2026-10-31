@@ -83,7 +83,7 @@ public sealed class SessionReader(AppDbContext db, ImageLinks links, TimeProvide
     {
         var q = photo.QualityFlags;
         return new PhotoDto(photo.Id, photo.Angle, photo.Width, photo.Height, photo.IsPrimary,
-            new PhotoQualityDto(q.Blurry, q.LowResolution, q.NotPortrait, q.HasWarnings, JobMessages.PhotoWarnings(q)), urls);
+            new PhotoQualityDto(q.Blurry, q.LowResolution, q.NotPortrait, q.HasWarnings, JobMessages.PhotoWarnings(q)), urls, photo.StaffApprovedAt);
     }
 
     public static GeneratedImageDto ToImageDto(Domain.Generation.GeneratedImage i, ImageUrls urls, string? aiModel = null) =>

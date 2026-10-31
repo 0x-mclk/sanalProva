@@ -88,6 +88,12 @@ public static class GenerationEndpoints
             return ApiProblems.Conflict("NO_PHOTO", "Önce müşterinin fotoğrafı yüklenmeli.");
         }
 
+        // Personel fotoğraf uygunluk onayı SUNUCUDA zorunludur: arayüzü atlayan istek ücretli çağrıya, kredi rezervasyonuna veya kuyruğa ULAŞAMAZ (mock modda da aranır)
+        if (photo.StaffApprovedAt is null)
+        {
+            return PhotoNotApproved();
+        }
+
         if (session.Draft is not { Items.Count: > 0 } draft)
         {
             return ApiProblems.BadRequest("EMPTY_SELECTION", "Önce kıyafet seçin.");
@@ -171,7 +177,7 @@ public static class GenerationEndpoints
 
         // Kredi bedeli kabulde TARİFEDEN bir kez hesaplanıp işe yazılır (sonradan tarife değişse de bu iş için değişmez). Mock sağlayıcı kredi tüketmez.
         var credit = CreditFor(tariff, live, jobType, modelKey, quality);
-        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey, credit?.Cost);
+        var job = NewJob(session, user, jobType, selection.Id, photo.Id, idempotencyKey, clock.GetUtcNow(), fingerprint, modelKey, quality, dedupeKey, credit?.Cost, admittedLive: !generationSettings.CurrentValue.UseMockProviders);
         // Sonucu belirsiz (ücretlenmiş olabilir) aynı istek de "etkin" sayılır: tekrar tıklamak yeni ücretli iş açmaz, o iş ve uyarısı döner
         var admission = await AdmitAsync(db, reader, user, session, job, selection, "Generation.Requested", audit, clock, includeUncertain: true, credits, credit, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
@@ -323,9 +329,10 @@ public static class GenerationEndpoints
 
     private static GenerationJob NewJob(
         TryOnSession session, CurrentUser user, GenerationJobType type, Guid? selectionId, Guid? photoId, string key, DateTimeOffset now,
-        string? fingerprint = null, string? modelKey = null, string? quality = null, string? dedupeKey = null, int? creditCost = null) => new()
+        string? fingerprint = null, string? modelKey = null, string? quality = null, string? dedupeKey = null, int? creditCost = null, bool? admittedLive = null) => new()
     {
         CreditCost = creditCost,
+        AdmittedLive = admittedLive,
         RequestFingerprint = fingerprint,
         DedupeKey = dedupeKey,
         ModelKey = modelKey,
@@ -431,7 +438,7 @@ public static class GenerationEndpoints
     /// </summary>
     private static async Task<IResult> RetryAsync(
         Guid id, [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey, AppDbContext db, CurrentUser user, SessionReader reader, IJobNotifier notifier, AuditTrail audit,
-        GenerationStrategy strategy, CreditTariff tariff, CreditLedgerService credits, TimeProvider clock, CancellationToken ct)
+        GenerationStrategy strategy, Microsoft.Extensions.Options.IOptionsMonitor<GenerationSettings> generationSettings, CreditTariff tariff, CreditLedgerService credits, TimeProvider clock, CancellationToken ct)
     {
         // Başlık isteğe bağlıdır (eski istemciler anahtarsız çağırır: her çağrı yeni anahtar alır). Verilirse ağ hatasında aynı anahtarla tekrar göndermek tek yeni iş açar.
         if (idempotencyKey is not null && (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Length > 64))
@@ -461,6 +468,12 @@ public static class GenerationEndpoints
             return ApiProblems.Conflict("NO_PHOTO", "Fotoğraf silinmiş. Yeni fotoğraf yükleyip tekrar üretin.");
         }
 
+        // Yeniden denemede de aynı kural: onay kaldırıldıysa (veya hiç verilmediyse) yeni iş açılmaz
+        if (session.Photos.Single(p => p.Id == failed.SourcePhotoId).StaffApprovedAt is null)
+        {
+            return PhotoNotApproved();
+        }
+
         if (idempotencyKey is not null)
         {
             // Aynı anahtar daha önce bu yeniden denemede kullanıldıysa o iş döner; başka bir işlem (özgün iş veya farklı istek) için kullanıldıysa açık hata
@@ -484,12 +497,15 @@ public static class GenerationEndpoints
 
         var job = NewJob(session, user, failed.JobType, failed.SelectionId, failed.SourcePhotoId, idempotencyKey ?? Guid.NewGuid().ToString("N"), clock.GetUtcNow(),
             failed.RequestFingerprint, failed.ModelKey, failed.Quality, dedupeKey: live ? failed.RequestFingerprint : null,
-            creditCost: CreditFor(tariff, live, failed.JobType, failed.ModelKey, failed.Quality)?.Cost);
+            creditCost: CreditFor(tariff, live, failed.JobType, failed.ModelKey, failed.Quality)?.Cost, admittedLive: !generationSettings.CurrentValue.UseMockProviders);
         var credit = CreditFor(tariff, live, failed.JobType, failed.ModelKey, failed.Quality);
         // Bilinçli personel kararı: sonucu belirsiz iş yeniden denenebilir (ikinci ücret olasılığı iletide yazar); etkin aynı iş varsa yine o döner
         var admission = await AdmitAsync(db, reader, user, session, job, selection: null, "Generation.Retried", audit, clock, includeUncertain: false, credits, credit, ct);
         return await RespondAsync(admission, db, reader, notifier, ct);
     }
+
+    private static IResult PhotoNotApproved() =>
+        ApiProblems.Conflict("PHOTO_NOT_APPROVED", "Fotoğraf uygunluğu personel tarafından onaylanmadı. Üretimden önce fotoğrafı kontrol edip onaylayın.");
 
     private static async Task<IResult> FavoriteAsync(Guid id, FavoriteRequest request, AppDbContext db, ImageLinks links, CancellationToken ct)
     {
