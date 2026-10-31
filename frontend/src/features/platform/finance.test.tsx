@@ -25,7 +25,7 @@ vi.mock('../../shared/api/platform', async (original) => ({
 
 const org = (over: Partial<OrganizationFinance>): OrganizationFinance => ({
   organizationId: 'o1', name: 'Gül Gelinlik', slug: 'gul', isActive: true, paidAiEnabled: true, creditBalance: 40, creditReserved: 3, creditAvailable: 37, lowCredit: false,
-  dailyLimitUsd: 2, monthlyLimitUsd: 30, maxJobCostUsd: 0.25, spentTodayUsd: 0.5, spentMonthUsd: 4, openReservedUsd: 0.15, openUncertainCases: 0, oldestUncertainAt: null, budgetLevel: 'Ok', ...over,
+  dailyLimitUsd: 2, monthlyLimitUsd: 30, maxJobCostUsd: 0.25, spentTodayUsd: 0.5, spentMonthUsd: 4, openReservedUsd: 0.15, openUncertainCases: 0, oldestUncertainAt: null, budgetLevel: 'Ok', settingsCorrupt: false, ...over,
 });
 
 const caseDto = (over: Partial<CostCase> = {}): CostCase => ({
@@ -69,6 +69,14 @@ describe('platform finans ve izleme', () => {
     expect(within(row).getByText('Bütçe: Uyarı')).toBeInTheDocument();
     expect(within(screen.getByTestId('finance-gul')).getByText(/Bugün \$0\.50 \/ \$2\.00/)).toBeInTheDocument();
     expect(within(screen.getByTestId('finance-gul')).getByText(/Açık rezervasyon \$0\.15/)).toBeInTheDocument();
+  });
+});
+
+describe('bozuk firma ayarı', () => {
+  it('ayarı okunamayan firma kırmızı uyarıyla gösterilir (fail-closed)', () => {
+    finance = [org({ organizationId: 'o9', name: 'Bozuk Firma', slug: 'bozuk', settingsCorrupt: true, paidAiEnabled: false })];
+    wrap(<FinancePage />);
+    expect(within(screen.getByTestId('finance-bozuk')).getByText(/Ayarlar okunamıyor/)).toBeInTheDocument();
   });
 });
 

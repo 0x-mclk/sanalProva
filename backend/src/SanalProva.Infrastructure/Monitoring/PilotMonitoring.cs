@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SanalProva.Domain.Generation;
+using SanalProva.Domain.Tenancy;
 using SanalProva.Infrastructure.Ai;
 using SanalProva.Infrastructure.Credits;
 using SanalProva.Infrastructure.Generation;
@@ -23,7 +24,8 @@ public sealed record OrganizationFinance(
     Guid OrganizationId, string Name, string Slug, bool IsActive, bool PaidAiEnabled,
     int CreditBalance, int CreditReserved, int CreditAvailable, bool LowCredit,
     decimal DailyLimitUsd, decimal MonthlyLimitUsd, decimal MaxJobCostUsd, decimal SpentTodayUsd, decimal SpentMonthUsd, decimal OpenReservedUsd,
-    int OpenUncertainCases, DateTimeOffset? OldestUncertainAt, MonitorLevel BudgetLevel);
+    int OpenUncertainCases, DateTimeOffset? OldestUncertainAt, MonitorLevel BudgetLevel,
+    bool SettingsCorrupt = false);
 
 /// <summary>
 /// Pilot düzeyinde asgari izleme (Faz C): veritabanı bağlantısı, depo diski, takılı işler, bekleyen belirsiz maliyetler, bütçe ve kredi uyarıları.
@@ -44,7 +46,8 @@ public sealed class PilotMonitoring(
         ArgumentNullException.ThrowIfNull(db);
         var settings = generation.CurrentValue;
         var threshold = credits.CurrentValue.LowBalanceThreshold;
-        var organizations = await db.Organizations.AsNoTracking().OrderBy(o => o.Name).ToListAsync(ct);
+        // Ayar JSON'u BİLEREK burada okunmaz: tek bozuk satır tüm listeyi düşürmesin (firma başına aşağıda, fail-closed)
+        var organizations = await db.Organizations.AsNoTracking().OrderBy(o => o.Name).Select(o => new { o.Id, o.Name, o.Slug, o.IsActive }).ToListAsync(ct);
         var accounts = await db.CreditAccounts.IgnoreQueryFilters().AsNoTracking().ToDictionaryAsync(a => a.OrganizationId, ct);
         var openCases = await db.AiUsageLogs.IgnoreQueryFilters().AsNoTracking()
             .Where(l => l.ReconciliationState == CostReconciliationState.Open && !l.IsAdjustment)
@@ -56,18 +59,36 @@ public sealed class PilotMonitoring(
         {
             accounts.TryGetValue(organization.Id, out var account);
             var spend = await budget.GetSpendAsync(db, organization.Id, null, ct);
-            var limits = BudgetLimits.Resolve(settings.Budget, organization.Settings);
+            var (organizationSettings, corrupt) = await ReadSettingsAsync(db, organization.Id, ct);
+            // Bozuk/okunamayan ayar fail-closed (PaidAiPolicy/BudgetLimits.ForAsync ile aynı kural): ücretli AI kapalı, bütçe sınırları 0
+            var limits = corrupt ? new BudgetLimits(0m, 0m, 0m, true, true, true) : BudgetLimits.Resolve(settings.Budget, organizationSettings);
             var open = await BudgetGuard.GetOpenReservedAsync(db, organization.Id, ct);
             var available = account?.AvailableCredits ?? 0;
             cases.TryGetValue(organization.Id, out var uncertain);
             result.Add(new OrganizationFinance(
-                organization.Id, organization.Name, organization.Slug, organization.IsActive, organization.Settings.PaidAiEnabled,
+                organization.Id, organization.Name, organization.Slug, organization.IsActive, !corrupt && organizationSettings!.PaidAiEnabled,
                 account?.BalanceCredits ?? 0, account?.ReservedCredits ?? 0, available, threshold > 0 && available <= threshold,
                 limits.DailyUsd, limits.MonthlyUsd, limits.MaxJobUsd, spend.Today, spend.Month, open,
-                uncertain?.Count ?? 0, uncertain?.Oldest, BudgetLevel(spend.Today, spend.Month, open, limits)));
+                uncertain?.Count ?? 0, uncertain?.Oldest, BudgetLevel(spend.Today, spend.Month, open, limits), corrupt));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Tek firmanın ayarını okur. JSON bozuk/tür uyumsuzsa EF okuma istisnası fırlatır: <c>corrupt = true</c> döner (fail-closed). Veritabanı/bağlantı hataları ve iptal çağırana
+    /// yayılır (altyapı hatası "ayar bozuk" demek değildir). Kaynak: <c>PaidAiPolicy.IsEnabledForAsync</c> ile aynı ayrım.
+    /// </summary>
+    private static async Task<(OrganizationSettings? Settings, bool Corrupt)> ReadSettingsAsync(AppDbContext db, Guid organizationId, CancellationToken ct)
+    {
+        try
+        {
+            return (await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.Settings).SingleAsync(ct), false);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or System.Data.Common.DbException or DbUpdateException))
+        {
+            return (null, true);
+        }
     }
 
     internal static MonitorLevel BudgetLevel(decimal today, decimal month, decimal open, BudgetLimits limits)
@@ -140,6 +161,11 @@ public sealed class PilotMonitoring(
         // Bütçe ve kredi (yalnızca etkin firmalar)
         foreach (var f in finance.Where(f => f.IsActive))
         {
+            if (f.SettingsCorrupt)
+            {
+                checks.Add(new MonitorCheck($"settings:{f.Slug}", MonitorLevel.Critical, $"{f.Name}: firma ayarları okunamıyor (bozuk JSON). Ücretli AI ve bütçe KAPALI sayılıyor; ayarı onarın."));
+            }
+
             if (f.BudgetLevel != MonitorLevel.Ok)
             {
                 checks.Add(new MonitorCheck($"budget:{f.Slug}", f.BudgetLevel,

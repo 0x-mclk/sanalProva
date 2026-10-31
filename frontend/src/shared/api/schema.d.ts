@@ -3656,6 +3656,8 @@ export interface components {
             /** Format: date-time */
             oldestUncertainAt: null | string;
             budgetLevel: components["schemas"]["MonitorLevel"];
+            /** @default false */
+            settingsCorrupt: boolean;
         };
         OrganizationListItem: {
             /** Format: uuid */

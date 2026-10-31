@@ -43,6 +43,11 @@ function OrganizationRow({ f }: { f: OrganizationFinance }) {
           <Badge color={LEVEL_COLOR[f.budgetLevel]} variant="light">
             Bütçe: {LEVEL_LABEL[f.budgetLevel]}
           </Badge>
+          {f.settingsCorrupt ? (
+            <Badge color="red" variant="light">
+              Ayarlar okunamıyor (bozuk): ücretli AI ve bütçe kapalı sayılıyor
+            </Badge>
+          ) : null}
           {f.openUncertainCases > 0 ? (
             <Badge color="red" variant="light">
               {f.openUncertainCases} belirsiz maliyet

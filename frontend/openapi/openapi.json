@@ -4902,6 +4902,10 @@
           },
           "budgetLevel": {
             "$ref": "#/components/schemas/MonitorLevel"
+          },
+          "settingsCorrupt": {
+            "type": "boolean",
+            "default": false
           }
         }
       },

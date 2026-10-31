@@ -423,4 +423,75 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
         Assert.Contains("[KRİTİK] uncertain-cases", output, StringComparison.Ordinal);
         Assert.DoesNotContain(TestData.Password, output, StringComparison.Ordinal);
     }
+
+    private async Task<Guid> CorruptOrganizationAsync(string settingsJson)
+    {
+        var tenant = await TestData.CreateTenantAsync(Services, StoreRole.Owner, credits: 3);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE organizations SET settings = {settingsJson} WHERE id = {tenant.OrganizationId}", Ct);
+        }
+
+        return tenant.OrganizationId;
+    }
+
+    /// <summary>
+    /// CI #16 kök nedeni: PaidProviderPipelineTests fail-closed senaryoları için firma ayarını KASITLI bozar ("{bozuk json") ve satırı paylaşılan test veritabanında bırakır.
+    /// Finans/izleme TÜM firmaların ayarını tek sorguda okuyordu: tek bozuk satır JsonException ile 500 veriyordu (platform status ve /platform/finance|monitoring kör kalıyordu).
+    /// Veri bozulması uygulama hatası değil, ama izleme aracı tek bozuk firma yüzünden kör kalmamalı: bozuk firma fail-closed (ücretli AI kapalı, sınırlar 0) gösterilir ve
+    /// KRİTİK uyarı üretir; diğer firmalar etkilenmez. Linux/CI'ya özgü bir EF davranışı DEĞİLDİR (Windows'ta da aynı veriyle aynı istisna).
+    /// </summary>
+    [Theory]
+    [InlineData("{bozuk json")]
+    [InlineData("{\"PaidAiEnabled\":\"evet\"}")]
+    public async Task Bozuk_firma_ayari_finans_ve_izlemeyi_dusurmez_fail_closed_gosterilir_digerleri_etkilenmez(string settingsJson)
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var good = await TestData.CreateTenantAsync(Services, StoreRole.Owner, credits: 9);
+        var corruptId = await CorruptOrganizationAsync(settingsJson);
+        var admin = await PlatformAdminClientAsync();
+
+        var finance = await admin.GetAsync<List<OrganizationFinance>>("/api/v1/platform/finance"); // eskiden 500
+        var bad = Assert.Single(finance, f => f.OrganizationId == corruptId);
+        Assert.True(bad.SettingsCorrupt);
+        Assert.False(bad.PaidAiEnabled); // fail-closed
+        Assert.Equal((0m, 0m, 0m), (bad.DailyLimitUsd, bad.MonthlyLimitUsd, bad.MaxJobCostUsd)); // sınırlar kapalı
+        Assert.Equal(3, bad.CreditBalance); // kredi hesabı ayrı tablodan okunur, etkilenmez
+        var fine = Assert.Single(finance, f => f.OrganizationId == good.OrganizationId);
+        Assert.False(fine.SettingsCorrupt);
+        Assert.Equal(9, fine.CreditBalance);
+
+        var checks = await admin.GetAsync<List<MonitorCheck>>("/api/v1/platform/monitoring"); // eskiden 500
+        Assert.Contains(checks, c => c.Name.StartsWith("settings:", StringComparison.Ordinal) && c.Level == MonitorLevel.Critical);
+
+        var writer = new StringWriter();
+        var exit = await SanalProva.Api.Features.Platform.PlatformCommands.RunAsync(Services, ["platform", "status"], writer, Ct); // eskiden JsonException
+        Assert.Equal(SanalProva.Api.Features.Platform.PlatformCommands.ExitMonitorCritical, exit);
+        Assert.Contains("[KRİTİK] settings:", writer.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>EF "decimal precision" uyarısı (OrganizationSettings): alanlar JSON sütunundadır; sayı JSON metni olarak saklanır, SQL decimal kırpması YOKTUR. Kanıt: çok basamaklı değer birebir döner.</summary>
+    [Fact]
+    public async Task Firma_ayarindaki_decimal_alanlar_json_sutununda_kirpilmadan_saklanir()
+    {
+        ApiFactory.RequireDatabase(Factory);
+        var tenant = await TestData.CreateTenantAsync(Services, StoreRole.Owner);
+        var (scope, db) = OpenDb();
+        using (scope)
+        {
+            var organization = await db.Organizations.SingleAsync(o => o.Id == tenant.OrganizationId, Ct);
+            organization.Settings.DailyBudgetUsd = 0.123456789m;
+            organization.Settings.MonthlyBudgetUsd = 12345.678901234m;
+            await db.SaveChangesAsync(Ct);
+        }
+
+        var (scope2, db2) = OpenDb();
+        using (scope2)
+        {
+            var settings = await db2.Organizations.AsNoTracking().Where(o => o.Id == tenant.OrganizationId).Select(o => o.Settings).SingleAsync(Ct);
+            Assert.Equal(0.123456789m, settings.DailyBudgetUsd);
+            Assert.Equal(12345.678901234m, settings.MonthlyBudgetUsd);
+        }
+    }
 }
