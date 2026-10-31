@@ -198,6 +198,11 @@ public sealed class StaffManagementService(
 
             user.IsActive = isActive;
             user.UpdatedAt = clock.GetUtcNow();
+            if (!isActive)
+            {
+                user.ClearPin(); // yeniden etkinleştirilen hesap eski PIN ile değil parolayla girer
+            }
+
             // Açık oturumlar bir sonraki istekte düşer (ActiveUserCookieValidator); bekleyen bağlantılar da kullanılamaz hale gelir
             await users.UpdateSecurityStampAsync(user);
             if (!isActive)

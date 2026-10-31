@@ -183,6 +183,115 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LockStatusDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SetPinRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/account/unlock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UnlockRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agreement/current": {
         parameters: {
             query?: never;
@@ -1886,6 +1995,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/finance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OrganizationFinance"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/monitoring": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MonitorCheck"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/organizations": {
         parameters: {
             query?: never;
@@ -2232,6 +2411,80 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["CreditLedgerItemDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credits/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreditBalanceDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credits/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    jobType?: components["schemas"]["GenerationJobType"];
+                    modelKey?: string;
+                    quality?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreditQuoteDto"];
                     };
                 };
             };
@@ -2986,6 +3239,13 @@ export interface components {
             /** Format: int32 */
             dailyGenerationQuota: null | number;
         };
+        CreditBalanceDto: {
+            enforced: boolean;
+            /** Format: int32 */
+            available: number;
+            isLow: boolean;
+            isEmpty: boolean;
+        };
         /** @enum {unknown} */
         CreditEntryType: "Grant" | "Adjustment" | "Reserve" | "Release" | "Consume";
         CreditLedgerItemDto: {
@@ -3006,6 +3266,18 @@ export interface components {
             tariffKey: null | string;
             /** Format: date-time */
             createdAt: string;
+        };
+        CreditQuoteDto: {
+            enforced: boolean;
+            live: boolean;
+            /** Format: int32 */
+            cost: number;
+            /** Format: int32 */
+            available: number;
+            sufficient: boolean;
+            /** Format: int32 */
+            availableAfter: number;
+            lowAfter: boolean;
         };
         /** @enum {unknown} */
         CreditSource: "Operator" | "System" | "Payment";
@@ -3173,6 +3445,11 @@ export interface components {
             quality: null | string;
             modelLabel: null | string;
         };
+        LockStatusDto: {
+            hasPin: boolean;
+            /** Format: int32 */
+            idleLockSeconds: number;
+        };
         LoginRequest: {
             email: string;
             password: string;
@@ -3195,6 +3472,13 @@ export interface components {
         MockGenerationRequest: {
             jobType: components["schemas"]["GenerationJobType"];
         };
+        MonitorCheck: {
+            name: string;
+            level: components["schemas"]["MonitorLevel"];
+            message: string;
+        };
+        /** @enum {unknown} */
+        MonitorLevel: "Ok" | "Warning" | "Critical";
         OrganizationDetail: {
             /** Format: uuid */
             id: string;
@@ -3220,6 +3504,38 @@ export interface components {
             creditBalance: number;
             /** Format: int32 */
             creditReserved: number;
+        };
+        OrganizationFinance: {
+            /** Format: uuid */
+            organizationId: string;
+            name: string;
+            slug: string;
+            isActive: boolean;
+            paidAiEnabled: boolean;
+            /** Format: int32 */
+            creditBalance: number;
+            /** Format: int32 */
+            creditReserved: number;
+            /** Format: int32 */
+            creditAvailable: number;
+            lowCredit: boolean;
+            /** Format: double */
+            dailyLimitUsd: number;
+            /** Format: double */
+            monthlyLimitUsd: number;
+            /** Format: double */
+            maxJobCostUsd: number;
+            /** Format: double */
+            spentTodayUsd: number;
+            /** Format: double */
+            spentMonthUsd: number;
+            /** Format: double */
+            openReservedUsd: number;
+            /** Format: int32 */
+            openUncertainCases: number;
+            /** Format: date-time */
+            oldestUncertainAt: null | string;
+            budgetLevel: components["schemas"]["MonitorLevel"];
         };
         OrganizationListItem: {
             /** Format: uuid */
@@ -3481,6 +3797,10 @@ export interface components {
             /** Format: int64 */
             expectedVersion: null | number;
         };
+        SetPinRequest: {
+            currentPassword: string;
+            pin: string;
+        };
         SetStaffAssignmentsRequest: {
             assignments: components["schemas"]["StaffAssignmentRequest"][];
         };
@@ -3619,6 +3939,10 @@ export interface components {
             deviceName: string;
             hasSession: boolean;
             images: components["schemas"]["TvImageDto"][];
+        };
+        UnlockRequest: {
+            pin: null | string;
+            password: null | string;
         };
         UpdateStoreRequest: {
             name: string;

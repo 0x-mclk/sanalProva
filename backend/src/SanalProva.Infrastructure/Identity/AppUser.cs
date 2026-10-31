@@ -17,6 +17,16 @@ public sealed class AppUser : IdentityUser<Guid>
     /// <summary>Ekran kilidi PIN'inin hash'i (Identity parola hasher'ı ile).</summary>
     public string? PinHash { get; set; }
 
+    /// <summary>Ardışık hatalı PIN/parola sayısı (kilit açma). Başarıda sıfırlanır; sınıra ulaşınca oturumlar kapatılır (PinPolicy).</summary>
+    public int PinFailedAttempts { get; set; }
+
+    /// <summary>PIN'i siler ve sayacı sıfırlar: pasife alma ve parola sıfırlamada eski PIN yeni oturuma taşınmaz.</summary>
+    public void ClearPin()
+    {
+        PinHash = null;
+        PinFailedAttempts = 0;
+    }
+
     public bool IsActive { get; set; } = true;
 
     /// <summary>

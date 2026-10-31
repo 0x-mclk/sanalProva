@@ -2135,6 +2135,10 @@ namespace SanalProva.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("phone_number_confirmed");
 
+                    b.Property<int>("PinFailedAttempts")
+                        .HasColumnType("int")
+                        .HasColumnName("pin_failed_attempts");
+
                     b.Property<string>("PinHash")
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("pin_hash");

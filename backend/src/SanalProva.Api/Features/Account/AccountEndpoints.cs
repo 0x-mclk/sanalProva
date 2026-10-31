@@ -86,6 +86,7 @@ public static class AccountEndpoints
         {
             await users.ResetAccessFailedCountAsync(user);
             await users.SetLockoutEndDateAsync(user, null);
+            user.ClearPin(); // parola sıfırlama = eski PIN geçersiz; UpdateSecurityStampAsync kullanıcıyı kaydeder
             await users.UpdateSecurityStampAsync(user);
         }
 

@@ -26,6 +26,9 @@ public sealed class CreditSettings
     /// </summary>
     public Dictionary<string, int> Tariff { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Kullanılabilir kredi bu değere veya altına inince personel/yönetici ekranlarında düşük kredi uyarısı çıkar (0 = uyarı yok). Yalnızca arayüz uyarısıdır, üretimi engellemez.</summary>
+    public int LowBalanceThreshold { get; set; } = 10;
+
     public const int MaxCostPerJob = 1000;
 }
 

@@ -112,6 +112,10 @@ builder.Services.AddRateLimiter(options =>
     AddIpLimit(DisplayEndpoints.ClaimRateLimit, "Security:DisplayClaimRateLimitPerMinute", 20);
     AddIpLimit(DisplayEndpoints.DeviceStateRateLimit, "Security:DisplayStateRateLimitPerMinute", 300);
     AddIpLimit(AccountEndpoints.SetupPasswordRateLimit, "Security:SetupPasswordRateLimitPerMinute", 10);
+    // PIN/parola ile kilit açma: KULLANICI başına (IP'den bağımsız; aynı mağaza ağındaki herkes tek IP'dir); asıl koruma PinPolicy.MaxAttempts oturum kapatmasıdır
+    options.AddPolicy(PinPolicy.UnlockRateLimit, http => RateLimitPartition.GetFixedWindowLimiter(
+        http.User.GetUserId()?.ToString() ?? http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = builder.Configuration.GetValue("Security:UnlockRateLimitPerMinute", 10), Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
 // --- API ---
@@ -158,8 +162,8 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseSerilogRequestLogging(); // Yalnızca yol loglanır; sorgu dizesi (imzalı URL) loglanmaz
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter(); // kimlikten sonra: kullanıcı başına bölümlü politikalar (kilit açma) kullanıcı kimliğini görebilsin
 app.UseTenantContext();
 app.UseAuthorization();
 app.UseAgreementEnforcement();
@@ -170,6 +174,7 @@ app.MapFileEndpoints();
 var api = app.MapGroup("/api/v1").AddEndpointFilter<AntiforgeryFilter>();
 api.MapAuthEndpoints();
 api.MapAccountEndpoints();
+api.MapPinEndpoints();
 api.MapAgreementEndpoints();
 api.MapCatalogEndpoints();
 api.MapSessionEndpoints();
@@ -177,6 +182,7 @@ api.MapGenerationEndpoints();
 api.MapDisplayManagementEndpoints();
 api.MapUsageEndpoints();
 api.MapPlatformCostEndpoints();
+api.MapPlatformFinanceEndpoints();
 api.MapPlatformOrganizationEndpoints();
 api.MapStoreManagementEndpoints();
 api.MapCreditEndpoints();

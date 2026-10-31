@@ -111,6 +111,69 @@
         }
       }
     },
+    "/api/v1/account/lock": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LockStatusDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/account/pin": {
+      "put": {
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/api/v1/account/unlock": {
+      "post": {
+        "tags": [
+          "Account"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlockRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
     "/api/v1/agreement/current": {
       "get": {
         "tags": [
@@ -1801,6 +1864,50 @@
         }
       }
     },
+    "/api/v1/platform/finance": {
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OrganizationFinance"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/monitoring": {
+      "get": {
+        "tags": [
+          "Platform"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MonitorCheck"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/platform/organizations": {
       "post": {
         "tags": [
@@ -2123,6 +2230,68 @@
                   "items": {
                     "$ref": "#/components/schemas/CreditLedgerItemDto"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/credits/balance": {
+      "get": {
+        "tags": [
+          "Kredi"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditBalanceDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/credits/quote": {
+      "get": {
+        "tags": [
+          "Kredi"
+        ],
+        "parameters": [
+          {
+            "name": "jobType",
+            "in": "query",
+            "schema": {
+              "default": "OutfitSet",
+              "$ref": "#/components/schemas/GenerationJobType"
+            }
+          },
+          {
+            "name": "modelKey",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "quality",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditQuoteDto"
                 }
               }
             }
@@ -3486,6 +3655,30 @@
           }
         }
       },
+      "CreditBalanceDto": {
+        "required": [
+          "enforced",
+          "available",
+          "isLow",
+          "isEmpty"
+        ],
+        "type": "object",
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "isLow": {
+            "type": "boolean"
+          },
+          "isEmpty": {
+            "type": "boolean"
+          }
+        }
+      },
       "CreditEntryType": {
         "enum": [
           "Grant",
@@ -3561,6 +3754,44 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "CreditQuoteDto": {
+        "required": [
+          "enforced",
+          "live",
+          "cost",
+          "available",
+          "sufficient",
+          "availableAfter",
+          "lowAfter"
+        ],
+        "type": "object",
+        "properties": {
+          "enforced": {
+            "type": "boolean"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "cost": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "available": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sufficient": {
+            "type": "boolean"
+          },
+          "availableAfter": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lowAfter": {
+            "type": "boolean"
           }
         }
       },
@@ -4229,6 +4460,22 @@
           }
         }
       },
+      "LockStatusDto": {
+        "required": [
+          "hasPin",
+          "idleLockSeconds"
+        ],
+        "type": "object",
+        "properties": {
+          "hasPin": {
+            "type": "boolean"
+          },
+          "idleLockSeconds": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "LoginRequest": {
         "required": [
           "email",
@@ -4310,6 +4557,32 @@
             "$ref": "#/components/schemas/GenerationJobType"
           }
         }
+      },
+      "MonitorCheck": {
+        "required": [
+          "name",
+          "level",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/MonitorLevel"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "MonitorLevel": {
+        "enum": [
+          "Ok",
+          "Warning",
+          "Critical"
+        ]
       },
       "OrganizationDetail": {
         "required": [
@@ -4405,6 +4678,100 @@
           "creditReserved": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "OrganizationFinance": {
+        "required": [
+          "organizationId",
+          "name",
+          "slug",
+          "isActive",
+          "paidAiEnabled",
+          "creditBalance",
+          "creditReserved",
+          "creditAvailable",
+          "lowCredit",
+          "dailyLimitUsd",
+          "monthlyLimitUsd",
+          "maxJobCostUsd",
+          "spentTodayUsd",
+          "spentMonthUsd",
+          "openReservedUsd",
+          "openUncertainCases",
+          "oldestUncertainAt",
+          "budgetLevel"
+        ],
+        "type": "object",
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "paidAiEnabled": {
+            "type": "boolean"
+          },
+          "creditBalance": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "creditReserved": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "creditAvailable": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lowCredit": {
+            "type": "boolean"
+          },
+          "dailyLimitUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "monthlyLimitUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxJobCostUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "spentTodayUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "spentMonthUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "openReservedUsd": {
+            "type": "number",
+            "format": "double"
+          },
+          "openUncertainCases": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "oldestUncertainAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "budgetLevel": {
+            "$ref": "#/components/schemas/MonitorLevel"
           }
         }
       },
@@ -5472,6 +5839,25 @@
           }
         }
       },
+      "SetPinRequest": {
+        "required": [
+          "currentPassword",
+          "pin"
+        ],
+        "type": "object",
+        "properties": {
+          "currentPassword": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pin": {
+            "maxLength": 8,
+            "minLength": 4,
+            "type": "string"
+          }
+        }
+      },
       "SetStaffAssignmentsRequest": {
         "required": [
           "assignments"
@@ -5983,6 +6369,31 @@
             "items": {
               "$ref": "#/components/schemas/TvImageDto"
             }
+          }
+        }
+      },
+      "UnlockRequest": {
+        "required": [
+          "pin",
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "pin": {
+            "maxLength": 8,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 0,
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

@@ -83,6 +83,7 @@ public static class DependencyInjection
         services.AddKeyedTransient<IImageGenerationProvider>(GeminiProvider.ProviderName, (sp, _) => sp.GetRequiredService<GeminiProvider>());
         services.AddKeyedTransient<IImageEditProvider>(GeminiProvider.ProviderName, (sp, _) => sp.GetRequiredService<GeminiProvider>());
         services.AddSingleton<Generation.BudgetGuard>();
+        services.AddSingleton<Monitoring.PilotMonitoring>();
 
         // Tek ürün giydirme modelleri (Aşama 4b): fal.ai (Seedream 5 Flash Edit, GPT Image 2.5 Sunburst Edit) ve Pruna (P-Image Try-On).
         // FASHN ve Gemini adapter'ları eski (pasif) olarak kayıtlı kalır.

@@ -28,6 +28,10 @@ public static class PlatformCommands
     public const int ExitRefused = 3;
     public const int ExitNotFound = 4;
 
+    /// <summary><c>status</c> çıkış kodları: cron/izleyici bunlara göre uyarır.</summary>
+    public const int ExitMonitorWarning = 10;
+    public const int ExitMonitorCritical = 11;
+
     public const string PlatformSlug = "platform";
     public const string PlatformName = "Sanal Prova Platform";
 
@@ -80,6 +84,7 @@ public static class PlatformCommands
                 "budget" => await BudgetAsync(context, ct),
                 "credits" => await CreditsAsync(context, ct),
                 "reapply-deletions" => await ReapplyDeletionsAsync(context, ct),
+                "status" => await StatusAsync(context, ct),
                 _ => await UnknownAsync(output, args[1]),
             };
         }
@@ -100,6 +105,7 @@ public static class PlatformCommands
 
     private const string Usage = """
         Kullanım: dotnet SanalProva.Api.dll platform <komut> [seçenekler]
+          status                                                                                      Pilot izleme (salt okunur): veritabanı, disk, takılı iş, belirsiz maliyet, bütçe, kredi. Çıkış 0=tamam, 10=uyarı, 11=kritik
           bootstrap     --email <e-posta> --name <ad> [--additional] [--base-url <url>] [--confirm]   İlk (veya ek) platform yöneticisi + 72 saatlik şifre bağlantısı
           reissue-link  --email <e-posta> [--base-url <url>] [--confirm]                              Şifresini henüz belirlememiş yöneticinin bağlantısını yeniden üretir (öncekiler iptal)
           revoke        --email <e-posta> [--confirm]                                                 Yöneticinin açık kurulum bağlantılarını iptal eder
@@ -477,6 +483,34 @@ public static class PlatformCommands
     }
 
     // ------------------------------------------------------------------ reapply-deletions
+
+    /// <summary>
+    /// Pilot izleme (Faz C): veritabanı, disk, takılı iş, belirsiz maliyet, bütçe ve kredi kontrolleri. YALNIZCA OKUR (<c>--confirm</c> gerekmez, hiçbir şey yazmaz).
+    /// Çıkış kodu: 0 sorun yok, 10 uyarı var, 11 kritik. Cron ile çalıştırılıp çıkış koduna göre uyarı verilebilir (docs/19 §11).
+    /// </summary>
+    private static async Task<int> StatusAsync(Context c, CancellationToken ct)
+    {
+        var monitoring = c.Services.GetRequiredService<SanalProva.Infrastructure.Monitoring.PilotMonitoring>();
+        var checks = await monitoring.CheckAsync(c.Db, ct);
+        foreach (var check in checks)
+        {
+            var tag = check.Level switch
+            {
+                SanalProva.Infrastructure.Monitoring.MonitorLevel.Critical => "KRİTİK",
+                SanalProva.Infrastructure.Monitoring.MonitorLevel.Warning => "UYARI ",
+                _ => "TAMAM ",
+            };
+            await c.Out.WriteLineAsync($"[{tag}] {check.Name}: {check.Message}");
+        }
+
+        var worst = checks.Max(x => x.Level);
+        return worst switch
+        {
+            SanalProva.Infrastructure.Monitoring.MonitorLevel.Critical => ExitMonitorCritical,
+            SanalProva.Infrastructure.Monitoring.MonitorLevel.Warning => ExitMonitorWarning,
+            _ => ExitOk,
+        };
+    }
 
     /// <summary>
     /// Yedekten geri yükleme sonrası (Pilot Faz A, KVKK): silme günlüğündeki oturumları, veritabanında yeniden belirmişse yeniden siler; veritabanında yoksa depoda kalmış
