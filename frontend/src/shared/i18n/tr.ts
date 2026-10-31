@@ -96,6 +96,11 @@ export const tr = {
     STORE_CODE_TAKEN: 'Bu şube kodu zaten kullanılıyor.',
     OWNER_ALREADY_ACTIVATED: 'Firma sahibi şifresini zaten belirlemiş; yeni kurulum bağlantısı üretilemez.',
     // M5.4: kredi
+    INVALID_PIN: 'PIN hatalı.',
+    INVALID_PASSWORD: 'Parola hatalı.',
+    PIN_POLICY: 'PIN 4–8 rakam olmalı; 1234 veya 1111 gibi kolay tahmin edilenler kabul edilmez.',
+    PIN_LOCKED_OUT: 'Çok fazla hatalı deneme. Güvenlik için oturum kapatıldı; parolanızla yeniden giriş yapın.',
+    UNLOCK_CREDENTIAL_REQUIRED: 'PIN veya parola girin.',
     INSUFFICIENT_CREDITS: 'Yeterli krediniz yok, bu üretim başlatılamadı. İşletme sahibi veya yöneticiyle iletişime geçip kredi yükletin.',
     HTTP_402: 'Yeterli krediniz yok. İşletme sahibi veya yöneticiyle iletişime geçip kredi yükletin.',
     // M5.2: şube ve personel yönetimi

@@ -2,6 +2,9 @@ import { Button, Chip, Menu, Select, TextInput } from '@mantine/core';
 import { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
+import { useCreditQuote } from '../../shared/api/credits';
+import { CreditQuoteNotice } from '../credits/CreditNotices';
+import { isPhotoApproved } from '../session/photoApproval';
 import { newIdempotencyKey } from '../../shared/api/idempotency';
 import type { DraftDto, ProductListItem } from '../../shared/api/types';
 import { ApiError } from '../../shared/api/http';
@@ -84,7 +87,10 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
   const idempotencyKey = useRef<string>(newIdempotencyKey());
   const options = useTryOnOptions();
   const [model, setModel] = useState<{ key?: string; quality?: string }>({});
-  const overBudget = options.data ? resolvePick(options.data, model)?.quality?.exceedsJobLimit === true : false;
+  const picked = options.data ? resolvePick(options.data, model) : null;
+  const quote = useCreditQuote('OutfitSet', picked?.model.key, picked?.quality?.key);
+  const overBudget = picked?.quality?.exceedsJobLimit === true;
+  const photoApproved = isPhotoApproved(photoId);
 
   const chips = useMemo(() => categoryChips(items), [items]);
   const visible = useMemo(() => filterProducts(items, deferredQuery, categoryId, sort), [items, deferredQuery, categoryId, sort]);
@@ -214,9 +220,11 @@ function OutfitSetContent({ sessionId, code, label, serverDraft, photoId, items,
           />
         ) : null}
         {warnings.length > 0 ? <Notice tone="warning">Seçimde sorun var: {warnings.join(', ')}</Notice> : null}
+        {photoApproved ? null : <Notice tone="warning">Fotoğraf uygunluğu henüz onaylanmadı. Önceki adımda fotoğrafı kontrol edip onaylayın.</Notice>}
+        <CreditQuoteNotice quote={quote.data} />
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {saveError ? <Notice tone="warning">Seçim kaydedilemedi; tekrar dokunun.</Notice> : null}
-        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={!selectedProduct || warnings.length > 0 || overBudget} loading={start.isPending} onClick={() => void generate()}>
+        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={!selectedProduct || warnings.length > 0 || overBudget || quote.data?.sufficient === false || !photoApproved} loading={start.isPending} onClick={() => void generate()}>
           Üret
         </Button>
         <p className={classes.barNote}>{demo ? 'Demo üretim: gerçek yapay zekâ çağrısı yapılmaz.' : 'AI prova hazırlanır; sonuç ekranda gösterilir.'}</p>

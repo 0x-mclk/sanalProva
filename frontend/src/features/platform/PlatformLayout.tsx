@@ -1,5 +1,5 @@
 import { Button } from '@mantine/core';
-import { Link, Outlet } from 'react-router';
+import { Link, NavLink, Outlet } from 'react-router';
 import { useLogout } from '../../shared/api/hooks';
 import { useAuth } from '../../shared/auth/AuthContext';
 import { Eyebrow, LogoutIcon } from '../../shared/ui';
@@ -21,6 +21,17 @@ export function PlatformLayout() {
             Çıkış yap
           </Button>
         </header>
+        <nav className={classes.nav} aria-label="Platform bölümleri">
+          <Button component={NavLink} to="/platform" end variant="default" size="compact-md">
+            İşletmeler
+          </Button>
+          <Button component={NavLink} to="/platform/finans" variant="default" size="compact-md">
+            Finans ve izleme
+          </Button>
+          <Button component={NavLink} to="/platform/mutabakat" variant="default" size="compact-md">
+            Mutabakat
+          </Button>
+        </nav>
         <Outlet />
       </div>
     </main>

@@ -21,6 +21,8 @@ import {
   TrashIcon,
 } from '../../shared/ui';
 import { CameraView, type CameraHandle, type CameraStatus } from './CameraView';
+import { PhotoApproval, PhotoGuide } from './PhotoGuide';
+import { isPhotoApproved } from './photoApproval';
 import classes from './PhotoPage.module.css';
 
 /** Müşteri fotoğrafı çekme/yükleme (referans: "Müşteri fotoğrafı"). */
@@ -38,6 +40,7 @@ export function PhotoPage() {
   const [retaking, setRetaking] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [approvedState, setApprovedState] = useState<{ photoId: string; approved: boolean } | null>(null);
 
   if (session.isLoading) {
     return (
@@ -99,6 +102,7 @@ export function PhotoPage() {
   };
 
   const warnings = photo?.quality.warnings ?? [];
+  const approved = photo ? (approvedState?.photoId === photo.id ? approvedState.approved : isPhotoApproved(photo.id)) : false;
 
   return (
     <main className="sp-page">
@@ -109,6 +113,8 @@ export function PhotoPage() {
         <div className={classes.main}>
           <h1 className="sp-title">Önce, boydan bir fotoğraf.</h1>
           <p className="sp-lead">Müşterinin başı ve ayakları kadrajda olsun. Kollarını gövdesinden hafifçe ayırmasını isteyin.</p>
+
+          {showCamera ? <PhotoGuide /> : null}
 
           <div className={classes.stage}>
             {showCamera ? (
@@ -179,12 +185,14 @@ export function PhotoPage() {
           ) : null}
           {photo ? <p className={classes.checkNote}>Kontrol edilenler: yön, çözünürlük ve netlik. Kişi sayısı ve tam boy otomatik denetlenmez.</p> : null}
 
+          {photo && !retaking ? <PhotoApproval key={photo.id} photoId={photo.id} approved={approved} onChange={(value) => setApprovedState({ photoId: photo.id, approved: value })} /> : null}
+
           {photo && !retaking ? (
             <div className={classes.footerActions}>
               <Button variant="default" size="md" onClick={() => setRetaking(true)}>
                 Yeniden Çek
               </Button>
-              <Button size="md" rightSection={<ArrowRightIcon size={18} />} onClick={() => void navigate(`/prova/${data.id}/tur`)}>
+              <Button size="md" rightSection={<ArrowRightIcon size={18} />} disabled={!approved} onClick={() => void navigate(`/prova/${data.id}/tur`)}>
                 Devam Et
               </Button>
               <Button className={classes.deleteButton} variant="subtle" color="red" size="compact-md" leftSection={<TrashIcon size={16} />} onClick={() => setConfirmDelete(true)}>

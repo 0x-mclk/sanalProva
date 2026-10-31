@@ -14,6 +14,7 @@ import type {
   VariantWriteRequest,
 } from './types';
 import { isJobActive } from './types';
+import { writeLocked } from '../auth/lockState';
 
 /** Sorgu anahtarları: ilgili önbelleği mutasyonlardan sonra tek yerden geçersiz kılmak için. */
 export const qk = {
@@ -47,6 +48,7 @@ export function useLogin() {
     mutationFn: (body: { email: string; password: string; rememberMe: boolean }) => unwrap(api.POST('/api/v1/auth/login', { body })),
     onSuccess: (me) => {
       resetCsrfToken();
+      writeLocked(false);
       // Önceki kullanıcının verisi kalmasın; ancak aktif `useMe` gözlemcisi kopmasın (clear() gözlemciyi önbellekten ayırır)
       client.removeQueries({ predicate: (query) => query.queryKey[0] !== qk.me[0] });
       client.setQueryData(qk.me, me);
@@ -60,6 +62,7 @@ export function useLogout() {
     mutationFn: () => unwrap(api.POST('/api/v1/auth/logout')),
     onSettled: async () => {
       resetCsrfToken();
+      writeLocked(false); // kilit bayrağı bir sonraki girişe taşınmaz
       // Müşteri verisi oturum kapanınca bellekte de kalmaz; kimlik sorgusu sıfırlanıp yeniden denenir (401 → giriş ekranı)
       client.removeQueries({ predicate: (query) => query.queryKey[0] !== qk.me[0] });
       await client.resetQueries({ queryKey: qk.me });

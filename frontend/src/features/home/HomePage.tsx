@@ -1,7 +1,12 @@
 import { Button, Menu } from '@mantine/core';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useLogout, useProducts, useSessions } from '../../shared/api/hooks';
 import { useAuth } from '../../shared/auth/AuthContext';
+import { LowCreditNotice } from '../credits/CreditNotices';
+import { useScreenLock } from '../lock/IdleLock';
+import { PinSetupModal } from '../lock/PinSetupModal';
+import { useLockStatus } from '../../shared/api/lock';
 import { tr, timeAgo } from '../../shared/i18n/tr';
 import {
   ArrowRightIcon,
@@ -42,6 +47,9 @@ export function HomePage() {
   const logout = useLogout();
   const sessions = useSessions('open', 5);
   const sets = useProducts({ type: 'OutfitSet', selectable: true, pageSize: 12 });
+  const { lock } = useScreenLock();
+  const lockStatus = useLockStatus();
+  const [pinOpen, setPinOpen] = useState(false);
 
   const now = new Date();
   const firstName = me?.displayName.split(/\s+/)[0] ?? '';
@@ -118,12 +126,21 @@ export function HomePage() {
               </Menu.Item>
             ) : null}
             <Menu.Divider />
+            <Menu.Item leftSection={<ShieldIcon size={16} />} onClick={lock}>
+              Ekranı kilitle
+            </Menu.Item>
+            <Menu.Item leftSection={<ShieldIcon size={16} />} onClick={() => setPinOpen(true)}>
+              {lockStatus.data?.hasPin ? 'Ekran kilidi PIN’ini değiştir' : 'Ekran kilidi PIN’i belirle'}
+            </Menu.Item>
+            <Menu.Divider />
             <Menu.Item leftSection={<LogoutIcon size={16} />} color="red" onClick={() => logout.mutate(undefined, { onSettled: () => void navigate('/giris') })}>
               Çıkış yap
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
       </div>
+
+      <LowCreditNotice />
 
       <section className={classes.hero} aria-labelledby="hero-title">
         {heroImage ? <img className={classes.heroImage} src={heroImage.url} alt="" /> : null}
@@ -188,6 +205,8 @@ export function HomePage() {
           </Link>
         </div>
       </div>
+
+      <PinSetupModal opened={pinOpen} onClose={() => setPinOpen(false)} />
 
       <p className={classes.footer}>
         <ShieldIcon size={16} /> Müşteri fotoğrafları güvenle, yalnızca prova için.

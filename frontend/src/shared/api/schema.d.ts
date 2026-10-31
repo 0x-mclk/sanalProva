@@ -3241,6 +3241,7 @@ export interface components {
         };
         CreditBalanceDto: {
             enforced: boolean;
+            live: boolean;
             /** Format: int32 */
             available: number;
             isLow: boolean;

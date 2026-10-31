@@ -150,3 +150,51 @@
     padding-top: calc(var(--sp-space-xxxl) + var(--sp-space-sm));
   }
 }
+
+.guideCard {
+  display: flex;
+  gap: var(--sp-space-md);
+  align-items: center;
+  padding: var(--sp-space-md);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+}
+
+.guideFigure {
+  flex: 0 0 72px;
+  width: 72px;
+  height: 108px;
+}
+
+.guideTitle {
+  margin: 0 0 var(--sp-space-xs);
+  font-size: var(--sp-font-size-md);
+}
+
+.guideList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--sp-font-size-sm);
+  color: var(--sp-color-text-subtle);
+
+  & li {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+  }
+}
+
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-space-xs);
+  padding: var(--sp-space-md);
+  border-radius: var(--sp-radius-lg);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+}

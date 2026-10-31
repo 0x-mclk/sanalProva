@@ -24,7 +24,8 @@ public sealed record CreditLedgerItemDto(
     Guid Id, CreditEntryType Type, int Amount, int BalanceAfter, int ReservedAfter, Guid? JobId, string? Reference, CreditSource Source, string? Note, string? TariffKey, DateTimeOffset CreatedAt);
 
 /// <summary>Personel/Manager görünümü (Faz C): yalnızca kullanılabilir kredi ve uyarı bayrakları. Defter, rezerve, tarife ve ödeme bilgisi YOKTUR (Owner ekranında).</summary>
-public sealed record CreditBalanceDto(bool Enforced, int Available, bool IsLow, bool IsEmpty);
+/// <param name="Live">Gerçek (ücretli) sağlayıcı etkin mi: mock modda üretim kredi harcamaz, uyarı gösterilmemelidir.</param>
+public sealed record CreditBalanceDto(bool Enforced, bool Live, int Available, bool IsLow, bool IsEmpty);
 
 /// <param name="Cost">Bu üretimin kredi bedeli (mock modda 0: kredi harcanmaz).</param>
 /// <param name="Live">Gerçek (ücretli) sağlayıcı etkin mi; false ise sonuç DEMO/mock'tur.</param>
@@ -52,12 +53,12 @@ public static class CreditEndpoints
         return api;
     }
 
-    private static async Task<IResult> BalanceAsync(AppDbContext db, CurrentUser user, IOptionsMonitor<CreditSettings> settings, CancellationToken ct)
+    private static async Task<IResult> BalanceAsync(AppDbContext db, CurrentUser user, IOptionsMonitor<CreditSettings> settings, IOptionsMonitor<GenerationSettings> generation, CancellationToken ct)
     {
         var available = await AvailableAsync(db, user, ct);
         var threshold = settings.CurrentValue.LowBalanceThreshold;
         var enforced = settings.CurrentValue.Enforce;
-        return TypedResults.Ok(new CreditBalanceDto(enforced, available, enforced && threshold > 0 && available <= threshold, enforced && available <= 0));
+        return TypedResults.Ok(new CreditBalanceDto(enforced, !generation.CurrentValue.UseMockProviders, available, enforced && threshold > 0 && available <= threshold, enforced && available <= 0));
     }
 
     /// <summary>Üretim başlamadan önce bedel bilgisi. Tarifeden okunur (kabuldeki hesapla aynı kaynak); hiçbir şey ayrılmaz veya yazılmaz.</summary>

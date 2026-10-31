@@ -1,0 +1,31 @@
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-gutter);
+  background:
+    radial-gradient(120% 60% at 50% 0%, #efe3d3 0%, transparent 60%),
+    var(--sp-color-bg);
+}
+
+.panel {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--sp-space-xl);
+  border-radius: var(--sp-radius-xl);
+  background: var(--sp-color-surface);
+  border: 1px solid var(--sp-color-border);
+  box-shadow: var(--sp-shadow-raised);
+}
+
+.note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-space-xs);
+  margin: var(--sp-space-lg) 0 0;
+  font-size: var(--sp-font-size-xs);
+  color: var(--sp-color-text-subtle);
+}

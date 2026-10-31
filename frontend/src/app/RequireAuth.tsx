@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { useAuth } from '../shared/auth/AuthContext';
+import { IdleLock } from '../features/lock/IdleLock';
 import { DisplaySync } from '../shared/realtime/DisplaySync';
 import { EmptyState, LoadingState } from '../shared/ui';
 
@@ -37,7 +38,9 @@ export function RequireAuth() {
   return (
     <>
       <DisplaySync />
-      <Outlet />
+      <IdleLock>
+        <Outlet />
+      </IdleLock>
     </>
   );
 }

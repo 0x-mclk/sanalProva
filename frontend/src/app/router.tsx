@@ -29,6 +29,8 @@ const PlatformLayout = lazy(() => import('../features/platform/PlatformLayout').
 const OrganizationsPage = lazy(() => import('../features/platform/OrganizationsPage').then((m) => ({ default: m.OrganizationsPage })));
 const CreateOrganizationPage = lazy(() => import('../features/platform/CreateOrganizationPage').then((m) => ({ default: m.CreateOrganizationPage })));
 const OrganizationDetailPage = lazy(() => import('../features/platform/OrganizationDetailPage').then((m) => ({ default: m.OrganizationDetailPage })));
+const FinancePage = lazy(() => import('../features/platform/FinancePage').then((m) => ({ default: m.FinancePage })));
+const ReconciliationPage = lazy(() => import('../features/platform/ReconciliationPage').then((m) => ({ default: m.ReconciliationPage })));
 const StoresPage = lazy(() => import('../features/management/StoresPage').then((m) => ({ default: m.StoresPage })));
 const StaffPage = lazy(() => import('../features/management/StaffPage').then((m) => ({ default: m.StaffPage })));
 const CreditsPage = lazy(() => import('../features/credits/CreditsPage').then((m) => ({ default: m.CreditsPage })));
@@ -76,6 +78,8 @@ export const router = createBrowserRouter([
         children: [
           { path: '/platform', element: lazyPage(<OrganizationsPage />) },
           { path: '/platform/yeni', element: lazyPage(<CreateOrganizationPage />) },
+          { path: '/platform/finans', element: lazyPage(<FinancePage />) },
+          { path: '/platform/mutabakat', element: lazyPage(<ReconciliationPage />) },
           { path: '/platform/:id', element: lazyPage(<OrganizationDetailPage />) },
         ],
       },

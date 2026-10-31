@@ -2,6 +2,9 @@ import { Button } from '@mantine/core';
 import { useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import { useCategories, useProducts, useSession, useStartGeneration } from '../../shared/api/hooks';
+import { useCreditQuote } from '../../shared/api/credits';
+import { CreditQuoteNotice } from '../credits/CreditNotices';
+import { isPhotoApproved } from '../session/photoApproval';
 import { newIdempotencyKey } from '../../shared/api/idempotency';
 import { ApiError } from '../../shared/api/http';
 import type { CategoryDto, DraftDto, ProductListItem } from '../../shared/api/types';
@@ -79,6 +82,8 @@ function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, 
   const navigate = useNavigate();
   const { entries, setEntries, warnings, flush, saveError } = useDraftItems(sessionId, 'FreeCombination', serverDraft);
   const start = useStartGeneration(sessionId);
+  const quote = useCreditQuote('FreeCombination');
+  const photoApproved = isPhotoApproved(photoId);
   const [error, setError] = useState<string | null>(null);
   const idempotencyKey = useRef<string>(newIdempotencyKey());
 
@@ -183,9 +188,11 @@ function FreeCombinationContent({ sessionId, code, label, serverDraft, photoId, 
           )}
         </div>
         {warnings.length > 0 ? <Notice tone="warning">{warnings.map((w) => WARNING_TEXT[w] ?? w).join(' ')}</Notice> : null}
+        {photoApproved ? null : <Notice tone="warning">Fotoğraf uygunluğu henüz onaylanmadı. Önceki adımda fotoğrafı kontrol edip onaylayın.</Notice>}
+        <CreditQuoteNotice quote={quote.data} />
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {saveError ? <Notice tone="warning">Seçim kaydedilemedi; tekrar dokunun.</Notice> : null}
-        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={selectedProducts.length === 0 || warnings.length > 0} loading={start.isPending} onClick={() => void generate()}>
+        <Button fullWidth leftSection={<SparklesIcon size={18} />} disabled={selectedProducts.length === 0 || warnings.length > 0 || quote.data?.sufficient === false || !photoApproved} loading={start.isPending} onClick={() => void generate()}>
           Üret
         </Button>
         <p className={classes.barNote}>{demo ? 'Demo üretim: gerçek yapay zekâ çağrısı yapılmaz.' : 'AI prova hazırlanır; sonuç ekranda gösterilir.'}</p>

@@ -5,6 +5,7 @@ import { useProducts, useSetProductStatus } from '../../shared/api/hooks';
 import type { ProductListItem } from '../../shared/api/types';
 import { useAuth } from '../../shared/auth/AuthContext';
 import { AppBar, EmptyState, ErrorState, ImageIcon, InfoIcon, LayersIcon, LoadingState, PlusIcon, SearchIcon } from '../../shared/ui';
+import { CatalogStarter } from './CatalogStarter';
 import classes from './CatalogAdmin.module.css';
 
 type TypeFilter = 'all' | 'OutfitSet' | 'Single';
@@ -40,6 +41,8 @@ export function ProductsPage() {
           </div>
         ) : null}
       </div>
+
+      {canManageCatalog ? <CatalogStarter /> : null}
 
       <div className={classes.tools}>
         <TextInput aria-label="Ürün ara" placeholder="Ürün adı veya kodu ara" leftSection={<SearchIcon size={18} />} type="search" value={query} onChange={(e) => setQuery(e.currentTarget.value)} />

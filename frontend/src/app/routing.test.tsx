@@ -16,6 +16,8 @@ let auth: AuthStub;
 
 vi.mock('../shared/auth/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../shared/realtime/DisplaySync', () => ({ DisplaySync: () => null }));
+// Ekran kilidi ayrı test edilir (lock.test.tsx); kapı testleri yalnızca yönlendirmeyi sınar
+vi.mock('../features/lock/IdleLock', () => ({ IdleLock: ({ children }: { children: unknown }) => children }));
 
 const base: AuthStub = { isLoading: false, isAuthenticated: true, activeStore: { id: 's1' }, isPlatformAdmin: false, agreementRequired: false };
 

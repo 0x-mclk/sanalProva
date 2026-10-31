@@ -3658,6 +3658,7 @@
       "CreditBalanceDto": {
         "required": [
           "enforced",
+          "live",
           "available",
           "isLow",
           "isEmpty"
@@ -3665,6 +3666,9 @@
         "type": "object",
         "properties": {
           "enforced": {
+            "type": "boolean"
+          },
+          "live": {
             "type": "boolean"
           },
           "available": {

@@ -219,6 +219,7 @@ public sealed class PilotFazCTests(ApiFactory factory) : ApiTestBase(factory)
             Assert.Equal(7, balance.GetProperty("available").GetInt32());
             Assert.True(balance.GetProperty("isLow").GetBoolean()); // 7 ≤ varsayılan eşik 10
             Assert.False(balance.GetProperty("isEmpty").GetBoolean());
+            Assert.False(balance.GetProperty("live").GetBoolean()); // mock: arayüz uyarı göstermez
             Assert.False(balance.TryGetProperty("reserved", out _));
             Assert.False(balance.TryGetProperty("tariff", out _));
             await ApiClient.AssertProblemAsync(await client.GetAsync("/api/v1/credits"), HttpStatusCode.Forbidden, "INSUFFICIENT_ROLE");
