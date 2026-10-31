@@ -81,7 +81,7 @@ M5.5 ödeme entegrasyonu (manuel kredi yeterli) · QR ile TV eşleştirme · rev
 
 ## 6. Önerilen çözüm sırası
 
-**Faz A — Kod (pilot altyapısı, ~1–1,5 hafta):**
+**Faz A — Kod (pilot altyapısı, ~1–1,5 hafta):** ✅ **Yerelde uygulandı** ([docs/19](19-uretim-dagitim-runbook.md); commit'ler A-1…A-4). Docker bu makinede olmadığı için Compose/Caddy/TLS gerçek çalıştırma **doğrulanmadı** (CI `deploy-package` işi + docker'lı prova dağıtımı gerekir). Kalan: Faz B (dış bağımlılıklar) ve Faz C.
 1. **E1** dağıtım paketi: frontend imajı + Caddy/TLS + `ForwardedHeaders` + üretim compose profili + dağıtım runbook'u.
 2. **E2** yedek/geri yükleme betikleri (DB + depo) + geri yükleme provası + silme-kaydı prosedürü; disk/yedek izleme.
 3. **E6** üretim DB sertleştirme betiği ve gizli yönetimi kontrol listesi (dağıtımla birlikte).

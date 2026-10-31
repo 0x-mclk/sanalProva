@@ -26,6 +26,7 @@ Mağaza içi, yapay zekâ destekli sanal kıyafet prova sistemi (bindallı, şal
 | M5.2 Şube ve personel yönetimi (a–e) | ✅ yerelde tamamlandı ve doğrulandı (backend 624 test, React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/15](docs/15-m5-2-sube-personel-yonetimi.md)). Sıradaki: M5.3 (onay bekliyor) |
 | M5.3 Firma bazlı bütçe ve AI mutabakatı | ✅ yerelde tamamlandı ve doğrulandı (backend 639 test (4 beklenen atlama), React 140, Playwright 12/12); **CI/push kullanıcıda** ([docs/16](docs/16-m5-3-butce-ve-mutabakat.md)). Sıradaki: M5.4 kredi sistemi (onay bekliyor) |
 | M5.4 Firma bazlı kredi sistemi | ✅ yerelde tamamlandı ve doğrulandı (backend 693 test (4 beklenen atlama), React 147, Playwright 13/13); **CI/push kullanıcıda**; fiyat/paket kararı BEKLİYOR (varsayılan 1 kredi/üretim); ödeme yok ([docs/17](docs/17-m5-4-kredi-sistemi.md)). Sıradaki: M5.5 ödeme (onay bekliyor) |
+| Pilot Faz A Üretim dağıtımı ve operasyon | ✅ yerelde tamamlandı (`deploy/`, [docs/19](docs/19-uretim-dagitim-runbook.md)); **Docker/Caddy/TLS fiilen çalıştırılmadı** (bu makinede Docker yok; CI `deploy-package` + prova dağıtımı gerekir); push kullanıcıda. Sıradaki: Faz B/C (onay bekliyor) |
 | M3 MSSQL geçişi ve doğrulama (M3.1–M3.10) | ✅ tamamlandı; ayrıntı ve açık riskler: [docs/DEVAM-NOTU.md](docs/DEVAM-NOTU.md). Sıradaki: M4 (onay bekliyor) |
 | 6 Test ve yayın hazırlığı | bekliyor |
 

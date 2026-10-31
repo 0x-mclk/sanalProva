@@ -152,6 +152,10 @@ Ayrıntı: [docs/17](17-m5-4-kredi-sistemi.md). Özet: firma başına kredi hesa
 
 **Açık ticari kararlar (kullanıcıdan):** kredi fiyatı/paketleri (varsayılan: 1 kredi/üretim, yapılandırılabilir), kredi son kullanma tarihi, para iadesi/devri, fatura/KDV, Staff/Manager'a kalan kredi gösterimi ve düşük kredi uyarısı, belirsiz işlerde müşteriye bekleme açıklaması. M5.5 öncesi: ödeme sağlayıcısı seçimi (ayrı karar), `Payment` kaynaklı Grant akışı (`CreditLedgerService` aynı idempotency'yi kullanır).
 
+## Pilot Faz A sonucu — üretim dağıtımı ve operasyon
+
+Ayrıntı ve doğrulama durumu: [docs/19](19-uretim-dagitim-runbook.md). Özet: `deploy/` altında prod Compose (Caddy TLS → api → SQL Server TLS, yalnızca 80/443), güvenilen vekil başlıkları (`TrustedForwardedHeaders`), Production başlangıç denetimi (`ProductionStartupValidator`), KVKK silme günlüğü + `platform reapply-deletions`, idempotent en az yetki SQL sertleştirmesi + doğrulama, şifreli yedek/geri yükleme/karantina/tutarlılık betikleri (`deploy/ops/ops.sh`), CI `deploy-package` işi. Doğrulama (yerel): ops-selftest 54/54; `ProductionHardeningTests`, `DeployArtifactsTests`, `ProductionOpsLabTests` (gerçek SQL Server, yalnızca lab DB'leri) geçti. **Doğrulanamayan:** Docker derleme/çalıştırma, Caddy gerçek davranışı, özel CA ile SQL TLS, ACME. **Lab artığı:** `sanalprova_lab_0d85cba3_ffc1a89f88c142da_probe.bak` SQL varsayılan Backup klasöründe (`C:\Program Files\Microsoft SQL Server\MSSQL17.SANALPROVA\MSSQL\Backup`), izin yüzünden silinemedi: yönetici elle silmeli. Push yapılmadı.
+
 ## Açık riskler (üç grup)
 
 ### A. Ticari kullanımdan önce MUTLAKA çözülmeli

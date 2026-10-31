@@ -59,8 +59,7 @@ public static class PlatformCommands
             scope.ServiceProvider.GetRequiredService<IOptions<SetupTokenOptions>>().Value, options, output,
             scope.ServiceProvider.GetRequiredService<IOptions<SanalProva.Infrastructure.Ai.GenerationSettings>>().Value.Budget,
             scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Credits.CreditLedgerService>(),
-            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.SessionPurger>(), scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.DeletionJournal>(),
-            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Storage.IImageStorageService>());
+            scope.ServiceProvider.GetRequiredService<SanalProva.Infrastructure.Retention.DeletionJournal>(), scope.ServiceProvider);
 
         // Anahtar yoksa/zayıfsa token üretilmez (web sunucusundaki ValidateOnStart bu yolda çalışmaz)
         if (!Validator.TryValidateObject(context.TokenOptions, new ValidationContext(context.TokenOptions), null, validateAllProperties: true))
@@ -545,7 +544,12 @@ public static class PlatformCommands
     private sealed record Context(
         AppDbContext Db, UserManager<AppUser> Users, AccountSetupTokenService Tokens, AuditTrail Audit, SetupTokenOptions TokenOptions, CommandOptions Options, TextWriter Out,
         SanalProva.Infrastructure.Ai.BudgetSettings Budget, SanalProva.Infrastructure.Credits.CreditLedgerService Credits,
-        SanalProva.Infrastructure.Retention.SessionPurger Purger, SanalProva.Infrastructure.Retention.DeletionJournal Journal, SanalProva.Infrastructure.Storage.IImageStorageService Storage);
+        SanalProva.Infrastructure.Retention.DeletionJournal Journal, IServiceProvider Services)
+    {
+        // Depo/silici yalnızca reapply-deletions'ta çözülür: diğer komutlar depo imzalama anahtarını gerektirmez
+        public SanalProva.Infrastructure.Retention.SessionPurger Purger => Services.GetRequiredService<SanalProva.Infrastructure.Retention.SessionPurger>();
+        public SanalProva.Infrastructure.Storage.IImageStorageService Storage => Services.GetRequiredService<SanalProva.Infrastructure.Storage.IImageStorageService>();
+    }
 
     /// <summary>Sayısal bütçe seçeneği: <c>Set</c> seçenek verildi mi; <c>Value</c> null ise "none" (firma değerini sil).</summary>
     private readonly record struct BudgetArg(bool Set, decimal? Value);
